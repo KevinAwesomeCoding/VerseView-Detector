@@ -3,7 +3,6 @@ import asyncio
 import sys
 import time
 import re
-import json
 import logging
 import pyaudio
 import requests
@@ -17,7 +16,6 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.chrome import ChromeDriverManager
 
-# ========== IMPORT PARSERS ==========
 from parse_reference_eng import (
     parse_references as parse_eng,
     normalize_text as normalize_eng,
@@ -25,6 +23,7 @@ from parse_reference_eng import (
 )
 from parse_reference_hindi import parse_references as parse_hindi
 from parse_reference_ml import parse_references as parse_ml
+from bible_fetcher import fetch_verse as _multi_fetch
 
 # ========== LOGGING ==========
 logging.basicConfig(
@@ -37,7 +36,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# ========== DEFAULTS (overridden by configure()) ==========
+# ========== DEFAULTS ==========
 USE_XPATH         = sys.platform == "darwin"
 USE_SARVAM        = False
 DEEPGRAM_LANGUAGE = "en"
@@ -54,12 +53,11 @@ LLM_ENABLED       = True
 LLM_CALL_COUNT    = 0
 BIBLE_TRANSLATION = "kjv"
 
-# ========== API KEYS ==========
+# ========== API KEYS (set via GUI) ==========
 DEEPGRAM_API_KEY    = ""
 OPENROUTER_API_KEY  = ""
 DISCORD_WEBHOOK_URL = ""
 SARVAM_API_KEY      = ""
-SARVAM_WS_URL       = "wss://api.sarvam.ai/speech-to-text-streaming"
 
 llm_client = openai.OpenAI(
     base_url="https://openrouter.ai/api/v1",
@@ -67,8 +65,8 @@ llm_client = openai.OpenAI(
 )
 
 # ========== STOP MECHANISM ==========
-_stop_event:   asyncio.Event | None = None
-_engine_loop:  asyncio.AbstractEventLoop | None = None
+_stop_event:  asyncio.Event | None = None
+_engine_loop: asyncio.AbstractEventLoop | None = None
 
 def request_stop():
     global _stop_event, _engine_loop
@@ -137,7 +135,6 @@ def configure(
         DEEPGRAM_MODEL    = "nova-2"
         PRIMARY_PARSER    = parse_eng
 
-
 # ========== CONTEXT TRACKING ==========
 current_book    = None
 current_chapter = None
@@ -152,45 +149,40 @@ RANGE_RE = re.compile(
     re.IGNORECASE
 )
 
-# ========== BIBLE BOOK KEYWORDS ==========
 BOOK_KEYWORDS = [
-    "genesis", "exodus", "leviticus", "numbers", "deuteronomy",
-    "joshua", "judges", "ruth", "samuel", "kings", "chronicles",
-    "ezra", "nehemiah", "esther", "job", "psalm", "psalms",
-    "proverbs", "ecclesiastes", "isaiah", "jeremiah",
-    "lamentations", "ezekiel", "daniel", "hosea", "joel",
-    "amos", "obadiah", "jonah", "micah", "nahum", "habakkuk",
-    "zephaniah", "haggai", "zechariah", "malachi",
-    "matthew", "mark", "luke", "john", "acts", "romans",
-    "corinthians", "galatians", "ephesians", "philippians",
-    "colossians", "thessalonians", "timothy", "titus",
-    "philemon", "hebrews", "james", "peter", "jude", "revelation",
-    "मत्ती", "मरकुस", "लूका", "यूहन्ना", "रोमियों",
-    "उत्पत्ति", "भजन", "यशायाह", "प्रकाशितवाक्य",
-    "इफिसियों", "गलातियों", "फिलिप्पियों", "कुलुस्सियों",
-    "മത്തായി", "മർക്കോസ്", "ലൂക്കോസ്", "യോഹന്നാൻ",
-    "റോമർ", "ഉല്പത്തി", "സങ്കീർത്തനങ്ങൾ", "യെശയ്യാവ്",
-    "വെളിപാടു", "എഫെസ്യർ", "ഗലാത്യർ", "ദാനിയേൽ",
+    "genesis","exodus","leviticus","numbers","deuteronomy",
+    "joshua","judges","ruth","samuel","kings","chronicles",
+    "ezra","nehemiah","esther","job","psalm","psalms",
+    "proverbs","ecclesiastes","isaiah","jeremiah",
+    "lamentations","ezekiel","daniel","hosea","joel",
+    "amos","obadiah","jonah","micah","nahum","habakkuk",
+    "zephaniah","haggai","zechariah","malachi",
+    "matthew","mark","luke","john","acts","romans",
+    "corinthians","galatians","ephesians","philippians",
+    "colossians","thessalonians","timothy","titus",
+    "philemon","hebrews","james","peter","jude","revelation",
+    "मत्ती","मरकुस","लूका","यूहन्ना","रोमियों",
+    "उत्पत्ति","भजन","यशायाह","प्रकाशितवाक्य",
+    "इफिसियों","गलातियों","फिलिप्पियों","कुलुस्सियों",
+    "മത്തായി","മർക്കോസ്","ലൂക്കോസ്","യോഹന്നാൻ",
+    "റോമർ","ഉല്പത്തി","സങ്കീർത്തനങ്ങൾ","യെശയ്യാവ്",
+    "വെളിപാടു","എഫെസ്യർ","ഗലാത്യർ","ദാനിയേൽ",
 ]
 
 NUMBER_WORDS = [
-    "one", "two", "three", "four", "five", "six", "seven", "eight",
-    "nine", "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen",
-    "sixteen", "seventeen", "eighteen", "nineteen", "twenty", "thirty",
-    "forty", "fifty", "sixty", "seventy", "eighty", "ninety", "hundred"
+    "one","two","three","four","five","six","seven","eight",
+    "nine","ten","eleven","twelve","thirteen","fourteen","fifteen",
+    "sixteen","seventeen","eighteen","nineteen","twenty","thirty",
+    "forty","fifty","sixty","seventy","eighty","ninety","hundred"
 ]
 
-# ========== BIBLE API ==========
-from bible_fetcher import fetch_verse as _multi_fetch
-
+# ========== BIBLE FETCH ==========
 def fetch_verse_text(ref: str) -> str | None:
     text = _multi_fetch(ref, BIBLE_TRANSLATION)
     if text:
         return text
     logger.warning(f"⚠️ All APIs failed for {ref}")
     return None
-
-
 
 def queue_verse_range(book, chapter, start_verse, end_verse, controller):
     with verse_queue_lock:
@@ -250,7 +242,6 @@ def _check_and_queue_range(text, base_ref, controller):
     if end_v > start_v and end_v <= start_v + 30:
         queue_verse_range(book, chap_str, start_v, end_v, controller)
 
-
 # ========== DISCORD ==========
 def send_to_discord(verse: str):
     def _do_send(payload):
@@ -259,7 +250,7 @@ def send_to_discord(verse: str):
             if r.status_code == 204:
                 logger.info("📩 Sent to Discord")
             else:
-                logger.warning(f"⚠️ Discord webhook error: {r.status_code}")
+                logger.warning(f"⚠️ Discord error: {r.status_code}")
         except Exception as e:
             logger.error(f"⚠️ Discord failed: {e}")
 
@@ -267,7 +258,6 @@ def send_to_discord(verse: str):
     lower = verse.lower().replace(" ", "")
     if "6:7" in lower or ":67" in lower or re.search(r"\b67\b", lower):
         threading.Thread(target=_do_send, args=({"content": "SIXX SEVENNN :sixseven:"},), daemon=True).start()
-
 
 # ========== LLM FALLBACK ==========
 def extract_verse_with_llm(text):
@@ -295,7 +285,6 @@ Reference:"""
     except Exception as e:
         logger.error(f"❌ LLM error: {e}")
         return None
-
 
 # ========== VERSEVIEW CONTROLLER ==========
 class VerseController:
@@ -422,7 +411,6 @@ class VerseController:
             except:
                 pass
 
-
 # ========== HYBRID VERSE DETECTOR ==========
 def detect_verse_hybrid(text, controller):
     global current_book, current_chapter, current_verse
@@ -525,7 +513,6 @@ def detect_verse_hybrid(text, controller):
     except Exception as e:
         logger.error(f"Parse error: {e}")
 
-
 # ========== DEEPGRAM STREAMING ==========
 async def stream_audio(controller):
     audio  = pyaudio.PyAudio()
@@ -542,62 +529,34 @@ async def stream_audio(controller):
         logger.error(f"Microphone error: {e}")
         return
 
-    if USE_XPATH:
-        from deepgram import Deepgram
-        deepgram      = Deepgram(DEEPGRAM_API_KEY)
-        dg_connection = await deepgram.transcription.live({
-            'language': DEEPGRAM_LANGUAGE, 'model': DEEPGRAM_MODEL,
-            'punctuate': True, 'smart_format': False,
-            'interim_results': True, 'utterance_end_ms': 1000,
-            'endpointing': 300, 'encoding': 'linear16', 'sample_rate': RATE,
-        })
+    from deepgram import DeepgramClient, LiveOptions, LiveTranscriptionEvents
+    deepgram      = DeepgramClient(DEEPGRAM_API_KEY)
+    dg_connection = deepgram.listen.websocket.v("1")
 
-        def on_message(data):
-            try:
-                if isinstance(data, list): data = data[0]
-                if not isinstance(data, dict): return
-                alts = data.get('channel', {}).get('alternatives', [])
-                if not alts: return
-                sentence = alts[0].get('transcript', '')
-                if not sentence.strip(): return
-                check_verse_queue(sentence, controller)
-                if data.get('is_final'):
-                    logger.info(f"📝 TRANSCRIPT: {sentence}")
-                    detect_verse_hybrid(sentence, controller)
-            except Exception as e:
-                logger.error(f"Handler error: {e}")
+    def on_message(self, result, **kwargs):
+        try:
+            sentence = result.channel.alternatives[0].transcript
+            if not sentence.strip():
+                return
+            check_verse_queue(sentence, controller)
+            if result.is_final:
+                logger.info(f"📝 TRANSCRIPT: {sentence}")
+                detect_verse_hybrid(sentence, controller)
+        except Exception as e:
+            logger.error(f"Handler error: {e}")
 
-        dg_connection.registerHandler(dg_connection.event.TRANSCRIPT_RECEIVED, on_message)
-        dg_connection.registerHandler(dg_connection.event.ERROR, lambda e: logger.error(f"DG error: {e}"))
+    dg_connection.on(LiveTranscriptionEvents.Transcript, on_message)
+    dg_connection.on(LiveTranscriptionEvents.Error, lambda s, e, **k: logger.error(f"DG error: {e}"))
 
-    else:
-        from deepgram import DeepgramClient, LiveOptions, LiveTranscriptionEvents
-        deepgram      = DeepgramClient(DEEPGRAM_API_KEY)
-        dg_connection = deepgram.listen.websocket.v("1")
-
-        def on_message(self, result, **kwargs):
-            try:
-                sentence = result.channel.alternatives[0].transcript
-                if not sentence.strip(): return
-                check_verse_queue(sentence, controller)
-                if result.is_final:
-                    logger.info(f"📝 TRANSCRIPT: {sentence}")
-                    detect_verse_hybrid(sentence, controller)
-            except Exception as e:
-                logger.error(f"Handler error: {e}")
-
-        dg_connection.on(LiveTranscriptionEvents.Transcript, on_message)
-        dg_connection.on(LiveTranscriptionEvents.Error, lambda s, e, **k: logger.error(f"DG error: {e}"))
-
-        options = LiveOptions(
-            language=DEEPGRAM_LANGUAGE, model=DEEPGRAM_MODEL,
-            punctuate=True, smart_format=False, interim_results=True,
-            utterance_end_ms="1000", endpointing=300,
-            encoding="linear16", sample_rate=RATE,
-        )
-        if not dg_connection.start(options):
-            logger.error("Failed to connect to Deepgram")
-            return
+    options = LiveOptions(
+        language=DEEPGRAM_LANGUAGE, model=DEEPGRAM_MODEL,
+        punctuate=True, smart_format=False, interim_results=True,
+        utterance_end_ms="1000", endpointing=300,
+        encoding="linear16", sample_rate=RATE,
+    )
+    if not dg_connection.start(options):
+        logger.error("Failed to connect to Deepgram")
+        return
 
     logger.info(f"🎤 {DEEPGRAM_LANGUAGE.upper()} | {DEEPGRAM_MODEL.upper()}")
     logger.info("Press Stop to end\n")
@@ -612,13 +571,9 @@ async def stream_audio(controller):
             stream.stop_stream()
             stream.close()
         audio.terminate()
-        if USE_XPATH:
-            await dg_connection.finish()
-        else:
-            dg_connection.finish()
+        dg_connection.finish()
 
-
-# ========== SARVAM STREAMING (Malayalam) ==========
+# ========== SARVAM STREAMING ==========
 async def stream_audio_sarvam(controller):
     import base64
     import wave
@@ -670,18 +625,13 @@ async def stream_audio_sarvam(controller):
         ) as ws:
             logger.info("✅ Sarvam AI connected")
             logger.info(f"🎤 {SARVAM_LANGUAGE} | saaras:v3")
-            logger.info("Press Stop to end\n")
 
             async def send_audio():
                 try:
                     while not _stop_event.is_set():
                         pcm_data = await loop.run_in_executor(None, read_chunk_blocking)
                         wav_b64  = make_wav(pcm_data)
-                        await ws.transcribe(
-                            audio=wav_b64,
-                            encoding="audio/wav",
-                            sample_rate=RATE
-                        )
+                        await ws.transcribe(audio=wav_b64, encoding="audio/wav", sample_rate=RATE)
                 except asyncio.CancelledError:
                     pass
                 except Exception as e:
@@ -691,19 +641,15 @@ async def stream_audio_sarvam(controller):
                 try:
                     async for message in ws:
                         try:
-                            logger.debug(f"Sarvam: {vars(message) if hasattr(message,'__dict__') else message}")
                             sentence = (
                                 getattr(message, "transcript", None)
                                 or getattr(message, "text", None)
                                 or ""
                             ).strip()
-                            msg_type = getattr(message, "type", "") or ""
                             if sentence:
                                 logger.info(f"📝 TRANSCRIPT: {sentence}")
                                 check_verse_queue(sentence, controller)
                                 detect_verse_hybrid(sentence, controller)
-                            elif msg_type:
-                                logger.debug(f"Sarvam event: {msg_type}")
                         except Exception as e:
                             logger.error(f"Sarvam recv error: {e}")
                 except asyncio.CancelledError:
@@ -713,7 +659,6 @@ async def stream_audio_sarvam(controller):
 
             sender   = asyncio.create_task(send_audio())
             receiver = asyncio.create_task(recv_transcripts())
-
             await _stop_event.wait()
             sender.cancel()
             receiver.cancel()
@@ -726,7 +671,6 @@ async def stream_audio_sarvam(controller):
             stream.stop_stream()
             stream.close()
         audio.terminate()
-
 
 # ========== MAIN ==========
 async def main():

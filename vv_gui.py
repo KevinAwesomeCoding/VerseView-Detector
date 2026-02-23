@@ -30,14 +30,14 @@ class VerseViewApp(ctk.CTk):
         self.geometry("1060x660")
         self.minsize(800, 500)
 
-        self._s        = cfg.load()   # load saved settings
-        self._running  = False
+        self._s             = cfg.load()
+        self._running       = False
         self._engine_thread = None
 
         self._build_ui()
         self._populate_mics()
         self._attach_log_handler()
-        self._load_into_ui()           # fill fields from saved settings
+        self._load_into_ui()
 
     # ─────────────────────────────────────────────────
     # UI BUILD
@@ -102,14 +102,6 @@ class VerseViewApp(ctk.CTk):
 
         row = 0
 
-        ctk.CTkLabel(
-            self,
-            text=f"v{APP_VERSION}",
-            text_color=("gray50", "gray50"),
-            font=ctk.CTkFont(size=10)
-        ).grid(row=1, column=0, columnspan=2, pady=(0, 4), sticky="e", padx=12)
-
-
         def sep_label(text):
             nonlocal row
             ctk.CTkLabel(
@@ -143,6 +135,14 @@ class VerseViewApp(ctk.CTk):
             "Multi (Nova-2)",
         ])
 
+        # Bible Translation
+        sep_label("Bible Translation")
+        self.bible_var, self.bible_menu = add_option([
+            "KJV", "WEB", "ASV", "NET", "NLT",
+            "NIV", "ESV", "NASB", "NKJV", "AMP",
+            "CSB", "MSG", "OEB", "WEBBE",
+        ])
+
         # Microphone
         sep_label("Microphone")
         self.mic_var  = ctk.StringVar(value="Loading...")
@@ -174,40 +174,41 @@ class VerseViewApp(ctk.CTk):
         self._adv_row = row
         row += 1
 
-        # Advanced frame
         self.adv_frame = ctk.CTkFrame(right)
         self.adv_frame.grid_columnconfigure(1, weight=1)
         self._build_advanced()
 
-        # Save button at bottom
-        # Save button
         ctk.CTkButton(
             right, text="💾  Save Settings",
             fg_color="#1a5a8a", hover_color="#144a72",
             command=self._save_settings
         ).grid(row=row + 10, column=0, sticky="ew", padx=14, pady=(16, 4))
 
-        # Export button
         ctk.CTkButton(
             right, text="📤  Export Settings",
             fg_color="#4a4a4a", hover_color="#333333",
             command=self._export_settings
         ).grid(row=row + 11, column=0, sticky="ew", padx=14, pady=(0, 4))
 
-        # Import button
         ctk.CTkButton(
             right, text="📥  Import Settings",
             fg_color="#4a4a4a", hover_color="#333333",
             command=self._import_settings
         ).grid(row=row + 12, column=0, sticky="ew", padx=14, pady=(0, 8))
 
+        # Version label
+        ctk.CTkLabel(
+            self, text=f"v{APP_VERSION}",
+            text_color=("gray50", "gray50"),
+            font=ctk.CTkFont(size=10)
+        ).grid(row=1, column=0, columnspan=2, pady=(0, 4), sticky="e", padx=12)
 
     def _build_advanced(self):
         fields = [
-            ("Sample Rate",      "16000",  "rate_entry"),
-            ("Chunk Size",       "4096",   "chunk_entry"),
-            ("Cooldown (s)",     "3.0",    "cooldown_entry"),
-            ("Dedup Window (s)", "60",     "dedup_entry"),
+            ("Sample Rate",      "16000", "rate_entry"),
+            ("Chunk Size",       "4096",  "chunk_entry"),
+            ("Cooldown (s)",     "3.0",   "cooldown_entry"),
+            ("Dedup Window (s)", "60",    "dedup_entry"),
         ]
         for i, (lbl, default, attr) in enumerate(fields):
             ctk.CTkLabel(self.adv_frame, text=lbl, anchor="w").grid(
@@ -229,11 +230,8 @@ class VerseViewApp(ctk.CTk):
             values=["Enabled", "Disabled"], width=100
         ).grid(row=n, column=1, padx=10, pady=4, sticky="ew")
 
-        # ── API Keys section ──
         ctk.CTkLabel(
-            self.adv_frame,
-            text="─── API Keys ───",
-            anchor="w",
+            self.adv_frame, text="─── API Keys ───", anchor="w",
             font=ctk.CTkFont(size=12, weight="bold"),
             text_color=("gray30", "gray70")
         ).grid(row=n+1, column=0, columnspan=2, padx=10, pady=(14, 2), sticky="ew")
@@ -271,13 +269,14 @@ class VerseViewApp(ctk.CTk):
     def _load_into_ui(self):
         s = self._s
         self.lang_var.set(s.get("language", "English (Nova-2)"))
+        self.bible_var.set(s.get("bible_translation", "KJV").upper())
         self.url_entry.delete(0, "end")
         self.url_entry.insert(0, s.get("remote_url", "http://localhost:50010/control.html"))
 
-        self.rate_entry.delete(0, "end");     self.rate_entry.insert(0,     str(s.get("rate",         16000)))
-        self.chunk_entry.delete(0, "end");    self.chunk_entry.insert(0,    str(s.get("chunk",         4096)))
-        self.cooldown_entry.delete(0, "end"); self.cooldown_entry.insert(0, str(s.get("cooldown",      3.0)))
-        self.dedup_entry.delete(0, "end");    self.dedup_entry.insert(0,    str(s.get("dedup_window",  60)))
+        self.rate_entry.delete(0, "end");     self.rate_entry.insert(0,     str(s.get("rate",        16000)))
+        self.chunk_entry.delete(0, "end");    self.chunk_entry.insert(0,    str(s.get("chunk",        4096)))
+        self.cooldown_entry.delete(0, "end"); self.cooldown_entry.insert(0, str(s.get("cooldown",     3.0)))
+        self.dedup_entry.delete(0, "end");    self.dedup_entry.insert(0,    str(s.get("dedup_window", 60)))
         self.llm_var.set("Enabled" if s.get("llm_enabled", True) else "Disabled")
 
         for attr, key in [
@@ -293,11 +292,12 @@ class VerseViewApp(ctk.CTk):
     def _collect_settings(self) -> dict:
         return {
             "language":            self.lang_var.get(),
+            "bible_translation":   self.bible_var.get().lower(),
             "remote_url":          self.url_entry.get(),
-            "rate":                self._safe_int(self.rate_entry,     16000),
-            "chunk":               self._safe_int(self.chunk_entry,    4096),
+            "rate":                self._safe_int(self.rate_entry,      16000),
+            "chunk":               self._safe_int(self.chunk_entry,     4096),
             "cooldown":            self._safe_float(self.cooldown_entry, 3.0),
-            "dedup_window":        self._safe_int(self.dedup_entry,    60),
+            "dedup_window":        self._safe_int(self.dedup_entry,     60),
             "llm_enabled":         self.llm_var.get() == "Enabled",
             "deepgram_api_key":    self.dg_key_entry.get(),
             "openrouter_api_key":  self.or_key_entry.get(),
@@ -310,7 +310,7 @@ class VerseViewApp(ctk.CTk):
         self._s = self._collect_settings()
         cfg.save(self._s)
         self._append_log("✅ Settings saved.")
-        
+
     def _export_settings(self):
         data = self._collect_settings()
         if cfg.export_settings(data):
@@ -327,7 +327,6 @@ class VerseViewApp(ctk.CTk):
             self._append_log("📥 Settings imported successfully.")
         else:
             self._append_log("⚠️ Import cancelled.")
-
 
     # ─────────────────────────────────────────────────
     # MIC ENUMERATION
@@ -412,9 +411,9 @@ class VerseViewApp(ctk.CTk):
             if not s["sarvam_api_key"] and self._lang_code() == "ml":
                 missing.append("Sarvam API Key")
             if missing:
-                self._append_log(f"⚠️ Missing keys: {', '.join(missing)}")
                 import tkinter.messagebox as mb
-                mb.showwarning("Missing Keys", f"Please enter these in Advanced Settings:\n\n{chr(10).join(missing)}")
+                mb.showwarning("Missing Keys", f"Please enter in Advanced Settings:\n\n{chr(10).join(missing)}")
+                self._append_log(f"⚠️ Missing keys: {', '.join(missing)}")
                 return
 
             engine.configure(
@@ -426,6 +425,7 @@ class VerseViewApp(ctk.CTk):
                 dedup_window        = s["dedup_window"],
                 cooldown            = s["cooldown"],
                 llm_enabled         = s["llm_enabled"],
+                bible_translation   = s["bible_translation"],
                 deepgram_api_key    = s["deepgram_api_key"],
                 openrouter_api_key  = s["openrouter_api_key"],
                 sarvam_api_key      = s["sarvam_api_key"],
@@ -447,7 +447,6 @@ class VerseViewApp(ctk.CTk):
             mb.showerror("Start Error", f"Failed to start:\n\n{e}")
             self._append_log(f"❌ Start failed: {e}")
 
-
     def _run_engine(self):
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
@@ -455,6 +454,8 @@ class VerseViewApp(ctk.CTk):
             loop.run_until_complete(engine.main())
         except Exception as e:
             self._append_log(f"ENGINE ERROR: {e}")
+            import tkinter.messagebox as mb
+            self.after(0, lambda: mb.showerror("Engine Error", str(e)))
         finally:
             loop.close()
             self.after(0, self._on_stopped)
@@ -473,7 +474,7 @@ class VerseViewApp(ctk.CTk):
         self.mic_menu.configure(state="normal")
 
     def on_closing(self):
-        cfg.save(self._collect_settings())   # save on exit too
+        cfg.save(self._collect_settings())
         if self._running:
             engine.request_stop()
         self.destroy()
