@@ -81,7 +81,7 @@ class VerseViewApp(ctk.CTk):
 
         self.log_box = ctk.CTkTextbox(
             left, state="disabled",
-            font=("Segoe UI", 13), wrap="word" # CHANGE FOTNTS HERE
+            font=("Segoe UI", 12), wrap="word"
         )
         self.log_box.grid(row=1, column=0, padx=10, pady=(0, 10), sticky="nsew")
 
@@ -160,6 +160,33 @@ class VerseViewApp(ctk.CTk):
         # VerseView URL
         sep_label("VerseView URL")
         self.url_entry = add_entry("http://localhost:50010/control.html")
+
+        # ── Current Context ──
+        sep_label("📌  Current Context")
+
+        ctx_frame = ctk.CTkFrame(right, fg_color="transparent")
+        ctx_frame.grid(row=row, column=0, sticky="ew", padx=14, pady=(0, 4))
+        ctx_frame.grid_columnconfigure((0, 1, 2), weight=1)
+        row += 1
+
+        ctk.CTkLabel(ctx_frame, text="Book",    anchor="center", font=ctk.CTkFont(size=11)).grid(row=0, column=0, padx=2)
+        ctk.CTkLabel(ctx_frame, text="Chapter", anchor="center", font=ctk.CTkFont(size=11)).grid(row=0, column=1, padx=2)
+        ctk.CTkLabel(ctx_frame, text="Verse",   anchor="center", font=ctk.CTkFont(size=11)).grid(row=0, column=2, padx=2)
+
+        self.ctx_book    = ctk.CTkEntry(ctx_frame, placeholder_text="e.g. John", width=80)
+        self.ctx_chapter = ctk.CTkEntry(ctx_frame, placeholder_text="e.g. 3",    width=50)
+        self.ctx_verse   = ctk.CTkEntry(ctx_frame, placeholder_text="e.g. 16",   width=50)
+
+        self.ctx_book.grid(row=1,    column=0, padx=2, pady=2)
+        self.ctx_chapter.grid(row=1, column=1, padx=2, pady=2)
+        self.ctx_verse.grid(row=1,   column=2, padx=2, pady=2)
+
+        ctk.CTkButton(
+            right, text="📌  Set Context", height=28,
+            fg_color="#5a3a8a", hover_color="#3f2060",
+            command=self._set_context
+        ).grid(row=row, column=0, sticky="ew", padx=14, pady=(0, 8))
+        row += 1
 
         # ── Advanced toggle ──
         self._adv_open = False
@@ -294,10 +321,10 @@ class VerseViewApp(ctk.CTk):
             "language":            self.lang_var.get(),
             "bible_translation":   self.bible_var.get().lower(),
             "remote_url":          self.url_entry.get(),
-            "rate":                self._safe_int(self.rate_entry,      16000),
-            "chunk":               self._safe_int(self.chunk_entry,     4096),
-            "cooldown":            self._safe_float(self.cooldown_entry, 3.0),
-            "dedup_window":        self._safe_int(self.dedup_entry,     60),
+            "rate":                self._safe_int(self.rate_entry,       16000),
+            "chunk":               self._safe_int(self.chunk_entry,      4096),
+            "cooldown":            self._safe_float(self.cooldown_entry,  3.0),
+            "dedup_window":        self._safe_int(self.dedup_entry,      60),
             "llm_enabled":         self.llm_var.get() == "Enabled",
             "deepgram_api_key":    self.dg_key_entry.get(),
             "openrouter_api_key":  self.or_key_entry.get(),
@@ -327,6 +354,34 @@ class VerseViewApp(ctk.CTk):
             self._append_log("📥 Settings imported successfully.")
         else:
             self._append_log("⚠️ Import cancelled.")
+
+    # ─────────────────────────────────────────────────
+    # CONTEXT
+    # ─────────────────────────────────────────────────
+    def _set_context(self):
+        engine.set_context(
+            self.ctx_book.get(),
+            self.ctx_chapter.get(),
+            self.ctx_verse.get(),
+        )
+        self._append_log(
+            f"📌 Context set: {self.ctx_book.get()} "
+            f"{self.ctx_chapter.get()}:{self.ctx_verse.get()}"
+        )
+
+    def _refresh_context(self):
+        ctx = engine.get_context()
+        if ctx["book"]:
+            self.ctx_book.delete(0, "end")
+            self.ctx_book.insert(0, ctx["book"])
+        if ctx["chapter"]:
+            self.ctx_chapter.delete(0, "end")
+            self.ctx_chapter.insert(0, ctx["chapter"])
+        if ctx["verse"]:
+            self.ctx_verse.delete(0, "end")
+            self.ctx_verse.insert(0, ctx["verse"])
+        if self._running:
+            self.after(2000, self._refresh_context)
 
     # ─────────────────────────────────────────────────
     # MIC ENUMERATION
@@ -441,6 +496,7 @@ class VerseViewApp(ctk.CTk):
 
             self._engine_thread = threading.Thread(target=self._run_engine, daemon=True)
             self._engine_thread.start()
+            self.after(2000, self._refresh_context)
 
         except Exception as e:
             import tkinter.messagebox as mb

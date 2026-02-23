@@ -139,6 +139,20 @@ current_book    = None
 current_chapter = None
 current_verse   = None
 
+def get_context() -> dict:
+    return {
+        "book":    current_book    or "",
+        "chapter": current_chapter or "",
+        "verse":   current_verse   or "",
+    }
+
+def set_context(book: str, chapter: str, verse: str):
+    global current_book, current_chapter, current_verse
+    current_book    = book.strip()    or None
+    current_chapter = chapter.strip() or None
+    current_verse   = verse.strip()   or None
+    logger.info(f"📌 Context manually set: {current_book} {current_chapter}:{current_verse}")
+
 # ========== VERSE RANGE QUEUE ==========
 verse_queue      = []
 verse_queue_lock = threading.Lock()
@@ -573,16 +587,13 @@ async def stream_audio(controller):
                 try:
                     async for msg in ws:
                         try:
-                            data     = json.loads(msg)
+                            data = json.loads(msg)
 
-                            # Skip non-Results messages (UtteranceEnd, Metadata, etc.)
                             msg_type = data.get("type", "Results")
                             if msg_type != "Results":
                                 continue
 
                             channel = data.get("channel", {})
-
-                            # Skip if channel is a list (UtteranceEnd sends [0,1])
                             if isinstance(channel, list):
                                 continue
 
@@ -599,15 +610,12 @@ async def stream_audio(controller):
                             if data.get("is_final"):
                                 logger.info(f"📝 TRANSCRIPT: {sentence}")
 
-                                # Accumulate context so split sentences still match
                                 partial_context = (partial_context + " " + sentence).strip()
                                 found = detect_verse_hybrid(partial_context, controller)
 
                                 if found:
-                                    # Clear after a hit so old refs don't keep re-triggering
                                     partial_context = ""
                                 else:
-                                    # Keep last 15 words if no match yet
                                     words = partial_context.split()
                                     if len(words) > 30:
                                         partial_context = " ".join(words[-15:])
