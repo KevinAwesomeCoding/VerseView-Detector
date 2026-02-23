@@ -1,44 +1,73 @@
-      # Windows upload
-      - name: Upload Windows artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: VerseView-Detector-Windows
-          path: "dist/VerseView Detector.exe"   # ← quoted
+# -*- mode: python ; coding: utf-8 -*-
+import sys
 
-      # Mac DMG creation
-      - name: Package as DMG
-        run: |
-          brew install create-dmg
-          create-dmg \
-            --volname "VerseView Detector" \
-            --window-size 600 400 \
-            --icon-size 120 \
-            --app-drop-link 450 185 \
-            "dist/VerseView Detector.dmg" \
-            "dist/VerseView Detector.app"
+block_cipher = None
 
-      # Mac upload
-      - name: Upload Mac artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: VerseView-Detector-Mac
-          path: "dist/VerseView Detector.dmg"   # ← quoted
+a = Analysis(
+    ['vv_gui.py'],
+    pathex=['.'],
+    binaries=[],
+    datas=[],
+    hiddenimports=[
+        'customtkinter',
+        'pyaudio',
+        'deepgram',
+        'sarvamai',
+        'websockets',
+        'websockets.legacy',
+        'websockets.legacy.client',
+        'selenium',
+        'webdriver_manager',
+        'webdriver_manager.chrome',
+        'certifi',
+        'openai',
+        'requests',
+        'vv_streaming_master',
+        'parse_reference_eng',
+        'parse_reference_hindi',
+        'parse_reference_ml',
+        'wave',
+        'base64',
+        'io',
+        'unicodedata',
+    ],
+    hookspath=[],
+    runtime_hooks=[],
+    excludes=[],
+    win_no_prefer_redirects=False,
+    win_private_assemblies=False,
+    cipher=block_cipher,
+    noarchive=False,
+)
 
-      # Release job
-      - name: Create Release
-        uses: softprops/action-gh-release@v2
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          tag_name: build-${{ steps.sha.outputs.short }}
-          name: VerseView Detector Build ${{ steps.sha.outputs.short }}
-          body: |
-            Automated build from commit `${{ github.sha }}`
+pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
-            **Download for your platform below:**
-            - `VerseView Detector.exe` → Windows
-            - `VerseView Detector.dmg` → Mac
-          files: |
-            "dist/VerseView Detector.exe"
-            "dist/VerseView Detector.dmg"
-          draft: false
-          prerelease: false
+exe = EXE(
+    pyz,
+    a.scripts,
+    a.binaries,
+    a.zipfiles,
+    a.datas,
+    [],
+    name='VerseView Detector',
+    debug=False,
+    bootloader_ignore_signals=False,
+    strip=False,
+    upx=True,
+    upx_exclude=[],
+    runtime_tmpdir=None,
+    console=False,
+    icon=None,
+)
+
+if sys.platform == 'darwin':
+    app = BUNDLE(
+        exe,
+        name='VerseView Detector.app',
+        icon=None,
+        bundle_identifier='com.verseview.app',
+        info_plist={
+            'NSMicrophoneUsageDescription': 'VerseView needs microphone access for live transcription.',
+            'LSMinimumSystemVersion': '11.0',
+        },
+    )
