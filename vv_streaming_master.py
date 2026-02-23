@@ -55,10 +55,10 @@ LLM_CALL_COUNT    = 0
 BIBLE_TRANSLATION = "kjv"
 
 # ========== API KEYS ==========
-DEEPGRAM_API_KEY    = "35c7124e03d04829517774600368164f8fe4e54c"
-OPENROUTER_API_KEY  = "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"
-DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1417216987867648050/atH87eO57N6kK9ySTyzJ_xxV9NvzsdnUmfQhFIaSuiJ9dIhYB6zDWCqw9jLB8Ps1HFJ0"
-SARVAM_API_KEY      = "sk_s20kg0cj_dgx3UzmeRDG5w0wVoyxfmqbV"
+DEEPGRAM_API_KEY    = ""
+OPENROUTER_API_KEY  = ""
+DISCORD_WEBHOOK_URL = ""
+SARVAM_API_KEY      = ""
 SARVAM_WS_URL       = "wss://api.sarvam.ai/speech-to-text-streaming"
 
 llm_client = openai.OpenAI(
@@ -77,16 +77,26 @@ def request_stop():
 
 # ========== CONFIGURE ==========
 def configure(
-    language="en",
-    mic_index=1,
-    rate=16000,
-    chunk=4096,
-    remote_url="http://localhost:50010/control.html",
-    dedup_window=60,
-    cooldown=3.0,
-    llm_enabled=True,
-    bible_translation="kjv",
+
+    deepgram_api_key    = "",
+    openrouter_api_key  = "",
+    sarvam_api_key      = "",
+    discord_webhook_url = "",
 ):
+    global DEEPGRAM_API_KEY, OPENROUTER_API_KEY, SARVAM_API_KEY, DISCORD_WEBHOOK_URL
+    ...
+    DEEPGRAM_API_KEY    = deepgram_api_key
+    OPENROUTER_API_KEY  = openrouter_api_key
+    SARVAM_API_KEY      = sarvam_api_key
+    DISCORD_WEBHOOK_URL = discord_webhook_url
+
+    # Re-init LLM client with new key
+    global llm_client
+    llm_client = openai.OpenAI(
+        base_url="https://openrouter.ai/api/v1",
+        api_key=OPENROUTER_API_KEY
+    )
+
     global USE_SARVAM, DEEPGRAM_LANGUAGE, DEEPGRAM_MODEL, SARVAM_LANGUAGE
     global PRIMARY_PARSER, MIC_INDEX, RATE, CHUNK, REMOTE_URL
     global DEDUP_WINDOW, COOLDOWN, LLM_ENABLED, BIBLE_TRANSLATION, USE_XPATH
