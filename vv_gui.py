@@ -170,11 +170,27 @@ class VerseViewApp(ctk.CTk):
         self._build_advanced()
 
         # Save button at bottom
+        # Save button
         ctk.CTkButton(
             right, text="💾  Save Settings",
             fg_color="#1a5a8a", hover_color="#144a72",
             command=self._save_settings
-        ).grid(row=row + 10, column=0, sticky="ew", padx=14, pady=(16, 8))
+        ).grid(row=row + 10, column=0, sticky="ew", padx=14, pady=(16, 4))
+
+        # Export button
+        ctk.CTkButton(
+            right, text="📤  Export Settings",
+            fg_color="#4a4a4a", hover_color="#333333",
+            command=self._export_settings
+        ).grid(row=row + 11, column=0, sticky="ew", padx=14, pady=(0, 4))
+
+        # Import button
+        ctk.CTkButton(
+            right, text="📥  Import Settings",
+            fg_color="#4a4a4a", hover_color="#333333",
+            command=self._import_settings
+        ).grid(row=row + 12, column=0, sticky="ew", padx=14, pady=(0, 8))
+
 
     def _build_advanced(self):
         fields = [
@@ -284,6 +300,24 @@ class VerseViewApp(ctk.CTk):
         self._s = self._collect_settings()
         cfg.save(self._s)
         self._append_log("✅ Settings saved.")
+        
+    def _export_settings(self):
+        data = self._collect_settings()
+        if cfg.export_settings(data):
+            self._append_log("📤 Settings exported successfully.")
+        else:
+            self._append_log("⚠️ Export cancelled.")
+
+    def _import_settings(self):
+        data = cfg.import_settings()
+        if data:
+            self._s = data
+            cfg.save(data)
+            self._load_into_ui()
+            self._append_log("📥 Settings imported successfully.")
+        else:
+            self._append_log("⚠️ Import cancelled.")
+
 
     # ─────────────────────────────────────────────────
     # MIC ENUMERATION

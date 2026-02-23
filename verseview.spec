@@ -49,7 +49,7 @@ exe = EXE(
     a.zipfiles,
     a.datas,
     [],
-    name='VerseView',
+    name='VerseView Detector',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -64,7 +64,7 @@ exe = EXE(
 if sys.platform == 'darwin':
     app = BUNDLE(
         exe,
-        name='VerseView.app',
+        name='VerseView Detector.app',
         icon=None,
         bundle_identifier='com.verseview.app',
         info_plist={

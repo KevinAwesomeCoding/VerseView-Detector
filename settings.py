@@ -2,7 +2,10 @@ import json
 import sys
 import os
 from pathlib import Path
+import tkinter.filedialog as fd
+import tkinter.messagebox as mb
 
+# ← DEFAULTS must be here, BEFORE the functions that use it
 DEFAULTS = {
     # API Keys
     "deepgram_api_key":    "",
@@ -22,6 +25,40 @@ DEFAULTS = {
 }
 
 
+def export_settings(data: dict):
+    path = fd.asksaveasfilename(
+        title="Export VerseView Settings",
+        defaultextension=".json",
+        filetypes=[("JSON file", "*.json")],
+        initialfile="verseview_settings.json"
+    )
+    if not path:
+        return False
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+        return True
+    except Exception as e:
+        mb.showerror("Export Failed", str(e))
+        return False
+
+
+def import_settings() -> dict | None:
+    path = fd.askopenfilename(
+        title="Import VerseView Settings",
+        filetypes=[("JSON file", "*.json")]
+    )
+    if not path:
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return {**DEFAULTS, **data}
+    except Exception as e:
+        mb.showerror("Import Failed", str(e))
+        return None
+
+
 def _settings_path() -> Path:
     if sys.platform == "darwin":
         base = Path.home() / "Library" / "Application Support" / "VerseView"
@@ -37,7 +74,6 @@ def load() -> dict:
         try:
             with open(path, "r", encoding="utf-8") as f:
                 saved = json.load(f)
-            # Merge with defaults so new keys always exist
             return {**DEFAULTS, **saved}
         except Exception:
             pass
