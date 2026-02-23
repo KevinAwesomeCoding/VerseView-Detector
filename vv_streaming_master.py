@@ -515,6 +515,9 @@ def detect_verse_hybrid(text, controller):
 
 # ========== DEEPGRAM STREAMING ==========
 async def stream_audio(controller):
+    import websockets
+    import json
+
     audio  = pyaudio.PyAudio()
     stream = None
     try:
@@ -529,49 +532,83 @@ async def stream_audio(controller):
         logger.error(f"Microphone error: {e}")
         return
 
-    from deepgram import DeepgramClient, LiveOptions, LiveTranscriptionEvents
-    deepgram      = DeepgramClient(DEEPGRAM_API_KEY)
-    dg_connection = deepgram.listen.websocket.v("1")
-
-    def on_message(self, result, **kwargs):
-        try:
-            sentence = result.channel.alternatives[0].transcript
-            if not sentence.strip():
-                return
-            check_verse_queue(sentence, controller)
-            if result.is_final:
-                logger.info(f"📝 TRANSCRIPT: {sentence}")
-                detect_verse_hybrid(sentence, controller)
-        except Exception as e:
-            logger.error(f"Handler error: {e}")
-
-    dg_connection.on(LiveTranscriptionEvents.Transcript, on_message)
-    dg_connection.on(LiveTranscriptionEvents.Error, lambda s, e, **k: logger.error(f"DG error: {e}"))
-
-    options = LiveOptions(
-        language=DEEPGRAM_LANGUAGE, model=DEEPGRAM_MODEL,
-        punctuate=True, smart_format=False, interim_results=True,
-        utterance_end_ms="1000", endpointing=300,
-        encoding="linear16", sample_rate=RATE,
+    url = (
+        f"wss://api.deepgram.com/v1/listen"
+        f"?language={DEEPGRAM_LANGUAGE}"
+        f"&model={DEEPGRAM_MODEL}"
+        f"&punctuate=true"
+        f"&smart_format=false"
+        f"&interim_results=true"
+        f"&utterance_end_ms=1000"
+        f"&endpointing=300"
+        f"&encoding=linear16"
+        f"&sample_rate={RATE}"
     )
-    if not dg_connection.start(options):
-        logger.error("Failed to connect to Deepgram")
-        return
+    headers = {"Authorization": f"Token {DEEPGRAM_API_KEY}"}
+    loop    = asyncio.get_event_loop()
 
-    logger.info(f"🎤 {DEEPGRAM_LANGUAGE.upper()} | {DEEPGRAM_MODEL.upper()}")
-    logger.info("Press Stop to end\n")
+    def read_audio():
+        return stream.read(CHUNK, exception_on_overflow=False)
 
     try:
-        while not _stop_event.is_set():
-            data = stream.read(CHUNK, exception_on_overflow=False)
-            dg_connection.send(data)
-            await asyncio.sleep(0.01)
+        async with websockets.connect(url, additional_headers=headers) as ws:
+            logger.info(f"🎤 {DEEPGRAM_LANGUAGE.upper()} | {DEEPGRAM_MODEL.upper()}")
+            logger.info("✅ Connected to Deepgram WebSocket")
+            logger.info("Press Stop to end\n")
+
+            async def send_audio():
+                try:
+                    while not _stop_event.is_set():
+                        data = await loop.run_in_executor(None, read_audio)
+                        await ws.send(data)
+                except asyncio.CancelledError:
+                    pass
+                except Exception as e:
+                    logger.error(f"Send error: {e}")
+
+            async def recv_transcripts():
+                try:
+                    async for msg in ws:
+                        try:
+                            data     = json.loads(msg)
+                            alts     = data.get("channel", {}).get("alternatives", [])
+                            if not alts:
+                                continue
+                            sentence = alts[0].get("transcript", "")
+                            if not sentence.strip():
+                                continue
+                            check_verse_queue(sentence, controller)
+                            if data.get("is_final"):
+                                logger.info(f"📝 TRANSCRIPT: {sentence}")
+                                detect_verse_hybrid(sentence, controller)
+                        except Exception as e:
+                            logger.error(f"Recv error: {e}")
+                except asyncio.CancelledError:
+                    pass
+                except Exception as e:
+                    logger.warning(f"WebSocket closed: {e}")
+
+            sender   = asyncio.create_task(send_audio())
+            receiver = asyncio.create_task(recv_transcripts())
+
+            await _stop_event.wait()
+            sender.cancel()
+            receiver.cancel()
+            await asyncio.gather(sender, receiver, return_exceptions=True)
+
+            try:
+                await ws.send(json.dumps({"type": "CloseStream"}))
+            except:
+                pass
+
+    except Exception as e:
+        logger.error(f"Deepgram WebSocket error: {e}")
     finally:
         if stream:
             stream.stop_stream()
             stream.close()
         audio.terminate()
-        dg_connection.finish()
+
 
 # ========== SARVAM STREAMING ==========
 async def stream_audio_sarvam(controller):

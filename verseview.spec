@@ -11,18 +11,10 @@ a = Analysis(
     hiddenimports=[
         'customtkinter',
         'pyaudio',
-        'deepgram',
-        'deepgram.clients',
-        'deepgram.clients.live',                         # ← add
-        'deepgram.clients.listen',                       # ← add
-        'deepgram.clients.listen.websocket',             # ← add
-        'deepgram.clients.listen.websocket.v1',          # ← add
-        'deepgram.audio',                                # ← add
-        'deepgram.audio.microphone',                     # ← add
-        'sarvamai',
         'websockets',
         'websockets.legacy',
         'websockets.legacy.client',
+        'sarvamai',
         'selenium',
         'selenium.webdriver',
         'selenium.webdriver.chrome',
@@ -50,6 +42,7 @@ a = Analysis(
         'io',
         'unicodedata',
     ],
+
 
 
     hookspath=[],
