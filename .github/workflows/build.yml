@@ -26,6 +26,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install pyaudio
           pip install -r requirements.txt
+          pip install "deepgram-sdk>=3.0.0"
           pip install pyinstaller
 
       - name: Build EXE
@@ -56,6 +57,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install pyaudio
           pip install -r requirements.txt
+          pip install "deepgram-sdk>=3.0.0"
           pip install pyinstaller
 
       - name: Build .app

@@ -12,6 +12,13 @@ a = Analysis(
         'customtkinter',
         'pyaudio',
         'deepgram',
+        'deepgram.clients',
+        'deepgram.clients.live',                         # ← add
+        'deepgram.clients.listen',                       # ← add
+        'deepgram.clients.listen.websocket',             # ← add
+        'deepgram.clients.listen.websocket.v1',          # ← add
+        'deepgram.audio',                                # ← add
+        'deepgram.audio.microphone',                     # ← add
         'sarvamai',
         'websockets',
         'websockets.legacy',
@@ -19,15 +26,15 @@ a = Analysis(
         'selenium',
         'selenium.webdriver',
         'selenium.webdriver.chrome',
-        'selenium.webdriver.chrome.options',        # ← add
-        'selenium.webdriver.chrome.service',        # ← add
-        'selenium.webdriver.chrome.webdriver',      # ← add
-        'selenium.webdriver.common.by',             # ← add
-        'selenium.webdriver.common.keys',           # ← add
-        'selenium.webdriver.support.ui',            # ← add
-        'selenium.webdriver.support.expected_conditions',  # ← add
-        'selenium.webdriver.remote.webdriver',      # ← add
-        'selenium.webdriver.remote.webelement',     # ← add
+        'selenium.webdriver.chrome.options',
+        'selenium.webdriver.chrome.service',
+        'selenium.webdriver.chrome.webdriver',
+        'selenium.webdriver.common.by',
+        'selenium.webdriver.common.keys',
+        'selenium.webdriver.support.ui',
+        'selenium.webdriver.support.expected_conditions',
+        'selenium.webdriver.remote.webdriver',
+        'selenium.webdriver.remote.webelement',
         'webdriver_manager',
         'webdriver_manager.chrome',
         'certifi',
@@ -43,6 +50,7 @@ a = Analysis(
         'io',
         'unicodedata',
     ],
+
 
     hookspath=[],
     runtime_hooks=[],
