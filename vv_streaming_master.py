@@ -567,26 +567,52 @@ async def stream_audio(controller):
                     logger.error(f"Send error: {e}")
 
             async def recv_transcripts():
+                partial_context = ""
                 try:
                     async for msg in ws:
                         try:
                             data     = json.loads(msg)
-                            alts     = data.get("channel", {}).get("alternatives", [])
-                            if not alts:
+
+                            # Skip non-Results messages
+                            msg_type = data.get("type", "Results")
+                            if msg_type != "Results":
                                 continue
+
+                            channel = data.get("channel", {})
+
+                            # Skip if channel is a list (UtteranceEnd sends [0,1])
+                            if isinstance(channel, list):
+                                continue
+
+                            alts = channel.get("alternatives", [])
+                            if not alts or not isinstance(alts[0], dict):
+                                continue
+
                             sentence = alts[0].get("transcript", "")
                             if not sentence.strip():
                                 continue
+
                             check_verse_queue(sentence, controller)
+
                             if data.get("is_final"):
                                 logger.info(f"📝 TRANSCRIPT: {sentence}")
-                                detect_verse_hybrid(sentence, controller)
+
+                                # Accumulate context so split sentences still match
+                                partial_context = (partial_context + " " + sentence).strip()
+                                detect_verse_hybrid(partial_context, controller)
+
+                                # Keep only last 15 words to avoid stale matches
+                                words = partial_context.split()
+                                if len(words) > 30:
+                                    partial_context = " ".join(words[-15:])
+
                         except Exception as e:
                             logger.error(f"Recv error: {e}")
                 except asyncio.CancelledError:
                     pass
                 except Exception as e:
                     logger.warning(f"WebSocket closed: {e}")
+
 
             sender   = asyncio.create_task(send_audio())
             receiver = asyncio.create_task(recv_transcripts())
