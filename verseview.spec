@@ -21,6 +21,7 @@ a = Analysis(
         'webdriver_manager.chrome',
         'certifi',
         'openai',
+        'bible_fetcher',
         'requests',
         'vv_streaming_master',
         'parse_reference_eng',

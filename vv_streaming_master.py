@@ -77,29 +77,35 @@ def request_stop():
 
 # ========== CONFIGURE ==========
 def configure(
-
+    language            = "en",
+    mic_index           = 1,
+    rate                = 16000,
+    chunk               = 4096,
+    remote_url          = "http://localhost:50010/control.html",
+    dedup_window        = 60,
+    cooldown            = 3.0,
+    llm_enabled         = True,
+    bible_translation   = "kjv",
     deepgram_api_key    = "",
     openrouter_api_key  = "",
     sarvam_api_key      = "",
     discord_webhook_url = "",
 ):
     global DEEPGRAM_API_KEY, OPENROUTER_API_KEY, SARVAM_API_KEY, DISCORD_WEBHOOK_URL
-    ...
+    global USE_SARVAM, DEEPGRAM_LANGUAGE, DEEPGRAM_MODEL, SARVAM_LANGUAGE
+    global PRIMARY_PARSER, MIC_INDEX, RATE, CHUNK, REMOTE_URL
+    global DEDUP_WINDOW, COOLDOWN, LLM_ENABLED, BIBLE_TRANSLATION, USE_XPATH
+    global llm_client
+
     DEEPGRAM_API_KEY    = deepgram_api_key
     OPENROUTER_API_KEY  = openrouter_api_key
     SARVAM_API_KEY      = sarvam_api_key
     DISCORD_WEBHOOK_URL = discord_webhook_url
 
-    # Re-init LLM client with new key
-    global llm_client
     llm_client = openai.OpenAI(
         base_url="https://openrouter.ai/api/v1",
         api_key=OPENROUTER_API_KEY
     )
-
-    global USE_SARVAM, DEEPGRAM_LANGUAGE, DEEPGRAM_MODEL, SARVAM_LANGUAGE
-    global PRIMARY_PARSER, MIC_INDEX, RATE, CHUNK, REMOTE_URL
-    global DEDUP_WINDOW, COOLDOWN, LLM_ENABLED, BIBLE_TRANSLATION, USE_XPATH
 
     USE_XPATH         = sys.platform == "darwin"
     MIC_INDEX         = mic_index
@@ -125,11 +131,12 @@ def configure(
         USE_SARVAM        = True
         SARVAM_LANGUAGE   = "ml-IN"
         PRIMARY_PARSER    = parse_ml
-    else:  # multi
+    else:
         USE_SARVAM        = False
         DEEPGRAM_LANGUAGE = "multi"
         DEEPGRAM_MODEL    = "nova-2"
         PRIMARY_PARSER    = parse_eng
+
 
 # ========== CONTEXT TRACKING ==========
 current_book    = None
@@ -174,15 +181,15 @@ NUMBER_WORDS = [
 ]
 
 # ========== BIBLE API ==========
+from bible_fetcher import fetch_verse as _multi_fetch
+
 def fetch_verse_text(ref: str) -> str | None:
-    try:
-        url = f"https://bible-api.com/{ref.replace(' ', '+')}?translation={BIBLE_TRANSLATION}"
-        r   = requests.get(url, timeout=6, verify=certifi.where())
-        if r.status_code == 200:
-            return r.json().get('text', '').strip()
-    except Exception as e:
-        logger.debug(f"Bible API error for {ref}: {e}")
+    text = _multi_fetch(ref, BIBLE_TRANSLATION)
+    if text:
+        return text
+    logger.warning(f"⚠️ All APIs failed for {ref}")
     return None
+
 
 
 def queue_verse_range(book, chapter, start_verse, end_verse, controller):

@@ -8,6 +8,8 @@ import pyaudio
 import settings as cfg
 import vv_streaming_master as engine
 
+APP_VERSION = "1.0.0"
+
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
 
@@ -24,7 +26,7 @@ class GUILogHandler(logging.Handler):
 class VerseViewApp(ctk.CTk):
     def __init__(self):
         super().__init__()
-        self.title("VerseView Live")
+        self.title(f"VerseView Detector  v{APP_VERSION}")
         self.geometry("1060x660")
         self.minsize(800, 500)
 
@@ -99,6 +101,14 @@ class VerseViewApp(ctk.CTk):
         right.grid_columnconfigure(0, weight=1)
 
         row = 0
+
+        ctk.CTkLabel(
+            self,
+            text=f"v{APP_VERSION}",
+            text_color=("gray50", "gray50"),
+            font=ctk.CTkFont(size=10)
+        ).grid(row=1, column=0, columnspan=2, pady=(0, 4), sticky="e", padx=12)
+
 
         def sep_label(text):
             nonlocal row
@@ -389,45 +399,54 @@ class VerseViewApp(ctk.CTk):
     # ENGINE CONTROL
     # ─────────────────────────────────────────────────
     def _start(self):
-        if self._running:
-            return
+        try:
+            if self._running:
+                return
 
-        s = self._collect_settings()
-        cfg.save(s)   # auto-save on start
+            s = self._collect_settings()
+            cfg.save(s)
 
-        missing = []
-        if not s["deepgram_api_key"] and self._lang_code() != "ml":
-            missing.append("Deepgram API Key")
-        if not s["sarvam_api_key"] and self._lang_code() == "ml":
-            missing.append("Sarvam API Key")
-        if missing:
-            self._append_log(f"⚠️  Missing keys in Advanced Settings: {', '.join(missing)}")
-            return
+            missing = []
+            if not s["deepgram_api_key"] and self._lang_code() != "ml":
+                missing.append("Deepgram API Key")
+            if not s["sarvam_api_key"] and self._lang_code() == "ml":
+                missing.append("Sarvam API Key")
+            if missing:
+                self._append_log(f"⚠️ Missing keys: {', '.join(missing)}")
+                import tkinter.messagebox as mb
+                mb.showwarning("Missing Keys", f"Please enter these in Advanced Settings:\n\n{chr(10).join(missing)}")
+                return
 
-        engine.configure(
-            language            = self._lang_code(),
-            mic_index           = self._mic_index(),
-            rate                = s["rate"],
-            chunk               = s["chunk"],
-            remote_url          = s["remote_url"],
-            dedup_window        = s["dedup_window"],
-            cooldown            = s["cooldown"],
-            llm_enabled         = s["llm_enabled"],
-            deepgram_api_key    = s["deepgram_api_key"],
-            openrouter_api_key  = s["openrouter_api_key"],
-            sarvam_api_key      = s["sarvam_api_key"],
-            discord_webhook_url = s["discord_webhook_url"],
-        )
+            engine.configure(
+                language            = self._lang_code(),
+                mic_index           = self._mic_index(),
+                rate                = s["rate"],
+                chunk               = s["chunk"],
+                remote_url          = s["remote_url"],
+                dedup_window        = s["dedup_window"],
+                cooldown            = s["cooldown"],
+                llm_enabled         = s["llm_enabled"],
+                deepgram_api_key    = s["deepgram_api_key"],
+                openrouter_api_key  = s["openrouter_api_key"],
+                sarvam_api_key      = s["sarvam_api_key"],
+                discord_webhook_url = s["discord_webhook_url"],
+            )
 
-        self._running = True
-        self.btn_start.configure(state="disabled")
-        self.btn_stop.configure(state="normal")
-        self.lbl_status.configure(text="● Running", text_color="#2a7a2a")
-        self.lang_menu.configure(state="disabled")
-        self.mic_menu.configure(state="disabled")
+            self._running = True
+            self.btn_start.configure(state="disabled")
+            self.btn_stop.configure(state="normal")
+            self.lbl_status.configure(text="● Running", text_color="#2a7a2a")
+            self.lang_menu.configure(state="disabled")
+            self.mic_menu.configure(state="disabled")
 
-        self._engine_thread = threading.Thread(target=self._run_engine, daemon=True)
-        self._engine_thread.start()
+            self._engine_thread = threading.Thread(target=self._run_engine, daemon=True)
+            self._engine_thread.start()
+
+        except Exception as e:
+            import tkinter.messagebox as mb
+            mb.showerror("Start Error", f"Failed to start:\n\n{e}")
+            self._append_log(f"❌ Start failed: {e}")
+
 
     def _run_engine(self):
         loop = asyncio.new_event_loop()
