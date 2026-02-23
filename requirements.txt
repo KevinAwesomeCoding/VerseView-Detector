@@ -1,0 +1,10 @@
+customtkinter
+pyaudio
+deepgram-sdk>=3.0.0
+sarvamai
+websockets
+selenium
+webdriver-manager
+certifi
+openai
+requests
