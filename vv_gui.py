@@ -81,7 +81,7 @@ class VerseViewApp(ctk.CTk):
 
         self.log_box = ctk.CTkTextbox(
             left, state="disabled",
-            font=("Courier New", 11), wrap="word"
+            font=("Segoe UI", 13), wrap="word" # CHANGE FOTNTS HERE
         )
         self.log_box.grid(row=1, column=0, padx=10, pady=(0, 10), sticky="nsew")
 

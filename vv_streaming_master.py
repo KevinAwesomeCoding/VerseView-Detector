@@ -53,7 +53,6 @@ LLM_ENABLED       = True
 LLM_CALL_COUNT    = 0
 BIBLE_TRANSLATION = "kjv"
 
-# ========== API KEYS (set via GUI) ==========
 DEEPGRAM_API_KEY    = ""
 OPENROUTER_API_KEY  = ""
 DISCORD_WEBHOOK_URL = ""
@@ -412,12 +411,13 @@ class VerseController:
                 pass
 
 # ========== HYBRID VERSE DETECTOR ==========
-def detect_verse_hybrid(text, controller):
+def detect_verse_hybrid(text, controller) -> bool:
     global current_book, current_chapter, current_verse
     if not text or len(text.strip()) < 3:
-        return
+        return False
     try:
-        check_verse_queue(text, controller)
+        if check_verse_queue(text, controller):
+            return True
 
         refs = PRIMARY_PARSER(text)
         if refs:
@@ -425,7 +425,7 @@ def detect_verse_hybrid(text, controller):
             logger.info(f"🔍 PARSER: {verse}")
             controller.send_verse(verse)
             _check_and_queue_range(text, verse, controller)
-            return
+            return True
 
         num_norm = normalize_numbers_only(text)
 
@@ -435,21 +435,21 @@ def detect_verse_hybrid(text, controller):
             logger.info(f"🔍 CONTEXTUAL: {ref}")
             controller.send_verse(ref)
             _check_and_queue_range(num_norm, ref, controller)
-            return
+            return True
 
         m_hi = re.search(r"वचन\s+(\d+)", text)
         if m_hi and current_book and current_chapter:
             ref = f"{current_book} {current_chapter}:{m_hi.group(1)}"
             logger.info(f"🔍 HINDI CTX: {ref}")
             controller.send_verse(ref)
-            return
+            return True
 
         m_ml = re.search(r"വാക്യം\s+(\d+)", text)
         if m_ml and current_book and current_chapter:
             ref = f"{current_book} {current_chapter}:{m_ml.group(1)}"
             logger.info(f"🔍 MALAYALAM CTX: {ref}")
             controller.send_verse(ref)
-            return
+            return True
 
         if current_book and current_chapter and current_verse:
             m_num = re.search(r"\b(\d{1,3})\b", text)
@@ -460,7 +460,7 @@ def detect_verse_hybrid(text, controller):
                         ref = f"{current_book} {current_chapter}:{candidate}"
                         logger.info(f"🔍 SEQUENTIAL: {ref}")
                         controller.send_verse(ref)
-                        return
+                        return True
                 except ValueError:
                     pass
 
@@ -479,7 +479,7 @@ def detect_verse_hybrid(text, controller):
                         logger.info(f"🔍 RANGE: {ref_start} → {end_v}")
                         controller.send_verse(ref_start)
                         queue_verse_range(current_book, current_chapter, start_v, end_v, controller)
-                        return
+                        return True
 
         m_simple = re.search(
             r'\b((?:[123]\s+)?(?:' + '|'.join(BOOK_KEYWORDS[:40]) + r'))\s+(\d{1,3})\b',
@@ -489,16 +489,16 @@ def detect_verse_hybrid(text, controller):
             ref = f"{m_simple.group(1).strip().title()} {m_simple.group(2)}"
             logger.info(f"🔍 SIMPLE: {ref}")
             controller.send_verse(ref)
-            return
+            return True
 
         if not LLM_ENABLED:
-            return
+            return False
 
         text_lower = text.lower()
         has_book   = any(kw in text_lower or kw in text for kw in BOOK_KEYWORDS)
         has_number = bool(re.search(r'\b\d+\b', text)) or any(w in text_lower for w in NUMBER_WORDS)
         if not (has_book and has_number):
-            return
+            return False
 
         logger.info(f"📞 LLM: '{text[:80]}'")
 
@@ -509,9 +509,11 @@ def detect_verse_hybrid(text, controller):
                 _check_and_queue_range(text, verse, controller)
 
         threading.Thread(target=llm_task, daemon=True).start()
+        return True
 
     except Exception as e:
         logger.error(f"Parse error: {e}")
+        return False
 
 # ========== DEEPGRAM STREAMING ==========
 async def stream_audio(controller):
@@ -573,7 +575,7 @@ async def stream_audio(controller):
                         try:
                             data     = json.loads(msg)
 
-                            # Skip non-Results messages
+                            # Skip non-Results messages (UtteranceEnd, Metadata, etc.)
                             msg_type = data.get("type", "Results")
                             if msg_type != "Results":
                                 continue
@@ -599,12 +601,16 @@ async def stream_audio(controller):
 
                                 # Accumulate context so split sentences still match
                                 partial_context = (partial_context + " " + sentence).strip()
-                                detect_verse_hybrid(partial_context, controller)
+                                found = detect_verse_hybrid(partial_context, controller)
 
-                                # Keep only last 15 words to avoid stale matches
-                                words = partial_context.split()
-                                if len(words) > 30:
-                                    partial_context = " ".join(words[-15:])
+                                if found:
+                                    # Clear after a hit so old refs don't keep re-triggering
+                                    partial_context = ""
+                                else:
+                                    # Keep last 15 words if no match yet
+                                    words = partial_context.split()
+                                    if len(words) > 30:
+                                        partial_context = " ".join(words[-15:])
 
                         except Exception as e:
                             logger.error(f"Recv error: {e}")
@@ -612,7 +618,6 @@ async def stream_audio(controller):
                     pass
                 except Exception as e:
                     logger.warning(f"WebSocket closed: {e}")
-
 
             sender   = asyncio.create_task(send_audio())
             receiver = asyncio.create_task(recv_transcripts())
@@ -634,7 +639,6 @@ async def stream_audio(controller):
             stream.stop_stream()
             stream.close()
         audio.terminate()
-
 
 # ========== SARVAM STREAMING ==========
 async def stream_audio_sarvam(controller):
