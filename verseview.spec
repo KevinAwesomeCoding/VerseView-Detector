@@ -17,21 +17,33 @@ a = Analysis(
         'websockets.legacy',
         'websockets.legacy.client',
         'selenium',
+        'selenium.webdriver',
+        'selenium.webdriver.chrome',
+        'selenium.webdriver.chrome.options',        # ← add
+        'selenium.webdriver.chrome.service',        # ← add
+        'selenium.webdriver.chrome.webdriver',      # ← add
+        'selenium.webdriver.common.by',             # ← add
+        'selenium.webdriver.common.keys',           # ← add
+        'selenium.webdriver.support.ui',            # ← add
+        'selenium.webdriver.support.expected_conditions',  # ← add
+        'selenium.webdriver.remote.webdriver',      # ← add
+        'selenium.webdriver.remote.webelement',     # ← add
         'webdriver_manager',
         'webdriver_manager.chrome',
         'certifi',
         'openai',
-        'bible_fetcher',
         'requests',
         'vv_streaming_master',
         'parse_reference_eng',
         'parse_reference_hindi',
         'parse_reference_ml',
+        'bible_fetcher',
         'wave',
         'base64',
         'io',
         'unicodedata',
     ],
+
     hookspath=[],
     runtime_hooks=[],
     excludes=[],
