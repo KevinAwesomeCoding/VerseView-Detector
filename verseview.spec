@@ -34,5 +34,41 @@ a = Analysis(
     hookspath=[],
     runtime_hooks=[],
     excludes=[],
+    win_no_prefer_redirects=False,
+    win_private_assemblies=False,
     cipher=block_cipher,
-    no
+    noarchive=False,
+)
+
+pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
+
+exe = EXE(
+    pyz,
+    a.scripts,
+    a.binaries,
+    a.zipfiles,
+    a.datas,
+    [],
+    name='VerseView',
+    debug=False,
+    bootloader_ignore_signals=False,
+    strip=False,
+    upx=True,
+    upx_exclude=[],
+    runtime_tmpdir=None,
+    console=False,
+    icon=None,
+)
+
+# Mac .app bundle
+if sys.platform == 'darwin':
+    app = BUNDLE(
+        exe,
+        name='VerseView.app',
+        icon=None,
+        bundle_identifier='com.verseview.app',
+        info_plist={
+            'NSMicrophoneUsageDescription': 'VerseView needs microphone access for live transcription.',
+            'LSMinimumSystemVersion': '11.0',
+        },
+    )
