@@ -72,6 +72,7 @@ exe = EXE(
     runtime_tmpdir=None,
     console=False,
     icon=None,
+    target_arch='universal2',
 )
 
 if sys.platform == 'darwin':
