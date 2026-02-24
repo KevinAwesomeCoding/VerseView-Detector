@@ -102,7 +102,6 @@ jobs:
           python -m pip install --upgrade pip
           pip install pyaudio
           pip install -r requirements.txt
-          pip install --upgrade --force-reinstall "deepgram-sdk>=3.0.0"
           pip install pyinstaller
 
       - name: Build .app
@@ -111,22 +110,15 @@ jobs:
       - name: Ad-hoc sign
         run: codesign --force --deep --sign - "dist/VerseView Detector.app"
 
-      - name: Package as DMG
-        run: |
-          brew install create-dmg
-          create-dmg \
-            --volname "VerseView Detector" \
-            --window-size 600 400 \
-            --icon-size 120 \
-            --app-drop-link 450 185 \
-            "dist/VerseView Detector Intel.dmg" \
-            "dist/VerseView Detector.app"
+      - name: Zip .app
+        run: zip -r "dist/VerseView Detector Intel.zip" "dist/VerseView Detector.app"
 
       - name: Upload Mac Intel artifact
         uses: actions/upload-artifact@v4
         with:
           name: VerseView-Detector-Mac-Intel
-          path: "dist/VerseView Detector Intel.dmg"
+          path: "dist/VerseView Detector Intel.zip"
+
 
   release:
     needs: [build-windows, build-mac, build-mac-intel]
