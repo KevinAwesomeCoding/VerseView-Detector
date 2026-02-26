@@ -230,6 +230,8 @@ class VerseViewApp(ctk.CTk):
             font=ctk.CTkFont(size=10)
         ).grid(row=1, column=0, columnspan=2, pady=(0, 4), sticky="e", padx=12)
 
+        self.after(2000, self._refresh_context)
+
     def _build_advanced(self):
         fields = [
             ("Sample Rate",      "16000", "rate_entry"),
@@ -289,6 +291,8 @@ class VerseViewApp(ctk.CTk):
         else:
             self.adv_frame.grid_forget()
             self.btn_adv.configure(text="▶   Advanced Settings")
+    
+    
 
     # ─────────────────────────────────────────────────
     # SETTINGS PERSISTENCE
@@ -296,7 +300,7 @@ class VerseViewApp(ctk.CTk):
     def _load_into_ui(self):
         s = self._s
         self.lang_var.set(s.get("language", "English (Nova-2)"))
-        self.bible_var.set(s.get("bible_translation", "KJV").upper())
+        self.bible_var.set(s.get("bible_translation", "WEB").upper())
         self.url_entry.delete(0, "end")
         self.url_entry.insert(0, s.get("remote_url", "http://localhost:50010/control.html"))
 
@@ -370,25 +374,24 @@ class VerseViewApp(ctk.CTk):
         )
 
     def _refresh_context(self):
-        # Don't overwrite if user is actively typing in context fields
         focused = self.focus_get()
-        if focused in (self.ctx_book, self.ctx_chapter, self.ctx_verse):
-            if self._running:
-                self.after(2000, self._refresh_context)
-            return
 
-        ctx = engine.get_context()
-        if ctx["book"]:
-            self.ctx_book.delete(0, "end")
-            self.ctx_book.insert(0, ctx["book"])
-        if ctx["chapter"]:
-            self.ctx_chapter.delete(0, "end")
-            self.ctx_chapter.insert(0, ctx["chapter"])
-        if ctx["verse"]:
-            self.ctx_verse.delete(0, "end")
-            self.ctx_verse.insert(0, ctx["verse"])
-        if self._running:
-            self.after(2000, self._refresh_context)
+        def is_inside(widget):
+            try:
+                f = str(focused)
+                return str(widget) in f or f.startswith(str(widget))
+            except:
+                return False
+
+        if not (is_inside(self.ctx_book) or is_inside(self.ctx_chapter) or is_inside(self.ctx_verse)):
+            self.ctx_book.configure(placeholder_text=engine.current_book or "e.g. John")
+            self.ctx_chapter.configure(placeholder_text=engine.current_chapter or "e.g. 3")
+            self.ctx_verse.configure(placeholder_text=engine.current_verse or "e.g. 16")
+
+        self.after(2000, self._refresh_context)
+
+
+
 
 
     # ─────────────────────────────────────────────────

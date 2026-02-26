@@ -52,9 +52,9 @@ NUMBER_MAP = {
 
 def convert_word_numbers(text):
     text = text.replace("-", " ")
-    parts = text.split("  ")
+    words = text.split()
     converted_parts = []
-    for part in parts:
+    for part in words:
         words = part.split()
         result = []
         i = 0
@@ -76,7 +76,7 @@ def convert_word_numbers(text):
                     result.append(str(fv + sv))
                     i += 2
                     continue
-            result.append(NUMBER_MAP[w] if w in NUMBER_MAP else w)
+            result.append(str(NUMBER_MAP[w]) if w in NUMBER_MAP else w)
             i += 1
         converted_parts.append(" ".join(result))
     return "  ".join(converted_parts)
