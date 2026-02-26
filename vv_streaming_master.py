@@ -17,10 +17,10 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.chrome import ChromeDriverManager
 
-from parse_reference_eng  import parse_references as parse_eng, normalize_text as normalize_eng, normalize_numbers_only
-from parse_reference_hindi import parse_references as parse_hindi
-from parse_reference_ml   import parse_references as parse_ml
-from bible_fetcher        import fetch_verse as multi_fetch
+from parse_reference_eng   import parse_references as parse_eng, normalize_numbers_only as norm_eng
+from parse_reference_hindi import parse_references as parse_hindi, normalize_numbers_only as norm_hindi
+from parse_reference_ml    import parse_references as parse_ml, normalize_numbers_only as norm_ml
+from bible_fetcher         import fetch_verse as multi_fetch
 
 # ── LOGGING ──
 logging.basicConfig(
@@ -95,25 +95,33 @@ def configure(
     LLM_ENABLED   = llm_enabled
     BIBLE_TRANSLATION = bible_translation
 
+    global normalize_numbers_only
     if language == "en":
         USE_SARVAM        = False
         DEEPGRAM_LANGUAGE = "en"
         DEEPGRAM_MODEL    = "nova-2"
         PRIMARY_PARSER    = parse_eng
+        normalize_numbers_only = norm_eng
+        
     elif language == "hi":
         USE_SARVAM        = False
         DEEPGRAM_LANGUAGE = "hi"
         DEEPGRAM_MODEL    = "nova-3"
         PRIMARY_PARSER    = parse_hindi
+        normalize_numbers_only = norm_hindi
+        
     elif language == "ml":
         USE_SARVAM        = True
         SARVAM_LANGUAGE   = "ml-IN"
         PRIMARY_PARSER    = parse_ml
+        normalize_numbers_only = norm_ml
+        
     else:
         USE_SARVAM        = False
         DEEPGRAM_LANGUAGE = "multi"
         DEEPGRAM_MODEL    = "nova-2"
         PRIMARY_PARSER    = parse_eng
+        normalize_numbers_only = norm_eng
 
 # ── CONTEXT TRACKING ──
 current_book    = None
