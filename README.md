@@ -7,6 +7,7 @@ Copy and paste this command and hit Enter (it might ask for their Mac password):
 Bash
 
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+
 When that finishes, copy and paste this and hit Enter:
 
 Bash
@@ -48,4 +49,5 @@ Run this final command:
 Bash
 
 pyinstaller verseview.spec
+
 
