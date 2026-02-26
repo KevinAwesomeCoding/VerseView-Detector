@@ -370,6 +370,13 @@ class VerseViewApp(ctk.CTk):
         )
 
     def _refresh_context(self):
+        # Don't overwrite if user is actively typing in context fields
+        focused = self.focus_get()
+        if focused in (self.ctx_book, self.ctx_chapter, self.ctx_verse):
+            if self._running:
+                self.after(2000, self._refresh_context)
+            return
+
         ctx = engine.get_context()
         if ctx["book"]:
             self.ctx_book.delete(0, "end")
@@ -382,6 +389,7 @@ class VerseViewApp(ctk.CTk):
             self.ctx_verse.insert(0, ctx["verse"])
         if self._running:
             self.after(2000, self._refresh_context)
+
 
     # ─────────────────────────────────────────────────
     # MIC ENUMERATION
