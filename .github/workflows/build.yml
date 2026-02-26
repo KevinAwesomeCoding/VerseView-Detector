@@ -26,7 +26,6 @@ jobs:
           python -m pip install --upgrade pip
           pip install pyaudio
           pip install -r requirements.txt
-          pip install "deepgram-sdk>=3.0.0"
           pip install pyinstaller
 
       - name: Build EXE
@@ -57,32 +56,28 @@ jobs:
           python -m pip install --upgrade pip
           pip install pyaudio
           pip install -r requirements.txt
-          pip install "deepgram-sdk>=3.0.0"
           pip install pyinstaller
 
       - name: Build .app
         run: pyinstaller verseview.spec
 
-      - name: Package as DMG
-        run: |
-          brew install create-dmg
-          create-dmg \
-            --volname "VerseView Detector" \
-            --window-size 600 400 \
-            --icon-size 120 \
-            --app-drop-link 450 185 \
-            "dist/VerseView Detector.dmg" \
-            "dist/VerseView Detector.app"
+      - name: Ad-hoc sign
+        run: codesign --force --deep --sign - "dist/VerseView Detector.app"
+
+      - name: Zip .app
+        run: zip -r "dist/VerseView Detector.zip" "dist/VerseView Detector.app"
 
       - name: Upload Mac artifact
         uses: actions/upload-artifact@v4
         with:
           name: VerseView-Detector-Mac
-          path: "dist/VerseView Detector.dmg"
+          path: "dist/VerseView Detector.zip"
 
   release:
     needs: [build-windows, build-mac]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Download Windows build
         uses: actions/download-artifact@v4
@@ -96,7 +91,7 @@ jobs:
           name: VerseView-Detector-Mac
           path: ./mac
 
-      - name: Get short commit SHA
+      - name: Get short SHA
         id: sha
         run: echo "short=$(echo $GITHUB_SHA | cut -c1-7)" >> $GITHUB_OUTPUT
 
@@ -104,16 +99,16 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          tag_name: build-${{ steps.sha.outputs.short }}
+          tag_name: build-${{ steps.sha.outputs.short }}-${{ github.run_number }}
           name: VerseView Detector Build ${{ steps.sha.outputs.short }}
           body: |
             Automated build from commit `${{ github.sha }}`
 
-            **Download for your platform below:**
+            **Download for your platform:**
             - `VerseView Detector.exe` → Windows
-            - `VerseView Detector.dmg` → Mac
+            - `VerseView Detector.zip` → Mac (Apple Silicon M1/M2/M3 only)
           files: |
             ./windows/VerseView Detector.exe
-            ./mac/VerseView Detector.dmg
+            ./mac/VerseView Detector.zip
           draft: false
           prerelease: false
