@@ -12,6 +12,7 @@ When that finishes, copy and paste this and hit Enter:
 Bash
 
 brew install portaudio
+
 Step 2: Set up the project folder
 Type cd  (make sure there is a space after "cd").
 
@@ -22,6 +23,7 @@ Run this command to create a safe workspace:
 Bash
 
 python3 -m venv venv
+
 Turn the workspace on:
 
 Bash
@@ -35,12 +37,15 @@ Copy and paste these two commands, hitting Enter after each:
 Bash
 
 pip install -r requirements.txt
+
 Bash
 
 pip install pyinstaller
 Step 4: Build the App!
+
 Run this final command:
 
 Bash
 
 pyinstaller verseview.spec
+
