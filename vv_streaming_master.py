@@ -758,8 +758,6 @@ async def stream_audio(controller):
 # ── SARVAM STREAMING ──
 async def stream_audio_sarvam(controller):
     import base64
-    import wave
-    import io
     from sarvamai import AsyncSarvamAI
 
     audio  = pyaudio.PyAudio()
@@ -778,15 +776,6 @@ async def stream_audio_sarvam(controller):
         logger.error(f"Microphone error: {e}")
         return
 
-    def make_wav(pcm_data: bytes) -> str:
-        buf = io.BytesIO()
-        with wave.open(buf, "wb") as wf:
-            wf.setnchannels(1)
-            wf.setsampwidth(2)
-            wf.setframerate(RATE)
-            wf.writeframes(pcm_data)
-        return base64.b64encode(buf.getvalue()).decode("utf-8")
-
     def read_chunk_blocking():
         frames = []
         for _ in range(max(1, int(RATE * 0.5 / CHUNK))):
@@ -798,11 +787,15 @@ async def stream_audio_sarvam(controller):
         client = AsyncSarvamAI(api_subscription_key=SARVAM_API_KEY)
         loop   = asyncio.get_event_loop()
 
+        # Tell server to expect RAW PCM, and TURN OFF aggressive VAD
         async with client.speech_to_text_streaming.connect(
-            model="saaras:v3", mode="transcribe",
+            model="saaras:v3", 
+            mode="transcribe",
             language_code=SARVAM_LANGUAGE,
             sample_rate=RATE,
-            high_vad_sensitivity=True, vad_signals=True
+            high_vad_sensitivity=False,
+            vad_signals=False,
+            input_audio_codec="pcm_s16le" 
         ) as ws:
             logger.info(f"Sarvam AI connected — {SARVAM_LANGUAGE} saaras:v3")
 
@@ -810,8 +803,12 @@ async def stream_audio_sarvam(controller):
                 try:
                     while not stop_event.is_set():
                         pcm_data = await loop.run_in_executor(None, read_chunk_blocking)
-                        wav_b64  = make_wav(pcm_data)
-                        await ws.transcribe(audio=wav_b64, encoding="audio/wav", sample_rate=RATE)
+                        
+                        # Base64 encode the RAW bytes (NO WAV HEADERS)
+                        pcm_b64 = base64.b64encode(pcm_data).decode("utf-8")
+                        
+                        # Send WITHOUT the encoding parameter to bypass the Pydantic bug
+                        await ws.transcribe(audio=pcm_b64)
                 except asyncio.CancelledError:
                     pass
                 except Exception as e:
@@ -821,16 +818,24 @@ async def stream_audio_sarvam(controller):
                 try:
                     async for message in ws:
                         try:
-                            sentence = (
-                                getattr(message, "transcript", None) or
-                                getattr(message, "text", None) or ""
-                            ).strip()
-                            if sentence:
+                            # Safely extract the transcript from the wrapper
+                            if isinstance(message, dict):
+                                sentence = message.get("transcript", message.get("text", ""))
+                            else:
+                                # Look inside the .data object if it exists
+                                if hasattr(message, "data"):
+                                    sentence = getattr(message.data, "transcript", "")
+                                else:
+                                    sentence = getattr(message, "transcript", getattr(message, "text", ""))
+                                
+                            sentence = str(sentence).strip()
+                            
+                            if sentence and sentence != "None":
                                 logger.info(f"📝 TRANSCRIPT: {sentence}")
                                 check_verse_queue(sentence, controller)
                                 detect_verse_hybrid(sentence, controller)
                         except Exception as e:
-                            logger.error(f"Sarvam recv error: {e}")
+                            logger.error(f"Sarvam message parsing error: {e}")
                 except asyncio.CancelledError:
                     pass
                 except Exception as e:
