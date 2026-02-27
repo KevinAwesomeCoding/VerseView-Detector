@@ -362,16 +362,35 @@ class VerseViewApp(ctk.CTk):
     # ─────────────────────────────────────────────────
     # CONTEXT
     # ─────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────
+    # CONTEXT
+    # ─────────────────────────────────────────────────
     def _set_context(self):
-        engine.set_context(
-            self.ctx_book.get(),
-            self.ctx_chapter.get(),
-            self.ctx_verse.get(),
-        )
-        self._append_log(
-            f"📌 Context set: {self.ctx_book.get()} "
-            f"{self.ctx_chapter.get()}:{self.ctx_verse.get()}"
-        )
+        # 1. Get what the user actually typed
+        typed_book = self.ctx_book.get().strip()
+        typed_chapter = self.ctx_chapter.get().strip()
+        typed_verse = self.ctx_verse.get().strip()
+
+        # 2. If a box is empty, fallback to the current engine context!
+        final_book = typed_book if typed_book else engine.current_book
+        final_chapter = typed_chapter if typed_chapter else engine.current_chapter
+        final_verse = typed_verse if typed_verse else engine.current_verse
+
+        # 3. Handle cases where there might not be any context yet
+        final_book = final_book or ""
+        final_chapter = final_chapter or ""
+        final_verse = final_verse or ""
+
+        # 4. Update the engine with the combined context
+        engine.set_context(final_book, final_chapter, final_verse)
+
+        # 5. Clear the input boxes so the shiny new placeholders show up immediately
+        self.ctx_book.delete(0, "end")
+        self.ctx_chapter.delete(0, "end")
+        self.ctx_verse.delete(0, "end")
+
+        # 6. Log the successful update
+        self._append_log(f"📌 Context updated: {final_book} {final_chapter}:{final_verse}")
 
     def _refresh_context(self):
         focused = self.focus_get()
