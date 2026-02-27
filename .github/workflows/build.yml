@@ -35,7 +35,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: VerseView-Detector-Windows
-          path: "dist/VerseView Detector.exe"
+          path: "dist/VerseView_Detector.exe"
 
   build-mac:
     runs-on: macos-latest
@@ -105,10 +105,10 @@ jobs:
             Automated build from commit `${{ github.sha }}`
 
             **Download for your platform:**
-            - `VerseView Detector.exe` → Windows
+            - `VerseView_Detector.exe` → Windows
             - `VerseView Detector.zip` → Mac (Apple Silicon M1/M2/M3 only)
           files: |
-            ./windows/VerseView Detector.exe
+            ./windows/VerseView_Detector.exe
             ./mac/VerseView Detector.zip
           draft: false
           prerelease: false

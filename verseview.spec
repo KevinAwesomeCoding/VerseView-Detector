@@ -15,17 +15,12 @@ datas += [
     ('parse_reference_ml.py', '.'),
 ]
 
-# 2. Platform Specific Paths
+# 2. Platform Specific Paths (Mac Tcl/Tk logic)
 if sys.platform == 'darwin':
-    # Mac Tcl/Tk logic
     tcl_lib = '/usr/local/opt/tcl-tk/lib/tcl8.6'
     tk_lib = '/usr/local/opt/tcl-tk/lib/tk8.6'
     if os.path.exists(tcl_lib):
         datas += [(tcl_lib, 'tcl'), (tk_lib, 'tk')]
-elif sys.platform == 'win32':
-    # Windows usually bundles Tcl/Tk automatically, 
-    # but we ensure the hidden imports cover it.
-    pass
 
 a = Analysis(
     ['vv_gui.py'],
@@ -38,7 +33,7 @@ a = Analysis(
         'websockets.legacy.client', 
         'selenium', 
         'webdriver_manager',
-        'sarvamai' # Ensure Sarvam is included if using it
+        'sarvamai'
     ],
     hookspath=[],
     runtime_hooks=[],
@@ -51,14 +46,16 @@ a = Analysis(
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
-# Changed to ONEFILE for easier distribution on Windows
+# 3. Create the Executable
+# Notice: name='VerseView_Detector' (with underscore)
+# By passing a.binaries and a.datas here, Windows builds as a SINGLE .exe file.
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,  # Included for OneFile
-    a.zipfiles,  # Included for OneFile
-    a.datas,     # Included for OneFile
-    name='VerseView_Detector', # No spaces makes CLI life easier
+    a.binaries,
+    a.zipfiles,
+    a.datas,
+    name='VerseView_Detector', 
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -73,10 +70,21 @@ exe = EXE(
     entitlements_file=None,
 )
 
-# Mac Specific Bundle
+# 4. Create the Mac App Bundle (Mac Only)
 if sys.platform == 'darwin':
-    app = BUNDLE(
+    coll = COLLECT(
         exe,
+        a.binaries,
+        a.zipfiles,
+        a.datas,
+        strip=False,
+        upx=True,
+        upx_exclude=[],
+        name='VerseView Detector',
+    )
+
+    app = BUNDLE(
+        coll,
         name='VerseView Detector.app',
         icon=None,
         bundle_identifier='com.verseview.detector',
