@@ -37,7 +37,7 @@ jobs:
           name: VerseView-Detector-Windows
           path: "dist/VerseView_Detector.exe"
 
-  build-mac:
+  build-mac-silicon:
     runs-on: macos-latest
     steps:
       - name: Checkout
@@ -65,16 +65,52 @@ jobs:
         run: codesign --force --deep --sign - "dist/VerseView Detector.app"
 
       - name: Zip .app
-        run: zip -r "dist/VerseView Detector.zip" "dist/VerseView Detector.app"
+        run: zip -r "dist/VerseView_Detector_Silicon.zip" "dist/VerseView Detector.app"
 
       - name: Upload Mac artifact
         uses: actions/upload-artifact@v4
         with:
-          name: VerseView-Detector-Mac
-          path: "dist/VerseView Detector.zip"
+          name: VerseView-Detector-Mac-Silicon
+          path: "dist/VerseView_Detector_Silicon.zip"
+
+  build-mac-intel:
+    runs-on: macos-15-intel
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install PortAudio
+        run: brew install portaudio
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyaudio
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build .app
+        run: pyinstaller verseview.spec
+
+      - name: Ad-hoc sign
+        run: codesign --force --deep --sign - "dist/VerseView Detector.app"
+
+      - name: Zip .app
+        run: zip -r "dist/VerseView_Detector_Intel.zip" "dist/VerseView Detector.app"
+
+      - name: Upload Mac artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: VerseView-Detector-Mac-Intel
+          path: "dist/VerseView_Detector_Intel.zip"
 
   release:
-    needs: [build-windows, build-mac]
+    needs: [build-windows, build-mac-silicon, build-mac-intel]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -83,13 +119,19 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: VerseView-Detector-Windows
-          path: ./windows
+          path: ./artifacts
 
-      - name: Download Mac build
+      - name: Download Mac Silicon build
         uses: actions/download-artifact@v4
         with:
-          name: VerseView-Detector-Mac
-          path: ./mac
+          name: VerseView-Detector-Mac-Silicon
+          path: ./artifacts
+
+      - name: Download Mac Intel build
+        uses: actions/download-artifact@v4
+        with:
+          name: VerseView-Detector-Mac-Intel
+          path: ./artifacts
 
       - name: Get short SHA
         id: sha
@@ -106,9 +148,11 @@ jobs:
 
             **Download for your platform:**
             - `VerseView_Detector.exe` → Windows
-            - `VerseView Detector.zip` → Mac (Apple Silicon M1/M2/M3 only)
+            - `VerseView_Detector_Silicon.zip` → Mac (Apple Silicon M1/M2/M3)
+            - `VerseView_Detector_Intel.zip` → Mac (Older Intel Macs)
           files: |
-            ./windows/VerseView_Detector.exe
-            ./mac/VerseView Detector.zip
+            ./artifacts/VerseView_Detector.exe
+            ./artifacts/VerseView_Detector_Silicon.zip
+            ./artifacts/VerseView_Detector_Intel.zip
           draft: false
           prerelease: false
