@@ -50,11 +50,11 @@ LLM_ENABLED       = True
 LLM_CALL_COUNT    = 0
 BIBLE_TRANSLATION = "web"
 DEEPGRAM_API_KEY  = ""
-OPENROUTER_API_KEY = ""
+GROQ_API_KEY = ""
 DISCORD_WEBHOOK_URL = ""
 SARVAM_API_KEY    = ""
 
-llm_client = openai.OpenAI(base_url="https://openrouter.ai/api/v1", api_key=OPENROUTER_API_KEY)
+llm_client = openai.OpenAI(base_url="https://api.groq.com/openai/v1", api_key=GROQ_API_KEY)
 
 # ── STOP MECHANISM ──
 stop_event   = None
@@ -71,19 +71,19 @@ def configure(
     remote_url="http://localhost:50010/control.html",
     dedup_window=60, cooldown=3.0, llm_enabled=True,
     bible_translation="kjv", deepgram_api_key="",
-    openrouter_api_key="", sarvam_api_key="",
+    groq_api_key="", sarvam_api_key="",
     discord_webhook_url=""
 ):
-    global DEEPGRAM_API_KEY, OPENROUTER_API_KEY, SARVAM_API_KEY, DISCORD_WEBHOOK_URL
+    global DEEPGRAM_API_KEY, GROQ_API_KEY, SARVAM_API_KEY, DISCORD_WEBHOOK_URL
     global USE_SARVAM, DEEPGRAM_LANGUAGE, DEEPGRAM_MODEL, SARVAM_LANGUAGE
     global PRIMARY_PARSER, MIC_INDEX, RATE, CHUNK, REMOTE_URL
     global DEDUP_WINDOW, COOLDOWN, LLM_ENABLED, BIBLE_TRANSLATION, USE_XPATH, llm_client
 
     DEEPGRAM_API_KEY    = deepgram_api_key
-    OPENROUTER_API_KEY  = openrouter_api_key
+    GROQ_API_KEY  = groq_api_key
     SARVAM_API_KEY      = sarvam_api_key
     DISCORD_WEBHOOK_URL = discord_webhook_url
-    llm_client = openai.OpenAI(base_url="https://openrouter.ai/api/v1", api_key=OPENROUTER_API_KEY)
+    llm_client = openai.OpenAI(base_url="https://api.groq.com/openai/v1", api_key=GROQ_API_KEY)
 
     USE_XPATH     = sys.platform == "darwin"
     MIC_INDEX     = mic_index
@@ -334,16 +334,21 @@ def send_to_discord(verse: str):
 # ── LLM FALLBACK ──
 def extract_verse_with_llm(text):
     global LLM_CALL_COUNT
+    
+    context_hint = ""
+    if current_book and current_chapter:
+        context_hint = f"\nContext: The speaker is currently reading from {current_book} chapter {current_chapter}."
+
     try:
         LLM_CALL_COUNT += 1
         response = llm_client.chat.completions.create(
-            model="openrouter/auto",
+            model="llama-3.1-8b-instant",
             messages=[{
                 "role": "user",
                 "content": (
                     f"Extract the Bible verse reference from this text. "
                     f"Return ONLY in format Book Chapter:Verse (e.g., John 3:16). "
-                    f"If no verse found, return exactly NONE.\nText: {text}"
+                    f"If no verse found, return exactly NONE.{context_hint}\nText: {text}"
                 )
             }]
         )
@@ -506,44 +511,60 @@ def detect_verse_hybrid(text, controller) -> bool:
         if check_verse_queue(text, controller):
             return True
             
-        # Layer 0.5 — check onwards auto-advance
         if _check_onwards_advance(text, controller):
             return True
-
-        # Layer 1 — parser
-        refs = PRIMARY_PARSER(text)
-        if refs:
-            verse = refs[0]
-            logger.info(f"🔍 PARSER: {verse}")
-            controller.send_verse(verse)
-            
-            trigger_onwards_if_needed(verse, text)
-            
-            if ":" in verse:
-                check_and_queue_range(text, verse, controller)
-            return True
-
+        
         num_norm = normalize_numbers_only(text)
         
-        # 🔧 FIX: Re-combine tens and units that were split (e.g., "40 4" -> "44")
         num_norm = re.sub(
             r'\b(20|30|40|50|60|70|80|90)\s+([1-9])\b', 
             lambda m: str(int(m.group(1)) + int(m.group(2))), 
             num_norm
         )
 
+        # Layer 1 — parser
+        refs = PRIMARY_PARSER(text)
+        if refs:
+            verse = refs[0]
+            
+            is_blocked = False
+            if ":" not in verse:
+                chap_num = verse.split()[-1]
+                blockers = ["days", "weeks", "months", "years", "minutes", "hours", "people", "men", "women", "points", "dollars"]
+                # If the chapter number is followed by a blocker word in num_norm, block it atp...
+                if any(re.search(rf'\b{chap_num}\s+{b}\b', num_norm) for b in blockers):
+                    logger.info(f"🚫 BLOCKED Layer 1 False Positive: {verse} (Time/People phrase)")
+                    is_blocked = True
+            
+            if not is_blocked:
+                logger.info(f"🔍 PARSER: {verse}")
+                controller.send_verse(verse)
+                
+                trigger_onwards_if_needed(verse, text)
+                
+                if ":" in verse:
+                    check_and_queue_range(text, verse, controller)
+                return True
+
         # Layer 2 — contextual (number only, same book/chapter)
         m = re.search(r'\b(\d+)\b', num_norm)
         if m and current_book and current_chapter:
-            text_after = num_norm[m.end():].strip().lower()
-            blockers = [
-                "verses", "points", "things", "bibles", "dollars", "days", 
-                "weeks", "months", "years", "minutes", "hours", "times", 
-                "people", "men", "women", "students", "countries", 
-                "churches", "teams"
-            ]
-            if not any(text_after.startswith(b) for b in blockers):
-                ref = f"{current_book} {current_chapter}:{m.group(1)}"
+            candidate = m.group(1)
+            text_lower = num_norm.lower()
+            
+            is_valid = False
+            
+            if len(text.split()) <= 2:
+                is_valid = True
+
+            elif re.search(r'\b(?:verse|verses|v|vs)\s+' + candidate + r'\b', text_lower):
+                is_valid = True
+
+            elif any(kw in text_lower for kw in ["വാക്യം", "വചനം", "വചന", "वचन", "पद"]):
+                is_valid = True
+                
+            if is_valid:
+                ref = f"{current_book} {current_chapter}:{candidate}"
                 logger.info(f"🔍 CONTEXTUAL: {ref}")
                 controller.send_verse(ref)
                 
@@ -551,7 +572,7 @@ def detect_verse_hybrid(text, controller) -> bool:
                 check_and_queue_range(num_norm, ref, controller)
                 return True
 
-        # Layer 3 — Hindi contextual
+       # Layer 3 — Hindi contextual
         m_hi = re.search(r'([\u0966-\u096F]+)', text)
         if m_hi and current_book and current_chapter:
             ref = f"{current_book} {current_chapter}:{m_hi.group(1)}"

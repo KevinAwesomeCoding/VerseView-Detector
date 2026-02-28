@@ -267,7 +267,7 @@ class VerseViewApp(ctk.CTk):
 
         key_fields = [
             ("Deepgram Key",        "dg_key_entry"),
-            ("OpenRouter Key",      "or_key_entry"),
+            ("Groq API Key",      "or_key_entry"),
             ("Sarvam Key",          "sv_key_entry"),
             ("Discord Webhook URL", "dc_key_entry"),
         ]
@@ -312,7 +312,7 @@ class VerseViewApp(ctk.CTk):
 
         for attr, key in [
             ("dg_key_entry", "deepgram_api_key"),
-            ("or_key_entry", "openrouter_api_key"),
+            ("or_key_entry", "groq_api_key"),
             ("sv_key_entry", "sarvam_api_key"),
             ("dc_key_entry", "discord_webhook_url"),
         ]:
@@ -331,7 +331,7 @@ class VerseViewApp(ctk.CTk):
             "dedup_window":        self._safe_int(self.dedup_entry,      60),
             "llm_enabled":         self.llm_var.get() == "Enabled",
             "deepgram_api_key":    self.dg_key_entry.get(),
-            "openrouter_api_key":  self.or_key_entry.get(),
+            "groq_api_key":  self.or_key_entry.get(),
             "sarvam_api_key":      self.sv_key_entry.get(),
             "discord_webhook_url": self.dc_key_entry.get(),
             "mic_index":           self._mic_index(),
@@ -362,29 +362,21 @@ class VerseViewApp(ctk.CTk):
     # ─────────────────────────────────────────────────
     # CONTEXT
     # ─────────────────────────────────────────────────
-    # ─────────────────────────────────────────────────
-    # CONTEXT
-    # ─────────────────────────────────────────────────
     def _set_context(self):
-        # 1. Get what the user actually typed
         typed_book = self.ctx_book.get().strip()
         typed_chapter = self.ctx_chapter.get().strip()
         typed_verse = self.ctx_verse.get().strip()
 
-        # 2. If a box is empty, fallback to the current engine context!
         final_book = typed_book if typed_book else engine.current_book
         final_chapter = typed_chapter if typed_chapter else engine.current_chapter
         final_verse = typed_verse if typed_verse else engine.current_verse
 
-        # 3. Handle cases where there might not be any context yet
         final_book = final_book or ""
         final_chapter = final_chapter or ""
         final_verse = final_verse or ""
 
-        # 4. Update the engine with the combined context
         engine.set_context(final_book, final_chapter, final_verse)
 
-        # 5. Clear the input boxes so the shiny new placeholders show up immediately
         self.ctx_book.delete(0, "end")
         self.ctx_chapter.delete(0, "end")
         self.ctx_verse.delete(0, "end")
@@ -408,8 +400,6 @@ class VerseViewApp(ctk.CTk):
             self.ctx_verse.configure(placeholder_text=engine.current_verse or "e.g. 16")
 
         self.after(2000, self._refresh_context)
-
-
 
 
 
@@ -512,7 +502,7 @@ class VerseViewApp(ctk.CTk):
                 llm_enabled         = s["llm_enabled"],
                 bible_translation   = s["bible_translation"],
                 deepgram_api_key    = s["deepgram_api_key"],
-                openrouter_api_key  = s["openrouter_api_key"],
+                groq_api_key  = s["groq_api_key"],
                 sarvam_api_key      = s["sarvam_api_key"],
                 discord_webhook_url = s["discord_webhook_url"],
             )

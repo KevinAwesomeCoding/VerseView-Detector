@@ -7,7 +7,7 @@ import tkinter.messagebox as mb
 
 DEFAULTS = {
     "deepgram_api_key":    "",
-    "openrouter_api_key":  "",
+    "groq_api_key":  "",
     "discord_webhook_url": "",
     "sarvam_api_key":      "",
     "language":            "English (Nova-2)",
