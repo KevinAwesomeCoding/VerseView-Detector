@@ -59,6 +59,8 @@ jobs:
           pip install pyinstaller
 
       - name: Build App
+        env:
+          MACOSX_DEPLOYMENT_TARGET: "13.0"
         run: pyinstaller verseview.spec
 
       - name: Ad-hoc sign App
