@@ -1,11 +1,10 @@
-# -*- mode: python ; coding: utf-8 -*-
 import sys
 import os
 from PyInstaller.utils.hooks import collect_data_files
 
 block_cipher = None
 
-# 1. Collect CustomTkinter and local logic files
+
 datas = collect_data_files('customtkinter')
 datas += [
     ('settings.py', '.'),
@@ -15,7 +14,7 @@ datas += [
     ('parse_reference_ml.py', '.'),
 ]
 
-# 2. Platform Specific Paths (Mac Tcl/Tk logic)
+
 if sys.platform == 'darwin':
     tcl_lib = '/usr/local/opt/tcl-tk/lib/tcl8.6'
     tk_lib = '/usr/local/opt/tcl-tk/lib/tk8.6'
@@ -31,7 +30,11 @@ a = Analysis(
         'customtkinter', 
         'pyaudio', 
         'websockets.legacy.client', 
-        'selenium', 
+        'selenium',
+	    'selenium.webdriver',
+	    'selenium.webdriver.chrome.options', 
+	    'selenium.webdriver.chrome.webdriver',
+	    'selenium.webdriver.chrome.service',
         'webdriver_manager',
         'sarvamai'
     ],
@@ -46,9 +49,6 @@ a = Analysis(
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
-# 3. Create the Executable
-# Notice: name='VerseView_Detector' (with underscore)
-# By passing a.binaries and a.datas here, Windows builds as a SINGLE .exe file.
 exe = EXE(
     pyz,
     a.scripts,
@@ -70,7 +70,6 @@ exe = EXE(
     entitlements_file=None,
 )
 
-# 4. Create the Mac App Bundle (Mac Only)
 if sys.platform == 'darwin':
     coll = COLLECT(
         exe,
