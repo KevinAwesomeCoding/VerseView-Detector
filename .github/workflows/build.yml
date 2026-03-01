@@ -25,11 +25,10 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install pyaudio
-          pip install -r requirements.txt
-          pip install pyinstaller
+          pip install pyinstaller customtkinter selenium webdriver-manager certifi requests websockets openai
 
       - name: Build EXE
-        run: pyinstaller verseview.spec
+        run: pyinstaller --clean verseview.spec
 
       - name: Upload Windows artifact
         uses: actions/upload-artifact@v4
@@ -54,35 +53,36 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pyaudio
-          pip install -r requirements.txt
-          pip install pyinstaller
+          pip install pyinstaller customtkinter selenium webdriver-manager certifi pyaudio requests websockets openai
 
       - name: Build App
         env:
           MACOSX_DEPLOYMENT_TARGET: "13.0"
-        run: pyinstaller verseview.spec
+        run: pyinstaller --clean verseview.spec
 
       - name: Ad-hoc sign App
         run: codesign --force --deep --sign - "dist/VerseView Detector.app"
 
-      - name: Zip the Final App
-        run: zip -r "dist/VerseView-Detector-Mac-Intel-App.zip" "dist/VerseView Detector.app"
-
-      - name: Zip the Raw Crash/Debug Folder
-        run: zip -r "dist/VerseView-Detector-Mac-Intel-CrashDebug.zip" "dist/VerseView Detector/"
-
-      - name: Upload Mac Intel App
-        uses: actions/upload-artifact@v4
-        with:
-          name: VerseView-Detector-Mac-Intel-App
-          path: "dist/VerseView-Detector-Mac-Intel-App.zip"
+      # Safely stage and zip both the .app AND the raw UNIX folder!
+      - name: Zip the Intel App and Raw UNIX Folder
+        run: |
+          cd dist
+          mkdir "VerseView-Mac-Intel-Release"
           
-      - name: Upload Mac Intel Crash File
+          # Move the compiled .app into the folder
+          mv "VerseView Detector.app" "VerseView-Mac-Intel-Release/"
+          
+          # Move the raw UNIX executable folder into the same folder
+          mv "VerseView Detector" "VerseView-Mac-Intel-Release/VerseView Detector (Raw Executable)"
+          
+          # Zip the parent folder
+          zip -r "VerseView-Detector-Mac-Intel.zip" "VerseView-Mac-Intel-Release"
+
+      - name: Upload Mac Intel Zip
         uses: actions/upload-artifact@v4
         with:
-          name: VerseView-Detector-Mac-Intel-CrashDebug
-          path: "dist/VerseView-Detector-Mac-Intel-CrashDebug.zip"
+          name: VerseView-Detector-Mac-Intel
+          path: "dist/VerseView-Detector-Mac-Intel.zip"
 
   build-mac-silicon:
     runs-on: macos-latest
@@ -101,12 +101,10 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pyaudio
-          pip install -r requirements.txt
-          pip install pyinstaller
+          pip install pyinstaller customtkinter selenium webdriver-manager certifi pyaudio requests websockets openai
 
       - name: Build App
-        run: pyinstaller verseview.spec
+        run: pyinstaller --clean verseview.spec
 
       - name: Ad-hoc sign App
         run: codesign --force --deep --sign - "dist/VerseView Detector.app"
@@ -153,18 +151,16 @@ jobs:
           body: |
             Automated build from commit `${{ github.sha }}`
 
-            **Standard Downloads (Use these normally!):**
+            **Standard Downloads:**
             - `VerseView_Detector.exe` → Windows
-            - `VerseView-Detector-Mac-Intel-App.zip` → Older Macs (Intel chips)
+            - `VerseView-Detector-Mac-Intel.zip` → Older Macs (Intel chips) — *Includes the .app AND the raw UNIX executable folder.*
             - `VerseView-Detector-Mac-Silicon-App.zip` → Newer Macs (M1/M2/M3 chips)
 
             **Crash/Debug Versions (Only use if the app crashes!):**
-            - `VerseView-Detector-Mac-Intel-CrashDebug.zip`
             - `VerseView-Detector-Mac-Silicon-CrashDebug.zip`
           files: |
             ./artifacts/VerseView-Detector-Windows/VerseView_Detector.exe
-            ./artifacts/VerseView-Detector-Mac-Intel-App/VerseView-Detector-Mac-Intel-App.zip
-            ./artifacts/VerseView-Detector-Mac-Intel-CrashDebug/VerseView-Detector-Mac-Intel-CrashDebug.zip
+            ./artifacts/VerseView-Detector-Mac-Intel/VerseView-Detector-Mac-Intel.zip
             ./artifacts/VerseView-Detector-Mac-Silicon-App/VerseView-Detector-Mac-Silicon-App.zip
             ./artifacts/VerseView-Detector-Mac-Silicon-CrashDebug/VerseView-Detector-Mac-Silicon-CrashDebug.zip
           draft: false
