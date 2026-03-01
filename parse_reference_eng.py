@@ -53,33 +53,34 @@ NUMBER_MAP = {
 def convert_word_numbers(text):
     text = text.replace("-", " ")
     words = text.split()
-    converted_parts = []
-    for part in words:
-        words = part.split()
-        result = []
-        i = 0
-        while i < len(words):
-            w = words[i]
-            if i + 1 < len(words) and w in NUMBER_MAP and words[i + 1] == "hundred":
-                base = int(NUMBER_MAP[w]) * 100
-                if i + 2 < len(words) and words[i + 2] in NUMBER_MAP:
-                    result.append(str(base + int(NUMBER_MAP[words[i + 2]])))
-                    i += 3
-                else:
-                    result.append(str(base))
-                    i += 2
+    result = []
+    i = 0
+    
+    while i < len(words):
+        w = words[i]
+        
+        if i + 1 < len(words) and w in NUMBER_MAP and words[i + 1] == "hundred":
+            base = int(NUMBER_MAP[w]) * 100
+            if i + 2 < len(words) and words[i + 2] in NUMBER_MAP:
+                result.append(str(base + int(NUMBER_MAP[words[i + 2]])))
+                i += 3
+            else:
+                result.append(str(base))
+                i += 2
+            continue
+            
+        if i + 1 < len(words) and w in NUMBER_MAP and words[i + 1] in NUMBER_MAP:
+            fv = int(NUMBER_MAP[w])
+            sv = int(NUMBER_MAP[words[i + 1]])
+            if fv >= 20 and fv % 10 == 0 and 1 <= sv <= 9:
+                result.append(str(fv + sv))
+                i += 2
                 continue
-            if i + 1 < len(words) and w in NUMBER_MAP and words[i + 1] in NUMBER_MAP:
-                fv = int(NUMBER_MAP[w])
-                sv = int(NUMBER_MAP[words[i + 1]])
-                if fv >= 20 and fv % 10 == 0 and 1 <= sv <= 9:
-                    result.append(str(fv + sv))
-                    i += 2
-                    continue
-            result.append(str(NUMBER_MAP[w]) if w in NUMBER_MAP else w)
-            i += 1
-        converted_parts.append(" ".join(result))
-    return "  ".join(converted_parts)
+                
+        result.append(str(NUMBER_MAP[w]) if w in NUMBER_MAP else w)
+        i += 1
+        
+    return " ".join(result)
 
 
 def normalize_text(s: str) -> str:
