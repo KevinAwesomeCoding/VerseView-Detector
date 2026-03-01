@@ -1,4 +1,4 @@
-﻿# VerseView-Detector
+# VerseView-Detector
 If you have a Intel Mac, follow these steps:
 
 Step 1: Install the Mac audio tools
@@ -56,7 +56,7 @@ To make an app again do this :
 
 source venv/bin/activate
 
-pip install pyinstaller customtkinter selenium webdriver-manager certifi pyaudio requests openai
+pip install pyinstaller customtkinter selenium webdriver-manager certifi pyaudio requests websockets openai
 
 pyinstaller --clean verseview.spec
 
