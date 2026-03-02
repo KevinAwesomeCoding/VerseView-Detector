@@ -9,6 +9,7 @@ import requests
 import certifi
 import threading
 import openai
+import keyboard
 
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
@@ -50,9 +51,13 @@ LLM_ENABLED       = True
 LLM_CALL_COUNT    = 0
 BIBLE_TRANSLATION = "web"
 DEEPGRAM_API_KEY  = ""
-GROQ_API_KEY = ""
+GROQ_API_KEY      = ""
 DISCORD_WEBHOOK_URL = ""
 SARVAM_API_KEY    = ""
+
+CONFIDENCE_THRESHOLD = 0.75
+REQUIRE_VERIFY       = True
+PANIC_KEY            = "esc"
 
 llm_client = openai.OpenAI(base_url="https://api.groq.com/openai/v1", api_key=GROQ_API_KEY)
 
@@ -64,6 +69,7 @@ def request_stop():
     global stop_event, engine_loop
     if engine_loop and stop_event:
         engine_loop.call_soon_threadsafe(stop_event.set)
+    logger.warning("🚨 PANIC/STOP TRIGGERED! Stopping immediately.")
 
 # ── CONFIGURE ──
 def configure(
@@ -72,15 +78,16 @@ def configure(
     dedup_window=60, cooldown=3.0, llm_enabled=True,
     bible_translation="kjv", deepgram_api_key="",
     groq_api_key="", sarvam_api_key="",
-    discord_webhook_url=""
+    discord_webhook_url="", confidence=0.75, verify=True, panic_key="esc"
 ):
     global DEEPGRAM_API_KEY, GROQ_API_KEY, SARVAM_API_KEY, DISCORD_WEBHOOK_URL
     global USE_SARVAM, DEEPGRAM_LANGUAGE, DEEPGRAM_MODEL, SARVAM_LANGUAGE
     global PRIMARY_PARSER, MIC_INDEX, RATE, CHUNK, REMOTE_URL
     global DEDUP_WINDOW, COOLDOWN, LLM_ENABLED, BIBLE_TRANSLATION, USE_XPATH, llm_client
+    global CONFIDENCE_THRESHOLD, REQUIRE_VERIFY, PANIC_KEY
 
     DEEPGRAM_API_KEY    = deepgram_api_key
-    GROQ_API_KEY  = groq_api_key
+    GROQ_API_KEY        = groq_api_key
     SARVAM_API_KEY      = sarvam_api_key
     DISCORD_WEBHOOK_URL = discord_webhook_url
     llm_client = openai.OpenAI(base_url="https://api.groq.com/openai/v1", api_key=GROQ_API_KEY)
@@ -94,6 +101,10 @@ def configure(
     COOLDOWN      = cooldown
     LLM_ENABLED   = llm_enabled
     BIBLE_TRANSLATION = bible_translation
+    
+    CONFIDENCE_THRESHOLD = confidence
+    REQUIRE_VERIFY       = verify
+    PANIC_KEY            = panic_key
 
     global normalize_numbers_only
     if language == "en":
@@ -173,7 +184,7 @@ def fetch_verse_text(ref: str) -> str | None:
     logger.warning(f"All APIs failed for {ref}")
     return None
 
-# ── ONWARDS MODE ── THIS IS FOR WHEN PASTOR SAYS "ONWARDS" OR "AND FOLLOWING" ETC. AFTER A VERSE, TO AUTOMATICALLY ADVANCE THROUGH THE CHAPTER EEEEK :p
+# ── ONWARDS MODE ──
 onwards_active     = False
 onwards_book       = None
 onwards_chapter    = None
@@ -190,7 +201,7 @@ def _stop_onwards():
     onwards_timer = None
     onwards_target_ref = None
     onwards_trigger = None
-    logger.info("⏹️  ONWARDS mode stopped (60s timeout or reset)")
+    logger.info("⏹️  ONWARDS mode stopped")
 
 def _reset_onwards_timer():
     global onwards_timer
@@ -219,7 +230,7 @@ def _fetch_next_onwards():
 
 def _start_onwards(book, chapter, verse):
     global onwards_active, onwards_book, onwards_chapter, onwards_verse
-    _stop_onwards()  # Clear existing
+    _stop_onwards()
     onwards_active  = True
     onwards_book    = book
     onwards_chapter = chapter
@@ -246,7 +257,6 @@ def _check_onwards_advance(text, controller) -> bool:
         logger.info(f"🎯 ONWARDS ADVANCE: {onwards_target_ref} (heard '{onwards_trigger[:30]}')")
         controller.send_verse(onwards_target_ref, bypass_cooldown=True)
         
-        # Setup for next verse
         onwards_verse += 1
         _reset_onwards_timer()
         threading.Thread(target=_fetch_next_onwards, daemon=True).start()
@@ -291,7 +301,6 @@ def check_verse_queue(transcript, controller) -> bool:
     return True
 
 def check_and_queue_range(text, base_ref, controller):
-    # ONLY work with verses that HAVE verse numbers
     if ":" not in base_ref:
         return
         
@@ -310,18 +319,15 @@ def check_and_queue_range(text, base_ref, controller):
         if end_v > start_v and end_v <= start_v + 30:
             queue_verse_range(book, chap_str, start_v, end_v, controller)
     except Exception:
-        return  # Silent fail, no crash
+        return
 
 # ── DISCORD ──
 def send_to_discord(verse: str):
-    def do_send():
-        payload = {"content": f"✝️ Verse Detected: {verse}"}
+    def do_send(payload):
         try:
             r = requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=5, verify=certifi.where())
             if r.status_code == 204:
                 logger.info("📩 Sent to Discord")
-            else:
-                logger.warning(f"Discord error: {r.status_code}")
         except Exception as e:
             logger.error(f"Discord failed: {e}")
 
@@ -329,7 +335,7 @@ def send_to_discord(verse: str):
     if "67" in lower or "6:7" in lower or re.search(r'6\s*7', lower):
         threading.Thread(target=do_send, args=({"content": "SIXX SEVENNN 🔥"},), daemon=True).start()
 
-    threading.Thread(target=do_send, daemon=True).start()
+    threading.Thread(target=do_send, args=({"content": f"✝️ Verse Detected: {verse}"},), daemon=True).start()
 
 # ── LLM FALLBACK ──
 def extract_verse_with_llm(text):
@@ -366,12 +372,14 @@ def extract_verse_with_llm(text):
 # ── VERSE CONTROLLER ──
 class VerseController:
     def __init__(self):
-        self.driver    = None
-        self.box       = None
-        self.btn       = None
-        self.last_sent = None
-        self.last_time = 0
-        self.history   = {}
+        self.driver        = None
+        self.box           = None
+        self.btn           = None
+        self.last_sent     = None
+        self.last_time     = 0
+        self.history       = {}
+        self.pending_verse = None
+        self.match_count   = 0
 
     def connect(self):
         try:
@@ -432,6 +440,23 @@ class VerseController:
     def send_verse(self, ref, bypass_cooldown=False):
         global current_book, current_chapter, current_verse
         now = time.time()
+
+        # ── VERIFICATION LOGIC ──
+        if REQUIRE_VERIFY and not bypass_cooldown:
+            if self.pending_verse == ref:
+                self.match_count += 1
+            else:
+                self.pending_verse = ref
+                self.match_count = 1
+                logger.info(f"⏳ Verification pending for: {ref} (Heard once...)")
+                return False
+                
+            if self.match_count < 2:
+                return False
+                
+            # If we pass verification, reset the counter
+            self.pending_verse = None
+            self.match_count = 0
 
         if ref in self.history and (now - self.history[ref]) < DEDUP_WINDOW:
             logger.debug(f"Skipped duplicate: {ref}")
@@ -497,7 +522,6 @@ def detect_verse_hybrid(text, controller) -> bool:
     if not text or len(text.strip()) < 3:
         return False
 
-    # HELPER: Check for onwards in ANY layer
     def trigger_onwards_if_needed(ref_string, original_text):
         if any(kw in original_text.lower() for kw in ONWARDS_KEYWORDS):
             parts = ref_string.split()
@@ -531,7 +555,6 @@ def detect_verse_hybrid(text, controller) -> bool:
             if ":" not in verse:
                 chap_num = verse.split()[-1]
                 blockers = ["days", "weeks", "months", "years", "minutes", "hours", "people", "men", "women", "points", "dollars"]
-                # If the chapter number is followed by a blocker word in num_norm, block it atp...
                 if any(re.search(rf'\b{chap_num}\s+{b}\b', num_norm) for b in blockers):
                     logger.info(f"🚫 BLOCKED Layer 1 False Positive: {verse} (Time/People phrase)")
                     is_blocked = True
@@ -592,7 +615,7 @@ def detect_verse_hybrid(text, controller) -> bool:
 
         # Layer 5 — sequential (next verse)
         if current_book and current_chapter and current_verse:
-            m_num = re.search(r'\b(\d{1,3})\b', num_norm) # Using num_norm here to benefit from the compound number fix
+            m_num = re.search(r'\b(\d{1,3})\b', num_norm)
             if m_num:
                 candidate = m_num.group(1)
                 try:
@@ -735,6 +758,12 @@ async def stream_audio(controller):
                             alts = channel.get("alternatives", [])
                             if not alts or not isinstance(alts[0], dict):
                                 continue
+                                
+                            # ── CONFIDENCE CHECK ──
+                            confidence = alts[0].get("confidence", 1.0)
+                            if confidence < CONFIDENCE_THRESHOLD:
+                                continue # Skip processing if AI isn't confident enough
+
                             sentence = alts[0].get("transcript", "")
                             if not sentence.strip():
                                 continue
@@ -742,7 +771,7 @@ async def stream_audio(controller):
                             check_verse_queue(sentence, controller)
 
                             if data.get("is_final"):
-                                logger.info(f"📝 TRANSCRIPT: {sentence}")
+                                logger.info(f"📝 [{confidence:.2f}] {sentence}")
                                 partial_context += " " + sentence.strip()
                                 found = detect_verse_hybrid(partial_context, controller)
                                 if found:
@@ -808,7 +837,6 @@ async def stream_audio_sarvam(controller):
         client = AsyncSarvamAI(api_subscription_key=SARVAM_API_KEY)
         loop   = asyncio.get_event_loop()
 
-        # Tell server to expect RAW PCM, and TURN OFF aggressive VAD
         async with client.speech_to_text_streaming.connect(
             model="saaras:v3", 
             mode="transcribe",
@@ -824,11 +852,7 @@ async def stream_audio_sarvam(controller):
                 try:
                     while not stop_event.is_set():
                         pcm_data = await loop.run_in_executor(None, read_chunk_blocking)
-                        
-                        # Base64 encode the RAW bytes (NO WAV HEADERS)
                         pcm_b64 = base64.b64encode(pcm_data).decode("utf-8")
-                        
-                        # Send WITHOUT the encoding parameter to bypass the Pydantic bug
                         await ws.transcribe(audio=pcm_b64)
                 except asyncio.CancelledError:
                     pass
@@ -839,11 +863,9 @@ async def stream_audio_sarvam(controller):
                 try:
                     async for message in ws:
                         try:
-                            # Safely extract the transcript from the wrapper
                             if isinstance(message, dict):
                                 sentence = message.get("transcript", message.get("text", ""))
                             else:
-                                # Look inside the .data object if it exists
                                 if hasattr(message, "data"):
                                     sentence = getattr(message.data, "transcript", "")
                                 else:
@@ -881,6 +903,14 @@ async def main():
     global stop_event, engine_loop
     stop_event  = asyncio.Event()
     engine_loop = asyncio.get_event_loop()
+
+    # ── PANIC BUTTON BINDING ──
+    try:
+        if PANIC_KEY:
+            keyboard.add_hotkey(PANIC_KEY, request_stop)
+            logger.info(f"🚨 Panic Button active on: '{PANIC_KEY}'")
+    except Exception as e:
+        logger.warning(f"⚠️ Could not bind panic key (Mac Accessibility Permissions may be needed): {e}")
 
     controller = VerseController()
     connected  = False

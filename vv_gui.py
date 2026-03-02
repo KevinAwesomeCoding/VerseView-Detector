@@ -27,7 +27,7 @@ class VerseViewApp(ctk.CTk):
     def __init__(self):
         super().__init__()
         self.title(f"VerseView Detector  v{APP_VERSION}")
-        self.geometry("1060x660")
+        self.geometry("1060x700")
         self.minsize(800, 500)
 
         self._s             = cfg.load()
@@ -161,6 +161,20 @@ class VerseViewApp(ctk.CTk):
         sep_label("VerseView URL")
         self.url_entry = add_entry("http://localhost:50010/control.html")
 
+        # ── Verification & Confidence ──
+        sep_label("Confidence Threshold")
+        self.conf_var = ctk.DoubleVar(value=0.75)
+        self.conf_slider = ctk.CTkSlider(right, from_=0.5, to=1.0, variable=self.conf_var)
+        self.conf_slider.grid(row=row, column=0, sticky="ew", padx=14, pady=(0, 4))
+        row += 1
+
+        self.verify_var = ctk.BooleanVar(value=True)
+        ctk.CTkCheckBox(right, text="Require Verification (Hear verse twice)", variable=self.verify_var).grid(row=row, column=0, sticky="w", padx=14, pady=(10, 4))
+        row += 1
+
+        sep_label("Panic Keybind")
+        self.panic_entry = add_entry("e.g. esc, f12")
+
         # ── Current Context ──
         sep_label("📌  Current Context")
 
@@ -291,8 +305,6 @@ class VerseViewApp(ctk.CTk):
         else:
             self.adv_frame.grid_forget()
             self.btn_adv.configure(text="▶   Advanced Settings")
-    
-    
 
     # ─────────────────────────────────────────────────
     # SETTINGS PERSISTENCE
@@ -303,6 +315,12 @@ class VerseViewApp(ctk.CTk):
         self.bible_var.set(s.get("bible_translation", "WEB").upper())
         self.url_entry.delete(0, "end")
         self.url_entry.insert(0, s.get("remote_url", "http://localhost:50010/control.html"))
+        
+        # Load new Verification settings
+        self.conf_var.set(s.get("confidence", 0.75))
+        self.verify_var.set(s.get("verify", True))
+        self.panic_entry.delete(0, "end")
+        self.panic_entry.insert(0, s.get("panic_key", "esc"))
 
         self.rate_entry.delete(0, "end");     self.rate_entry.insert(0,     str(s.get("rate",        16000)))
         self.chunk_entry.delete(0, "end");    self.chunk_entry.insert(0,    str(s.get("chunk",        4096)))
@@ -325,13 +343,16 @@ class VerseViewApp(ctk.CTk):
             "language":            self.lang_var.get(),
             "bible_translation":   self.bible_var.get().lower(),
             "remote_url":          self.url_entry.get(),
+            "confidence":          self.conf_var.get(),
+            "verify":              self.verify_var.get(),
+            "panic_key":           self.panic_entry.get(),
             "rate":                self._safe_int(self.rate_entry,       16000),
             "chunk":               self._safe_int(self.chunk_entry,      4096),
             "cooldown":            self._safe_float(self.cooldown_entry,  3.0),
             "dedup_window":        self._safe_int(self.dedup_entry,      60),
             "llm_enabled":         self.llm_var.get() == "Enabled",
             "deepgram_api_key":    self.dg_key_entry.get(),
-            "groq_api_key":  self.or_key_entry.get(),
+            "groq_api_key":        self.or_key_entry.get(),
             "sarvam_api_key":      self.sv_key_entry.get(),
             "discord_webhook_url": self.dc_key_entry.get(),
             "mic_index":           self._mic_index(),
@@ -381,7 +402,6 @@ class VerseViewApp(ctk.CTk):
         self.ctx_chapter.delete(0, "end")
         self.ctx_verse.delete(0, "end")
 
-        # 6. Log the successful update
         self._append_log(f"📌 Context updated: {final_book} {final_chapter}:{final_verse}")
 
     def _refresh_context(self):
@@ -400,8 +420,6 @@ class VerseViewApp(ctk.CTk):
             self.ctx_verse.configure(placeholder_text=engine.current_verse or "e.g. 16")
 
         self.after(2000, self._refresh_context)
-
-
 
     # ─────────────────────────────────────────────────
     # MIC ENUMERATION
@@ -491,6 +509,7 @@ class VerseViewApp(ctk.CTk):
                 self._append_log(f"⚠️ Missing keys: {', '.join(missing)}")
                 return
 
+            # Pass new args down to engine
             engine.configure(
                 language            = self._lang_code(),
                 mic_index           = self._mic_index(),
@@ -502,9 +521,12 @@ class VerseViewApp(ctk.CTk):
                 llm_enabled         = s["llm_enabled"],
                 bible_translation   = s["bible_translation"],
                 deepgram_api_key    = s["deepgram_api_key"],
-                groq_api_key  = s["groq_api_key"],
+                groq_api_key        = s["groq_api_key"],
                 sarvam_api_key      = s["sarvam_api_key"],
                 discord_webhook_url = s["discord_webhook_url"],
+                confidence          = s["confidence"],
+                verify              = s["verify"],
+                panic_key           = s["panic_key"],
             )
 
             self._running = True

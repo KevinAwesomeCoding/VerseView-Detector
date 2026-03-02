@@ -36,7 +36,8 @@ a = Analysis(
 	    'selenium.webdriver.chrome.webdriver',
 	    'selenium.webdriver.chrome.service',
         'webdriver_manager',
-        'sarvamai'
+        'sarvamai',
+        'keyboard'
     ],
     hookspath=[],
     runtime_hooks=[],
