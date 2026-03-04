@@ -63,15 +63,25 @@ PANIC_KEY            = "esc"
 
 llm_client = openai.OpenAI(base_url="https://api.groq.com/openai/v1", api_key=GROQ_API_KEY)
 
-# ── STOP MECHANISM ──
+# ── GLOBALS ──
 stop_event   = None
 engine_loop  = None
+_controller  = None
 
+# ── STOP & PANIC LOGIC ──
 def request_stop():
+    """ Called ONLY by the GUI's Stop Button """
     global stop_event, engine_loop
     if engine_loop and stop_event:
         engine_loop.call_soon_threadsafe(stop_event.set)
-    logger.warning("🚨 PANIC/STOP TRIGGERED! Stopping immediately.")
+    logger.info("🛑 Stop requested from GUI.")
+
+def trigger_panic():
+    """ Called ONLY by the keyboard Hotkey """
+    global _controller
+    if _controller:
+        _controller.close_presentation()
+    # Notice we DO NOT set stop_event here, so the engine keeps running!
 
 # ── CONFIGURE ──
 def configure(
@@ -441,6 +451,16 @@ class VerseController:
             logger.error(f"VerseView connection failed: {e}")
             return False
 
+    def close_presentation(self):
+        """ The 'Panic' action: Clicks the X button in VerseView to clear the screen """
+        if not self.driver: return
+        try:
+            close_btn = self.driver.find_element(By.ID, "iconClose")
+            close_btn.click()
+            logger.info("🚫 Presentation cleared off the screen via Panic Button!")
+        except Exception as e:
+            logger.debug(f"Could not click close button (maybe already closed): {e}")
+
     def send_verse(self, ref, bypass_cooldown=False, confidence=1.0):
         global current_book, current_chapter, current_verse
         now = time.time()
@@ -448,9 +468,8 @@ class VerseController:
         # ── MANUAL CONFIRMATION LOGIC ──
         if confidence < CONFIDENCE_THRESHOLD and not bypass_cooldown:
             if REQUIRE_MANUAL_CONFIRM and CONFIRM_CALLBACK:
-                # We spawn a mini-thread so we don't block the audio stream while the user decides!
                 def _ask_thread():
-                    logger.info(f"🤔 Holding for manual confirmation: {ref} (Confidence: {confidence:.2f})")
+                    logger.info(f"🤔 Holding for manual confirmation: {ref} (Confidence: {int(confidence*100)}%)")
                     if CONFIRM_CALLBACK(ref, confidence):
                         logger.info(f"✅ User manually approved: {ref}")
                         self.send_verse(ref, bypass_cooldown=True, confidence=1.0)
@@ -459,7 +478,7 @@ class VerseController:
                 threading.Thread(target=_ask_thread, daemon=True).start()
                 return False
             else:
-                logger.warning(f"⚠️ Blocked: {ref} (Confidence {confidence:.2f} < Threshold {CONFIDENCE_THRESHOLD})")
+                logger.warning(f"⚠️ Blocked: {ref} (Confidence {int(confidence*100)}% < Threshold {int(CONFIDENCE_THRESHOLD*100)}%)")
                 return False
 
         # ── VERIFICATION LOGIC (Hear Twice) ──
@@ -475,7 +494,6 @@ class VerseController:
             if self.match_count < 2:
                 return False
                 
-            # If we pass verification, reset the counter
             self.pending_verse = None
             self.match_count = 0
 
@@ -581,7 +599,7 @@ def detect_verse_hybrid(text, controller, confidence=1.0) -> bool:
                     is_blocked = True
             
             if not is_blocked:
-                logger.info(f"🔍 PARSER: {verse}")
+                logger.info(f"🔍 PARSER: {verse} ({int(confidence*100)}% Acc)")
                 controller.send_verse(verse, confidence=confidence)
                 
                 trigger_onwards_if_needed(verse, text)
@@ -607,7 +625,7 @@ def detect_verse_hybrid(text, controller, confidence=1.0) -> bool:
                 
             if is_valid:
                 ref = f"{current_book} {current_chapter}:{candidate}"
-                logger.info(f"🔍 CONTEXTUAL: {ref}")
+                logger.info(f"🔍 CONTEXTUAL: {ref} ({int(confidence*100)}% Acc)")
                 controller.send_verse(ref, confidence=confidence)
                 
                 trigger_onwards_if_needed(ref, text)
@@ -618,7 +636,7 @@ def detect_verse_hybrid(text, controller, confidence=1.0) -> bool:
         m_hi = re.search(r'([\u0966-\u096F]+)', text)
         if m_hi and current_book and current_chapter:
             ref = f"{current_book} {current_chapter}:{m_hi.group(1)}"
-            logger.info(f"🔍 HINDI CTX: {ref}")
+            logger.info(f"🔍 HINDI CTX: {ref} ({int(confidence*100)}% Acc)")
             controller.send_verse(ref, confidence=confidence)
             trigger_onwards_if_needed(ref, text)
             return True
@@ -627,7 +645,7 @@ def detect_verse_hybrid(text, controller, confidence=1.0) -> bool:
         m_ml = re.search(r'([\u0D66-\u0D6F]+)', text)
         if m_ml and current_book and current_chapter:
             ref = f"{current_book} {current_chapter}:{m_ml.group(1)}"
-            logger.info(f"🔍 MALAYALAM CTX: {ref}")
+            logger.info(f"🔍 MALAYALAM CTX: {ref} ({int(confidence*100)}% Acc)")
             controller.send_verse(ref, confidence=confidence)
             trigger_onwards_if_needed(ref, text)
             return True
@@ -640,7 +658,7 @@ def detect_verse_hybrid(text, controller, confidence=1.0) -> bool:
                 try:
                     if int(candidate) == int(current_verse) + 1:
                         ref = f"{current_book} {current_chapter}:{candidate}"
-                        logger.info(f"🔍 SEQUENTIAL: {ref}")
+                        logger.info(f"🔍 SEQUENTIAL: {ref} ({int(confidence*100)}% Acc)")
                         controller.send_verse(ref, confidence=confidence)
                         trigger_onwards_if_needed(ref, text)
                         return True
@@ -662,7 +680,7 @@ def detect_verse_hybrid(text, controller, confidence=1.0) -> bool:
                 if not any(text_after.startswith(b) for b in blockers):
                     if 1 <= start_v < end_v <= start_v + 30:
                         ref_start = f"{current_book} {current_chapter}:{start_v}"
-                        logger.info(f"🔍 RANGE: {current_book} {current_chapter}:{start_v} → {end_v}")
+                        logger.info(f"🔍 RANGE: {current_book} {current_chapter}:{start_v} → {end_v} ({int(confidence*100)}% Acc)")
                         controller.send_verse(ref_start, confidence=confidence)
                         queue_verse_range(current_book, current_chapter, start_v, end_v, controller)
                         trigger_onwards_if_needed(ref_start, text)
@@ -675,7 +693,7 @@ def detect_verse_hybrid(text, controller, confidence=1.0) -> bool:
         )
         if m_simple:
             ref = f"{m_simple.group(1).strip().title()} {m_simple.group(2)}"
-            logger.info(f"🔍 SIMPLE: {ref}")
+            logger.info(f"🔍 SIMPLE: {ref} ({int(confidence*100)}% Acc)")
             controller.send_verse(ref, confidence=confidence)
             trigger_onwards_if_needed(ref, text)
             return True
@@ -787,7 +805,7 @@ async def stream_audio(controller):
                             check_verse_queue(sentence, controller)
 
                             if data.get("is_final"):
-                                logger.info(f"📝 [{confidence:.2f}] {sentence}")
+                                logger.info(f"📝 {sentence}")
                                 partial_context += " " + sentence.strip()
                                 
                                 # Send confidence down into the detector
@@ -892,7 +910,7 @@ async def stream_audio_sarvam(controller):
                             sentence = str(sentence).strip()
                             
                             if sentence and sentence != "None":
-                                logger.info(f"📝 TRANSCRIPT: {sentence}")
+                                logger.info(f"📝 {sentence}")
                                 check_verse_queue(sentence, controller)
                                 detect_verse_hybrid(sentence, controller, confidence=1.0)
                         except Exception as e:
@@ -918,24 +936,24 @@ async def stream_audio_sarvam(controller):
 
 # ── MAIN ──
 async def main():
-    global stop_event, engine_loop
+    global stop_event, engine_loop, _controller
     stop_event  = asyncio.Event()
     engine_loop = asyncio.get_event_loop()
 
     # ── PANIC BUTTON BINDING ──
     try:
         if PANIC_KEY:
-            keyboard.add_hotkey(PANIC_KEY, request_stop)
+            keyboard.add_hotkey(PANIC_KEY, trigger_panic)
             logger.info(f"🚨 Panic Button active on: '{PANIC_KEY}'")
     except Exception as e:
         logger.warning(f"⚠️ Could not bind panic key (Mac Accessibility Permissions may be needed): {e}")
 
-    controller = VerseController()
+    _controller = VerseController()
     connected  = False
 
     for attempt in range(1, 6):
         logger.info(f"Connection attempt {attempt}/5...")
-        if controller.connect():
+        if _controller.connect():
             connected = True
             break
         if stop_event.is_set():
@@ -955,11 +973,12 @@ async def main():
 
     try:
         if USE_SARVAM:
-            await stream_audio_sarvam(controller)
+            await stream_audio_sarvam(_controller)
         else:
-            await stream_audio(controller)
+            await stream_audio(_controller)
     finally:
-        controller.cleanup()
+        _controller.cleanup()
+        _controller = None
         logger.info(f"📊 LLM calls: {LLM_CALL_COUNT}")
         logger.info("Shutdown complete")
 

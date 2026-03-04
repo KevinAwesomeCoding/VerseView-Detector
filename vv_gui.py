@@ -5,6 +5,7 @@ import threading
 import asyncio
 import logging
 import pyaudio
+import keyboard  # <-- ADDED for recording the hotkey!
 
 import settings as cfg
 import vv_streaming_master as engine
@@ -180,8 +181,17 @@ class VerseViewApp(ctk.CTk):
         ctk.CTkCheckBox(right, text="Require Manual Confirmation (Ask Y/N if low)", variable=self.manual_var).grid(row=row, column=0, sticky="w", padx=14, pady=(10, 4))
         row += 1
 
+        # ── PANIC KEYBIND RECORDER ──
         sep_label("Panic Keybind")
-        self.panic_entry = add_entry("e.g. esc, f12")
+        self.panic_var = ctk.StringVar(value="esc")
+        
+        self.panic_btn = ctk.CTkButton(
+            right, text="Panic Key: esc",
+            fg_color="#4a4a4a", hover_color="#333333",
+            command=self._record_panic_key
+        )
+        self.panic_btn.grid(row=row, column=0, sticky="ew", padx=14, pady=(0, 4))
+        row += 1
 
         self.verify_var = ctk.BooleanVar(value=True)
         ctk.CTkCheckBox(right, text="Require Verification (Hear verse twice)", variable=self.verify_var).grid(row=row, column=0, sticky="w", padx=14, pady=(10, 4))
@@ -319,6 +329,34 @@ class VerseViewApp(ctk.CTk):
             self.btn_adv.configure(text="▶   Advanced Settings")
 
     # ─────────────────────────────────────────────────
+    # PANIC RECORDING LOGIC
+    # ─────────────────────────────────────────────────
+    def _record_panic_key(self):
+        """ Allows the user to press a key combo to record it safely without typing """
+        self.panic_btn.configure(text="Listening... Press your keys now!", fg_color="#a07020", state="disabled")
+
+        def recorder():
+            try:
+                # This safely blocks in the background thread until the user presses a combo!
+                combo = keyboard.read_hotkey(suppress=False)
+                self.after(0, lambda: self._on_panic_recorded(combo))
+            except Exception as e:
+                self._append_log(f"⚠️ Key recording error: {e}")
+                self.after(0, lambda: self._on_panic_recorded(self.panic_var.get()))
+
+        threading.Thread(target=recorder, daemon=True).start()
+
+    def _on_panic_recorded(self, combo):
+        if combo:
+            self.panic_var.set(combo)
+            self.panic_btn.configure(text=f"Panic Key: {combo}", fg_color=["#3B8ED0", "#1F6AA5"], state="normal")
+            self._append_log(f"⌨️ Panic key updated to: {combo}")
+        else:
+            # Fallback if something went wrong
+            self.panic_btn.configure(text=f"Panic Key: {self.panic_var.get()}", fg_color=["#3B8ED0", "#1F6AA5"], state="normal")
+
+
+    # ─────────────────────────────────────────────────
     # SETTINGS PERSISTENCE
     # ─────────────────────────────────────────────────
     def _load_into_ui(self):
@@ -336,8 +374,9 @@ class VerseViewApp(ctk.CTk):
         self.manual_var.set(s.get("manual_confirm", True))
         self.verify_var.set(s.get("verify", True))
         
-        self.panic_entry.delete(0, "end")
-        self.panic_entry.insert(0, s.get("panic_key", "esc"))
+        saved_panic = s.get("panic_key", "esc")
+        self.panic_var.set(saved_panic)
+        self.panic_btn.configure(text=f"Panic Key: {saved_panic}")
 
         self.rate_entry.delete(0, "end");     self.rate_entry.insert(0,     str(s.get("rate",        16000)))
         self.chunk_entry.delete(0, "end");    self.chunk_entry.insert(0,    str(s.get("chunk",        4096)))
@@ -363,7 +402,7 @@ class VerseViewApp(ctk.CTk):
             "confidence":          self.conf_var.get(),
             "manual_confirm":      self.manual_var.get(),
             "verify":              self.verify_var.get(),
-            "panic_key":           self.panic_entry.get(),
+            "panic_key":           self.panic_var.get(),
             "rate":                self._safe_int(self.rate_entry,       16000),
             "chunk":               self._safe_int(self.chunk_entry,      4096),
             "cooldown":            self._safe_float(self.cooldown_entry,  3.0),
@@ -505,7 +544,6 @@ class VerseViewApp(ctk.CTk):
         ev = threading.Event()
         
         def _ask():
-            # Show a pop-up on the main thread safely
             ans = mb.askyesno(
                 title="Low Confidence Verse", 
                 message=f"The AI is only {int(confidence * 100)}% sure.\n\nDetected: {ref}\n\nDo you want to send this to VerseView?"
@@ -514,7 +552,7 @@ class VerseViewApp(ctk.CTk):
             ev.set()
 
         self.after(0, _ask)
-        ev.wait() # Wait for user to click Yes or No
+        ev.wait() 
         return result[0]
 
     def _start(self):
