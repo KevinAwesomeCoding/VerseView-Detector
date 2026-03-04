@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 import customtkinter as ctk
+import tkinter.messagebox as mb
 import threading
 import asyncio
 import logging
@@ -104,12 +105,14 @@ class VerseViewApp(ctk.CTk):
 
         def sep_label(text):
             nonlocal row
-            ctk.CTkLabel(
+            lbl = ctk.CTkLabel(
                 right, text=text, anchor="w",
                 font=ctk.CTkFont(size=12, weight="bold"),
                 text_color=("gray30", "gray70")
-            ).grid(row=row, column=0, sticky="ew", padx=14, pady=(14, 2))
+            )
+            lbl.grid(row=row, column=0, sticky="ew", padx=14, pady=(14, 2))
             row += 1
+            return lbl
 
         def add_entry(placeholder="", show=""):
             nonlocal row
@@ -162,18 +165,27 @@ class VerseViewApp(ctk.CTk):
         self.url_entry = add_entry("http://localhost:50010/control.html")
 
         # ── Verification & Confidence ──
-        sep_label("Confidence Threshold")
+        self.conf_val_label = sep_label("Confidence Threshold: 75%")
+        
         self.conf_var = ctk.DoubleVar(value=0.75)
-        self.conf_slider = ctk.CTkSlider(right, from_=0.5, to=1.0, variable=self.conf_var)
+        
+        def update_conf_label(val):
+            self.conf_val_label.configure(text=f"Confidence Threshold: {int(float(val)*100)}%")
+
+        self.conf_slider = ctk.CTkSlider(right, from_=0.5, to=1.0, variable=self.conf_var, command=update_conf_label)
         self.conf_slider.grid(row=row, column=0, sticky="ew", padx=14, pady=(0, 4))
         row += 1
 
-        self.verify_var = ctk.BooleanVar(value=True)
-        ctk.CTkCheckBox(right, text="Require Verification (Hear verse twice)", variable=self.verify_var).grid(row=row, column=0, sticky="w", padx=14, pady=(10, 4))
+        self.manual_var = ctk.BooleanVar(value=True)
+        ctk.CTkCheckBox(right, text="Require Manual Confirmation (Ask Y/N if low)", variable=self.manual_var).grid(row=row, column=0, sticky="w", padx=14, pady=(10, 4))
         row += 1
 
         sep_label("Panic Keybind")
         self.panic_entry = add_entry("e.g. esc, f12")
+
+        self.verify_var = ctk.BooleanVar(value=True)
+        ctk.CTkCheckBox(right, text="Require Verification (Hear verse twice)", variable=self.verify_var).grid(row=row, column=0, sticky="w", padx=14, pady=(10, 4))
+        row += 1
 
         # ── Current Context ──
         sep_label("📌  Current Context")
@@ -316,9 +328,14 @@ class VerseViewApp(ctk.CTk):
         self.url_entry.delete(0, "end")
         self.url_entry.insert(0, s.get("remote_url", "http://localhost:50010/control.html"))
         
-        # Load new Verification settings
-        self.conf_var.set(s.get("confidence", 0.75))
+        # Load Verification / Confidence settings
+        saved_conf = s.get("confidence", 0.75)
+        self.conf_var.set(saved_conf)
+        self.conf_val_label.configure(text=f"Confidence Threshold: {int(saved_conf * 100)}%")
+        
+        self.manual_var.set(s.get("manual_confirm", True))
         self.verify_var.set(s.get("verify", True))
+        
         self.panic_entry.delete(0, "end")
         self.panic_entry.insert(0, s.get("panic_key", "esc"))
 
@@ -344,6 +361,7 @@ class VerseViewApp(ctk.CTk):
             "bible_translation":   self.bible_var.get().lower(),
             "remote_url":          self.url_entry.get(),
             "confidence":          self.conf_var.get(),
+            "manual_confirm":      self.manual_var.get(),
             "verify":              self.verify_var.get(),
             "panic_key":           self.panic_entry.get(),
             "rate":                self._safe_int(self.rate_entry,       16000),
@@ -381,7 +399,7 @@ class VerseViewApp(ctk.CTk):
             self._append_log("⚠️ Import cancelled.")
 
     # ─────────────────────────────────────────────────
-    # CONTEXT
+    # CONTEXT & LOGGING
     # ─────────────────────────────────────────────────
     def _set_context(self):
         typed_book = self.ctx_book.get().strip()
@@ -421,9 +439,6 @@ class VerseViewApp(ctk.CTk):
 
         self.after(2000, self._refresh_context)
 
-    # ─────────────────────────────────────────────────
-    # MIC ENUMERATION
-    # ─────────────────────────────────────────────────
     def _populate_mics(self):
         p    = pyaudio.PyAudio()
         mics = {}
@@ -444,9 +459,6 @@ class VerseViewApp(ctk.CTk):
             self.mic_map = {}
             self.mic_menu.configure(values=["No input devices found"])
 
-    # ─────────────────────────────────────────────────
-    # LOGGING
-    # ─────────────────────────────────────────────────
     def _attach_log_handler(self):
         handler = GUILogHandler(self._append_log)
         handler.setFormatter(logging.Formatter('%(asctime)s %(levelname)s  %(message)s'))
@@ -465,9 +477,6 @@ class VerseViewApp(ctk.CTk):
         self.log_box.delete("1.0", "end")
         self.log_box.configure(state="disabled")
 
-    # ─────────────────────────────────────────────────
-    # HELPERS
-    # ─────────────────────────────────────────────────
     def _lang_code(self) -> str:
         return {
             "English (Nova-2)":      "en",
@@ -488,8 +497,26 @@ class VerseViewApp(ctk.CTk):
         except: return d
 
     # ─────────────────────────────────────────────────
-    # ENGINE CONTROL
+    # ENGINE CONTROL & CALLBACKS
     # ─────────────────────────────────────────────────
+    def _user_confirm_callback(self, ref: str, confidence: float) -> bool:
+        """ Thread-safe popup to ask the user if they want to send a low-confidence verse. """
+        result = [False]
+        ev = threading.Event()
+        
+        def _ask():
+            # Show a pop-up on the main thread safely
+            ans = mb.askyesno(
+                title="Low Confidence Verse", 
+                message=f"The AI is only {int(confidence * 100)}% sure.\n\nDetected: {ref}\n\nDo you want to send this to VerseView?"
+            )
+            result[0] = ans
+            ev.set()
+
+        self.after(0, _ask)
+        ev.wait() # Wait for user to click Yes or No
+        return result[0]
+
     def _start(self):
         try:
             if self._running:
@@ -504,7 +531,6 @@ class VerseViewApp(ctk.CTk):
             if not s["sarvam_api_key"] and self._lang_code() == "ml":
                 missing.append("Sarvam API Key")
             if missing:
-                import tkinter.messagebox as mb
                 mb.showwarning("Missing Keys", f"Please enter in Advanced Settings:\n\n{chr(10).join(missing)}")
                 self._append_log(f"⚠️ Missing keys: {', '.join(missing)}")
                 return
@@ -525,6 +551,8 @@ class VerseViewApp(ctk.CTk):
                 sarvam_api_key      = s["sarvam_api_key"],
                 discord_webhook_url = s["discord_webhook_url"],
                 confidence          = s["confidence"],
+                manual_confirm      = s["manual_confirm"],
+                confirm_callback    = self._user_confirm_callback,
                 verify              = s["verify"],
                 panic_key           = s["panic_key"],
             )
@@ -541,7 +569,6 @@ class VerseViewApp(ctk.CTk):
             self.after(2000, self._refresh_context)
 
         except Exception as e:
-            import tkinter.messagebox as mb
             mb.showerror("Start Error", f"Failed to start:\n\n{e}")
             self._append_log(f"❌ Start failed: {e}")
 
@@ -552,7 +579,6 @@ class VerseViewApp(ctk.CTk):
             loop.run_until_complete(engine.main())
         except Exception as e:
             self._append_log(f"ENGINE ERROR: {e}")
-            import tkinter.messagebox as mb
             self.after(0, lambda: mb.showerror("Engine Error", str(e)))
         finally:
             loop.close()

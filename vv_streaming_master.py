@@ -56,6 +56,8 @@ DISCORD_WEBHOOK_URL = ""
 SARVAM_API_KEY    = ""
 
 CONFIDENCE_THRESHOLD = 0.75
+REQUIRE_MANUAL_CONFIRM = True
+CONFIRM_CALLBACK       = None
 REQUIRE_VERIFY       = True
 PANIC_KEY            = "esc"
 
@@ -78,13 +80,13 @@ def configure(
     dedup_window=60, cooldown=3.0, llm_enabled=True,
     bible_translation="kjv", deepgram_api_key="",
     groq_api_key="", sarvam_api_key="",
-    discord_webhook_url="", confidence=0.75, verify=True, panic_key="esc"
+    discord_webhook_url="", confidence=0.75, manual_confirm=True, confirm_callback=None, verify=True, panic_key="esc"
 ):
     global DEEPGRAM_API_KEY, GROQ_API_KEY, SARVAM_API_KEY, DISCORD_WEBHOOK_URL
     global USE_SARVAM, DEEPGRAM_LANGUAGE, DEEPGRAM_MODEL, SARVAM_LANGUAGE
     global PRIMARY_PARSER, MIC_INDEX, RATE, CHUNK, REMOTE_URL
     global DEDUP_WINDOW, COOLDOWN, LLM_ENABLED, BIBLE_TRANSLATION, USE_XPATH, llm_client
-    global CONFIDENCE_THRESHOLD, REQUIRE_VERIFY, PANIC_KEY
+    global CONFIDENCE_THRESHOLD, REQUIRE_MANUAL_CONFIRM, CONFIRM_CALLBACK, REQUIRE_VERIFY, PANIC_KEY
 
     DEEPGRAM_API_KEY    = deepgram_api_key
     GROQ_API_KEY        = groq_api_key
@@ -102,9 +104,11 @@ def configure(
     LLM_ENABLED   = llm_enabled
     BIBLE_TRANSLATION = bible_translation
     
-    CONFIDENCE_THRESHOLD = confidence
-    REQUIRE_VERIFY       = verify
-    PANIC_KEY            = panic_key
+    CONFIDENCE_THRESHOLD   = confidence
+    REQUIRE_MANUAL_CONFIRM = manual_confirm
+    CONFIRM_CALLBACK       = confirm_callback
+    REQUIRE_VERIFY         = verify
+    PANIC_KEY              = panic_key
 
     global normalize_numbers_only
     if language == "en":
@@ -437,11 +441,28 @@ class VerseController:
             logger.error(f"VerseView connection failed: {e}")
             return False
 
-    def send_verse(self, ref, bypass_cooldown=False):
+    def send_verse(self, ref, bypass_cooldown=False, confidence=1.0):
         global current_book, current_chapter, current_verse
         now = time.time()
 
-        # ── VERIFICATION LOGIC ──
+        # ── MANUAL CONFIRMATION LOGIC ──
+        if confidence < CONFIDENCE_THRESHOLD and not bypass_cooldown:
+            if REQUIRE_MANUAL_CONFIRM and CONFIRM_CALLBACK:
+                # We spawn a mini-thread so we don't block the audio stream while the user decides!
+                def _ask_thread():
+                    logger.info(f"🤔 Holding for manual confirmation: {ref} (Confidence: {confidence:.2f})")
+                    if CONFIRM_CALLBACK(ref, confidence):
+                        logger.info(f"✅ User manually approved: {ref}")
+                        self.send_verse(ref, bypass_cooldown=True, confidence=1.0)
+                    else:
+                        logger.info(f"❌ User rejected: {ref}")
+                threading.Thread(target=_ask_thread, daemon=True).start()
+                return False
+            else:
+                logger.warning(f"⚠️ Blocked: {ref} (Confidence {confidence:.2f} < Threshold {CONFIDENCE_THRESHOLD})")
+                return False
+
+        # ── VERIFICATION LOGIC (Hear Twice) ──
         if REQUIRE_VERIFY and not bypass_cooldown:
             if self.pending_verse == ref:
                 self.match_count += 1
@@ -458,6 +479,7 @@ class VerseController:
             self.pending_verse = None
             self.match_count = 0
 
+        # ── STANDARD COOLDOWNS ──
         if ref in self.history and (now - self.history[ref]) < DEDUP_WINDOW:
             logger.debug(f"Skipped duplicate: {ref}")
             return False
@@ -466,6 +488,7 @@ class VerseController:
             logger.debug(f"Cooldown active: {ref}")
             return False
 
+        # ── SEND TO VERSEVIEW ──
         try:
             if not self.driver:
                 if not self.connect():
@@ -516,7 +539,7 @@ class VerseController:
 # ── HYBRID VERSE DETECTOR ──
 ONWARDS_KEYWORDS = ["onwards", "onward", "and following", "and beyond", "and after"]
 
-def detect_verse_hybrid(text, controller) -> bool:
+def detect_verse_hybrid(text, controller, confidence=1.0) -> bool:
     global current_book, current_chapter, current_verse
 
     if not text or len(text.strip()) < 3:
@@ -531,7 +554,6 @@ def detect_verse_hybrid(text, controller) -> bool:
                 _start_onwards(bk, ch, vs)
 
     try:
-        # Layer 0 — check queued range verses
         if check_verse_queue(text, controller):
             return True
             
@@ -539,7 +561,6 @@ def detect_verse_hybrid(text, controller) -> bool:
             return True
         
         num_norm = normalize_numbers_only(text)
-        
         num_norm = re.sub(
             r'\b(20|30|40|50|60|70|80|90)\s+([1-9])\b', 
             lambda m: str(int(m.group(1)) + int(m.group(2))), 
@@ -561,7 +582,7 @@ def detect_verse_hybrid(text, controller) -> bool:
             
             if not is_blocked:
                 logger.info(f"🔍 PARSER: {verse}")
-                controller.send_verse(verse)
+                controller.send_verse(verse, confidence=confidence)
                 
                 trigger_onwards_if_needed(verse, text)
                 
@@ -579,17 +600,15 @@ def detect_verse_hybrid(text, controller) -> bool:
             
             if len(text.split()) <= 2:
                 is_valid = True
-
             elif re.search(r'\b(?:verse|verses|v|vs)\s+' + candidate + r'\b', text_lower):
                 is_valid = True
-
             elif any(kw in text_lower for kw in ["വാക്യം", "വചനം", "വചന", "वचन", "पद"]):
                 is_valid = True
                 
             if is_valid:
                 ref = f"{current_book} {current_chapter}:{candidate}"
                 logger.info(f"🔍 CONTEXTUAL: {ref}")
-                controller.send_verse(ref)
+                controller.send_verse(ref, confidence=confidence)
                 
                 trigger_onwards_if_needed(ref, text)
                 check_and_queue_range(num_norm, ref, controller)
@@ -600,7 +619,7 @@ def detect_verse_hybrid(text, controller) -> bool:
         if m_hi and current_book and current_chapter:
             ref = f"{current_book} {current_chapter}:{m_hi.group(1)}"
             logger.info(f"🔍 HINDI CTX: {ref}")
-            controller.send_verse(ref)
+            controller.send_verse(ref, confidence=confidence)
             trigger_onwards_if_needed(ref, text)
             return True
 
@@ -609,7 +628,7 @@ def detect_verse_hybrid(text, controller) -> bool:
         if m_ml and current_book and current_chapter:
             ref = f"{current_book} {current_chapter}:{m_ml.group(1)}"
             logger.info(f"🔍 MALAYALAM CTX: {ref}")
-            controller.send_verse(ref)
+            controller.send_verse(ref, confidence=confidence)
             trigger_onwards_if_needed(ref, text)
             return True
 
@@ -622,7 +641,7 @@ def detect_verse_hybrid(text, controller) -> bool:
                     if int(candidate) == int(current_verse) + 1:
                         ref = f"{current_book} {current_chapter}:{candidate}"
                         logger.info(f"🔍 SEQUENTIAL: {ref}")
-                        controller.send_verse(ref)
+                        controller.send_verse(ref, confidence=confidence)
                         trigger_onwards_if_needed(ref, text)
                         return True
                 except ValueError:
@@ -644,7 +663,7 @@ def detect_verse_hybrid(text, controller) -> bool:
                     if 1 <= start_v < end_v <= start_v + 30:
                         ref_start = f"{current_book} {current_chapter}:{start_v}"
                         logger.info(f"🔍 RANGE: {current_book} {current_chapter}:{start_v} → {end_v}")
-                        controller.send_verse(ref_start)
+                        controller.send_verse(ref_start, confidence=confidence)
                         queue_verse_range(current_book, current_chapter, start_v, end_v, controller)
                         trigger_onwards_if_needed(ref_start, text)
                         return True
@@ -657,7 +676,7 @@ def detect_verse_hybrid(text, controller) -> bool:
         if m_simple:
             ref = f"{m_simple.group(1).strip().title()} {m_simple.group(2)}"
             logger.info(f"🔍 SIMPLE: {ref}")
-            controller.send_verse(ref)
+            controller.send_verse(ref, confidence=confidence)
             trigger_onwards_if_needed(ref, text)
             return True
 
@@ -677,7 +696,7 @@ def detect_verse_hybrid(text, controller) -> bool:
         def llm_task():
             verse = extract_verse_with_llm(text)
             if verse:
-                controller.send_verse(verse)
+                controller.send_verse(verse, confidence=confidence)
                 trigger_onwards_if_needed(verse, text)
                 check_and_queue_range(text, verse, controller)
 
@@ -759,12 +778,9 @@ async def stream_audio(controller):
                             if not alts or not isinstance(alts[0], dict):
                                 continue
                                 
-                            # ── CONFIDENCE CHECK ──
                             confidence = alts[0].get("confidence", 1.0)
-                            if confidence < CONFIDENCE_THRESHOLD:
-                                continue # Skip processing if AI isn't confident enough
-
                             sentence = alts[0].get("transcript", "")
+                            
                             if not sentence.strip():
                                 continue
 
@@ -773,7 +789,9 @@ async def stream_audio(controller):
                             if data.get("is_final"):
                                 logger.info(f"📝 [{confidence:.2f}] {sentence}")
                                 partial_context += " " + sentence.strip()
-                                found = detect_verse_hybrid(partial_context, controller)
+                                
+                                # Send confidence down into the detector
+                                found = detect_verse_hybrid(partial_context, controller, confidence=confidence)
                                 if found:
                                     partial_context = ""
                                 else:
@@ -876,7 +894,7 @@ async def stream_audio_sarvam(controller):
                             if sentence and sentence != "None":
                                 logger.info(f"📝 TRANSCRIPT: {sentence}")
                                 check_verse_queue(sentence, controller)
-                                detect_verse_hybrid(sentence, controller)
+                                detect_verse_hybrid(sentence, controller, confidence=1.0)
                         except Exception as e:
                             logger.error(f"Sarvam message parsing error: {e}")
                 except asyncio.CancelledError:
