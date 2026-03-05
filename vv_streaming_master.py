@@ -61,6 +61,16 @@ CONFIRM_CALLBACK       = None
 REQUIRE_VERIFY       = True
 PANIC_KEY            = "esc"
 
+# ── SMART AMEN CONFIG ──
+SMART_AMEN_ENABLED   = True
+SMART_AMEN_KEYWORDS  = [
+    "let us pray",
+    "let's pray",
+    "please be seated",
+    "bow our heads",
+    "thank you jesus"
+]
+
 llm_client = openai.OpenAI(base_url="https://api.groq.com/openai/v1", api_key=GROQ_API_KEY)
 
 # ── GLOBALS ──
@@ -81,7 +91,18 @@ def trigger_panic():
     global _controller
     if _controller:
         _controller.close_presentation()
-    # Notice we DO NOT set stop_event here, so the engine keeps running!
+
+# ── SMART AMEN LOGIC ──
+def check_smart_amen(text, controller):
+    if not SMART_AMEN_ENABLED:
+        return False
+    text_lower = text.lower()
+    for kw in SMART_AMEN_KEYWORDS:
+        if kw in text_lower:
+            logger.info(f"🙏 Smart Amen triggered by phrase: '{kw}'")
+            controller.close_presentation()
+            return True
+    return False
 
 # ── CONFIGURE ──
 def configure(
@@ -90,13 +111,13 @@ def configure(
     dedup_window=60, cooldown=3.0, llm_enabled=True,
     bible_translation="kjv", deepgram_api_key="",
     groq_api_key="", sarvam_api_key="",
-    discord_webhook_url="", confidence=0.75, manual_confirm=True, confirm_callback=None, verify=True, panic_key="esc"
+    discord_webhook_url="", confidence=0.75, manual_confirm=True, confirm_callback=None, verify=True, panic_key="esc", smart_amen=True
 ):
     global DEEPGRAM_API_KEY, GROQ_API_KEY, SARVAM_API_KEY, DISCORD_WEBHOOK_URL
     global USE_SARVAM, DEEPGRAM_LANGUAGE, DEEPGRAM_MODEL, SARVAM_LANGUAGE
     global PRIMARY_PARSER, MIC_INDEX, RATE, CHUNK, REMOTE_URL
     global DEDUP_WINDOW, COOLDOWN, LLM_ENABLED, BIBLE_TRANSLATION, USE_XPATH, llm_client
-    global CONFIDENCE_THRESHOLD, REQUIRE_MANUAL_CONFIRM, CONFIRM_CALLBACK, REQUIRE_VERIFY, PANIC_KEY
+    global CONFIDENCE_THRESHOLD, REQUIRE_MANUAL_CONFIRM, CONFIRM_CALLBACK, REQUIRE_VERIFY, PANIC_KEY, SMART_AMEN_ENABLED
 
     DEEPGRAM_API_KEY    = deepgram_api_key
     GROQ_API_KEY        = groq_api_key
@@ -119,6 +140,7 @@ def configure(
     CONFIRM_CALLBACK       = confirm_callback
     REQUIRE_VERIFY         = verify
     PANIC_KEY              = panic_key
+    SMART_AMEN_ENABLED     = smart_amen
 
     global normalize_numbers_only
     if language == "en":
@@ -452,12 +474,12 @@ class VerseController:
             return False
 
     def close_presentation(self):
-        """ The 'Panic' action: Clicks the X button in VerseView to clear the screen """
+        """ Clears the screen via the VerseView X button """
         if not self.driver: return
         try:
             close_btn = self.driver.find_element(By.ID, "iconClose")
             close_btn.click()
-            logger.info("🚫 Presentation cleared off the screen via Panic Button!")
+            logger.info("🚫 Presentation cleared off the screen!")
         except Exception as e:
             logger.debug(f"Could not click close button (maybe already closed): {e}")
 
@@ -562,6 +584,15 @@ def detect_verse_hybrid(text, controller, confidence=1.0) -> bool:
 
     if not text or len(text.strip()) < 3:
         return False
+
+    # --- PHONETIC FIXES---
+    fixes = {
+        r"\b(?:sam's|sams|sam)\b": "psalms",
+        r"\bnayan\b": "nine"
+    }
+    for pattern, replacement in fixes.items():
+        text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
+    # --------------------------------------------------------------------------
 
     def trigger_onwards_if_needed(ref_string, original_text):
         if any(kw in original_text.lower() for kw in ONWARDS_KEYWORDS):
@@ -709,6 +740,12 @@ def detect_verse_hybrid(text, controller, confidence=1.0) -> bool:
         if not has_book and not has_number:
             return False
 
+        # --- LLM ANTI-SPAM (Debouncer) ---
+        # Prevent the LLM from triggering on tiny incomplete fragments (e.g. "Sa...")
+        if len(text.split()) < 4 and not has_number:
+            return False
+        # ---------------------------------
+
         logger.info(f"📞 LLM: '{text[:80]}'")
 
         def llm_task():
@@ -806,6 +843,11 @@ async def stream_audio(controller):
 
                             if data.get("is_final"):
                                 logger.info(f"📝 {sentence}")
+                                
+                                if check_smart_amen(sentence, controller):
+                                    partial_context = "" 
+                                    continue
+
                                 partial_context += " " + sentence.strip()
                                 
                                 # Send confidence down into the detector
@@ -911,6 +953,10 @@ async def stream_audio_sarvam(controller):
                             
                             if sentence and sentence != "None":
                                 logger.info(f"📝 {sentence}")
+                                
+                                if check_smart_amen(sentence, controller):
+                                    continue
+                                
                                 check_verse_queue(sentence, controller)
                                 detect_verse_hybrid(sentence, controller, confidence=1.0)
                         except Exception as e:

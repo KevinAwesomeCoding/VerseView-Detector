@@ -5,7 +5,7 @@ import threading
 import asyncio
 import logging
 import pyaudio
-import keyboard  # <-- ADDED for recording the hotkey!
+import keyboard 
 
 import settings as cfg
 import vv_streaming_master as engine
@@ -165,6 +165,33 @@ class VerseViewApp(ctk.CTk):
         sep_label("VerseView URL")
         self.url_entry = add_entry("http://localhost:50010/control.html")
 
+         # ── Current Context ──
+        sep_label("📌  Current Context")
+
+        ctx_frame = ctk.CTkFrame(right, fg_color="transparent")
+        ctx_frame.grid(row=row, column=0, sticky="ew", padx=14, pady=(0, 4))
+        ctx_frame.grid_columnconfigure((0, 1, 2), weight=1)
+        row += 1
+
+        ctk.CTkLabel(ctx_frame, text="Book",    anchor="center", font=ctk.CTkFont(size=11)).grid(row=0, column=0, padx=2)
+        ctk.CTkLabel(ctx_frame, text="Chapter", anchor="center", font=ctk.CTkFont(size=11)).grid(row=0, column=1, padx=2)
+        ctk.CTkLabel(ctx_frame, text="Verse",   anchor="center", font=ctk.CTkFont(size=11)).grid(row=0, column=2, padx=2)
+
+        self.ctx_book    = ctk.CTkEntry(ctx_frame, placeholder_text="e.g. John", width=80)
+        self.ctx_chapter = ctk.CTkEntry(ctx_frame, placeholder_text="e.g. 3",    width=50)
+        self.ctx_verse   = ctk.CTkEntry(ctx_frame, placeholder_text="e.g. 16",   width=50)
+
+        self.ctx_book.grid(row=1,    column=0, padx=2, pady=2)
+        self.ctx_chapter.grid(row=1, column=1, padx=2, pady=2)
+        self.ctx_verse.grid(row=1,   column=2, padx=2, pady=2)
+
+        ctk.CTkButton(
+            right, text="📌  Set Context", height=28,
+            fg_color="#5a3a8a", hover_color="#3f2060",
+            command=self._set_context
+        ).grid(row=row, column=0, sticky="ew", padx=14, pady=(0, 8))
+        row += 1
+
         # ── Verification & Confidence ──
         self.conf_val_label = sep_label("Confidence Threshold: 75%")
         
@@ -197,31 +224,8 @@ class VerseViewApp(ctk.CTk):
         ctk.CTkCheckBox(right, text="Require Verification (Hear verse twice)", variable=self.verify_var).grid(row=row, column=0, sticky="w", padx=14, pady=(10, 4))
         row += 1
 
-        # ── Current Context ──
-        sep_label("📌  Current Context")
-
-        ctx_frame = ctk.CTkFrame(right, fg_color="transparent")
-        ctx_frame.grid(row=row, column=0, sticky="ew", padx=14, pady=(0, 4))
-        ctx_frame.grid_columnconfigure((0, 1, 2), weight=1)
-        row += 1
-
-        ctk.CTkLabel(ctx_frame, text="Book",    anchor="center", font=ctk.CTkFont(size=11)).grid(row=0, column=0, padx=2)
-        ctk.CTkLabel(ctx_frame, text="Chapter", anchor="center", font=ctk.CTkFont(size=11)).grid(row=0, column=1, padx=2)
-        ctk.CTkLabel(ctx_frame, text="Verse",   anchor="center", font=ctk.CTkFont(size=11)).grid(row=0, column=2, padx=2)
-
-        self.ctx_book    = ctk.CTkEntry(ctx_frame, placeholder_text="e.g. John", width=80)
-        self.ctx_chapter = ctk.CTkEntry(ctx_frame, placeholder_text="e.g. 3",    width=50)
-        self.ctx_verse   = ctk.CTkEntry(ctx_frame, placeholder_text="e.g. 16",   width=50)
-
-        self.ctx_book.grid(row=1,    column=0, padx=2, pady=2)
-        self.ctx_chapter.grid(row=1, column=1, padx=2, pady=2)
-        self.ctx_verse.grid(row=1,   column=2, padx=2, pady=2)
-
-        ctk.CTkButton(
-            right, text="📌  Set Context", height=28,
-            fg_color="#5a3a8a", hover_color="#3f2060",
-            command=self._set_context
-        ).grid(row=row, column=0, sticky="ew", padx=14, pady=(0, 8))
+        self.smart_amen_var = ctk.BooleanVar(value=True)
+        ctk.CTkCheckBox(right, text="Smart Amen (Auto-Clear on 'Let us pray')", variable=self.smart_amen_var).grid(row=row, column=0, sticky="w", padx=14, pady=(10, 4))
         row += 1
 
         # ── Advanced toggle ──
@@ -373,6 +377,7 @@ class VerseViewApp(ctk.CTk):
         
         self.manual_var.set(s.get("manual_confirm", True))
         self.verify_var.set(s.get("verify", True))
+        self.smart_amen_var.set(s.get("smart_amen", True))
         
         saved_panic = s.get("panic_key", "esc")
         self.panic_var.set(saved_panic)
@@ -402,6 +407,7 @@ class VerseViewApp(ctk.CTk):
             "confidence":          self.conf_var.get(),
             "manual_confirm":      self.manual_var.get(),
             "verify":              self.verify_var.get(),
+            "smart_amen":          self.smart_amen_var.get(),
             "panic_key":           self.panic_var.get(),
             "rate":                self._safe_int(self.rate_entry,       16000),
             "chunk":               self._safe_int(self.chunk_entry,      4096),
@@ -592,6 +598,7 @@ class VerseViewApp(ctk.CTk):
                 manual_confirm      = s["manual_confirm"],
                 confirm_callback    = self._user_confirm_callback,
                 verify              = s["verify"],
+                smart_amen          = s["smart_amen"],
                 panic_key           = s["panic_key"],
             )
 
