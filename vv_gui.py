@@ -255,6 +255,11 @@ class VerseViewApp(ctk.CTk):
         ctk.CTkCheckBox(right, text="Smart Amen (Auto-Clear on 'Let us pray')", variable=self.smart_amen_var).grid(row=row, column=0, sticky="w", padx=14, pady=(10, 4))
         row += 1
 
+        # ── AUTO-SAVE TOGGLE ──
+        self.auto_save_var = ctk.BooleanVar(value=True)
+        ctk.CTkCheckBox(right, text="Auto-Save Sermon Notes on App Close", variable=self.auto_save_var).grid(row=row, column=0, sticky="w", padx=14, pady=(10, 4))
+        row += 1
+
         # ── Advanced toggle ──
         self._adv_open = False
         self.btn_adv = ctk.CTkButton(
@@ -405,6 +410,7 @@ class VerseViewApp(ctk.CTk):
         self.manual_var.set(s.get("manual_confirm", True))
         self.verify_var.set(s.get("verify", True))
         self.smart_amen_var.set(s.get("smart_amen", True))
+        self.auto_save_var.set(s.get("auto_save_notes", True))
         
         saved_panic = s.get("panic_key", "esc")
         self.panic_var.set(saved_panic)
@@ -435,6 +441,7 @@ class VerseViewApp(ctk.CTk):
             "manual_confirm":      self.manual_var.get(),
             "verify":              self.verify_var.get(),
             "smart_amen":          self.smart_amen_var.get(),
+            "auto_save_notes":     self.auto_save_var.get(),
             "panic_key":           self.panic_var.get(),
             "rate":                self._safe_int(self.rate_entry,       16000),
             "chunk":               self._safe_int(self.chunk_entry,      4096),
@@ -720,7 +727,7 @@ class VerseViewApp(ctk.CTk):
 
             import tkinter.filedialog as fd
             path = fd.asksaveasfilename(
-                initialdir=notes_folder,
+                initialdir=notes_folder, 
                 defaultextension=".txt", 
                 filetypes=[("Text Files", "*.txt")],
                 initialfile=suggested_filename
@@ -729,7 +736,7 @@ class VerseViewApp(ctk.CTk):
                 with open(path, "w", encoding="utf-8") as f:
                     f.write(content)
                 self._append_log(f"💾 Saved Sermon Notes to {path}")
-                self._notes_saved = True 
+                self._notes_saved = True # <--- Note is safely saved!
                 win.destroy()
                 
         btn_save = ctk.CTkButton(
@@ -746,9 +753,9 @@ class VerseViewApp(ctk.CTk):
             self._append_log("🗑️ Sermon memory wiped clean for the next service.")
 
     def on_closing(self):
-        if not self._notes_saved and engine.full_sermon_transcript and len(engine.full_sermon_transcript.strip()) > 100:
+        if self.auto_save_var.get() and not self._notes_saved and engine.full_sermon_transcript and len(engine.full_sermon_transcript.strip()) > 100:
             self.lbl_status.configure(text="● Auto-Saving Notes...", text_color="#a07020")
-            self.update() 
+            self.update()
             try:
                 self._append_log("⚠️ App closed without saving! Auto-generating summary...")
                 content = engine.generate_sermon_summary()
