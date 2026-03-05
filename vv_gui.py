@@ -5,7 +5,11 @@ import threading
 import asyncio
 import logging
 import pyaudio
-import keyboard 
+import keyboard
+import datetime
+import re
+import os
+import sys
 
 import settings as cfg
 import vv_streaming_master as engine
@@ -35,6 +39,7 @@ class VerseViewApp(ctk.CTk):
         self._s             = cfg.load()
         self._running       = False
         self._engine_thread = None
+        self._notes_saved   = False
 
         self._build_ui()
         self._populate_mics()
@@ -87,9 +92,9 @@ class VerseViewApp(ctk.CTk):
         )
         self.log_box.grid(row=1, column=0, padx=10, pady=(0, 10), sticky="nsew")
 
+        # ── ACTION BUTTONS ROW ──
         action_frame = ctk.CTkFrame(left, fg_color="transparent")
         action_frame.grid(row=2, column=0, padx=10, pady=(0, 10), sticky="ew")
-        
         action_frame.grid_columnconfigure(1, weight=1)
 
         ctk.CTkButton(
@@ -110,7 +115,7 @@ class VerseViewApp(ctk.CTk):
         self.btn_clear_sermon = ctk.CTkButton(
             action_frame, text="🗑️ Clear Memory", height=28, width=70,
             fg_color="transparent", border_width=1,
-            text_color=("#b53b3b", "#e05a5a"), # Red text
+            text_color=("#b53b3b", "#e05a5a"), 
             command=self._clear_sermon_memory
         )
         self.btn_clear_sermon.grid(row=0, column=2, padx=(5, 0), sticky="e")
@@ -186,7 +191,7 @@ class VerseViewApp(ctk.CTk):
         sep_label("VerseView URL")
         self.url_entry = add_entry("http://localhost:50010/control.html")
 
-         # ── Current Context ──
+        # ── Current Context ──
         sep_label("📌  Current Context")
 
         ctx_frame = ctk.CTkFrame(right, fg_color="transparent")
@@ -245,6 +250,7 @@ class VerseViewApp(ctk.CTk):
         ctk.CTkCheckBox(right, text="Require Verification (Hear verse twice)", variable=self.verify_var).grid(row=row, column=0, sticky="w", padx=14, pady=(10, 4))
         row += 1
 
+        # ── SMART AMEN TOGGLE ──
         self.smart_amen_var = ctk.BooleanVar(value=True)
         ctk.CTkCheckBox(right, text="Smart Amen (Auto-Clear on 'Let us pray')", variable=self.smart_amen_var).grid(row=row, column=0, sticky="w", padx=14, pady=(10, 4))
         row += 1
@@ -663,6 +669,21 @@ class VerseViewApp(ctk.CTk):
         self.lang_menu.configure(state="normal")
         self.mic_menu.configure(state="normal")
 
+    # ── FOLDER MANAGER ──
+    def _get_sermon_notes_dir(self):
+        if getattr(sys, 'frozen', False):
+            app_dir = os.path.dirname(sys.executable)
+        else:
+            app_dir = os.path.dirname(os.path.abspath(__file__))
+            
+        parent_dir = os.path.dirname(app_dir)
+        
+        notes_dir = os.path.join(parent_dir, "Sermon Notes")
+        os.makedirs(notes_dir, exist_ok=True)
+        
+        return notes_dir
+
+    # ── SERMON CLIFF NOTES ──
     def _generate_summary(self):
         def _task():
             self._append_log("⏳ Asking AI to summarize the sermon... (Please wait)")
@@ -686,16 +707,29 @@ class VerseViewApp(ctk.CTk):
         textbox.configure(state="disabled")
         
         def _save():
+            default_title = "Sermon_Notes"
+            first_line = content.split('\n')[0]
+            if first_line.startswith("TITLE:"):
+                raw_title = first_line.replace("TITLE:", "").strip()
+                default_title = re.sub(r'[\\/*?:"<>|]', "", raw_title)
+            
+            date_str = datetime.date.today().strftime("%B %d %Y")
+            suggested_filename = f"{default_title} {date_str}.txt"
+
+            notes_folder = self._get_sermon_notes_dir()
+
             import tkinter.filedialog as fd
             path = fd.asksaveasfilename(
+                initialdir=notes_folder,
                 defaultextension=".txt", 
                 filetypes=[("Text Files", "*.txt")],
-                initialfile="Sermon_Notes.txt"
+                initialfile=suggested_filename
             )
             if path:
                 with open(path, "w", encoding="utf-8") as f:
                     f.write(content)
                 self._append_log(f"💾 Saved Sermon Notes to {path}")
+                self._notes_saved = True 
                 win.destroy()
                 
         btn_save = ctk.CTkButton(
@@ -704,13 +738,40 @@ class VerseViewApp(ctk.CTk):
             command=_save
         )
         btn_save.pack(pady=(0, 15))
-    
+
     def _clear_sermon_memory(self):
         if mb.askyesno("Clear Memory", "Are you sure you want to delete the current recorded sermon?\n\nThis cannot be undone!"):
             engine.clear_sermon_buffer()
+            self._notes_saved = False 
             self._append_log("🗑️ Sermon memory wiped clean for the next service.")
 
     def on_closing(self):
+        if not self._notes_saved and engine.full_sermon_transcript and len(engine.full_sermon_transcript.strip()) > 100:
+            self.lbl_status.configure(text="● Auto-Saving Notes...", text_color="#a07020")
+            self.update() 
+            try:
+                self._append_log("⚠️ App closed without saving! Auto-generating summary...")
+                content = engine.generate_sermon_summary()
+                
+                default_title = "Unsaved_Sermon"
+                first_line = content.split('\n')[0]
+                if first_line.startswith("TITLE:"):
+                    raw_title = first_line.replace("TITLE:", "").strip()
+                    default_title = re.sub(r'[\\/*?:"<>|]', "", raw_title)
+                
+                date_str = datetime.date.today().strftime("%B %d %Y")
+                filename = f"{default_title} {date_str}.txt"
+                
+                notes_folder = self._get_sermon_notes_dir()
+                filepath = os.path.join(notes_folder, filename)
+                
+                with open(filepath, "w", encoding="utf-8") as f:
+                    f.write(content)
+                print(f"Emergency Auto-Save triggered: {filepath}")
+            except Exception as e:
+                print(f"Emergency Auto-Save Failed: {e}")
+
+        # Shut down normally
         cfg.save(self._collect_settings())
         if self._running:
             engine.request_stop()

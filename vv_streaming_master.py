@@ -78,6 +78,8 @@ stop_event   = None
 engine_loop  = None
 _controller  = None
 
+full_sermon_transcript = ""
+verses_cited           = []
 
 # ── STOP & PANIC LOGIC ──
 def request_stop():
@@ -110,10 +112,10 @@ def generate_sermon_summary():
     global full_sermon_transcript, verses_cited, LLM_ENABLED, llm_client
     
     if not LLM_ENABLED or not GROQ_API_KEY:
-        return "⚠️ LLM Fallback is disabled or missing Groq API Key. Required to generate notes."
+        return "⚠️ LLM Fallback is disabled or missing Groq API Key. Required to generate summaries."
         
     if len(full_sermon_transcript.strip()) < 100:
-        return "⚠️ Transcript is too short to generate meaningful notes."
+        return "⚠️ Transcript is too short to generate a meaningful summary."
 
     prompt = (
         "You are an expert sermon note-taker. Read the following sermon transcript "
@@ -145,40 +147,25 @@ def generate_sermon_summary():
         f"Transcript:\n{full_sermon_transcript}\n"
     )
 
-    max_retries = 3
-    for attempt in range(max_retries):
-        try:
-            logger.info(f"⏳ Generating Structured Sermon Notes via AI... (Attempt {attempt + 1}/{max_retries})")
-            response = llm_client.chat.completions.create(
-                model="meta-llama/llama-4-scout-17b-16e-instruct", 
-                messages=[{"role": "user", "content": prompt}]
-            )
-            notes = response.choices[0].message.content.strip()
+    try:
+        logger.info("⏳ Generating Sermon Cliff Notes via AI... (This may take a moment)")
+        response = llm_client.chat.completions.create(
+            model="meta-llama/llama-4-scout-17b-16e-instruct",
+            messages=[{"role": "user", "content": prompt}]
+        )
+        summary = response.choices[0].message.content.strip()
+        
+        # Append verses
+        verse_str = "\n".join([f"- {v}" for v in verses_cited])
+        if verse_str:
+            summary += "\n\n### Verses Cited:\n" + verse_str
             
-            verse_str = "\n".join([f"* {v}" for v in verses_cited])
-            if verse_str:
-                notes += "\n\n### 🪵 Extracted Cross-References:\n" + verse_str
-                
-            logger.info("✅ Sermon Notes generated!")
-            return notes
-            
-        except Exception as e:
-            error_msg = str(e).lower()
-            if "429" in error_msg or "rate limit" in error_msg:
-                if attempt < max_retries - 1:
-                    logger.warning("⚠️ Rate limit hit. Waiting 65 seconds before retrying...")
-                    time.sleep(65) 
-                else:
-                    logger.error(f"❌ Failed after {max_retries} attempts due to rate limits: {e}")
-                    return f"Error: Rate limit exceeded after {max_retries} retries."
-            else:
-                if attempt < max_retries - 1:
-                    logger.warning(f"⚠️ Error encountered: {e}. Retrying in 5 seconds...")
-                    time.sleep(5)
-                else:
-                    logger.error(f"❌ Failed to generate notes: {e}")
-                    return f"Error generating notes: {e}"
-                
+        logger.info("✅ Sermon Summary generated!")
+        return summary
+    except Exception as e:
+        logger.error(f"❌ Failed to generate summary: {e}")
+        return f"Error generating summary: {e}"
+
 def clear_sermon_buffer():
     global full_sermon_transcript, verses_cited
     full_sermon_transcript = ""
@@ -201,9 +188,7 @@ def configure(
     global CONFIDENCE_THRESHOLD, REQUIRE_MANUAL_CONFIRM, CONFIRM_CALLBACK, REQUIRE_VERIFY, PANIC_KEY, SMART_AMEN_ENABLED
     global full_sermon_transcript, verses_cited
 
-    # Reset buffer on start
-    full_sermon_transcript = ""
-    verses_cited = []
+    # NOTE: Sermon buffer is intentionally NOT reset here so memory persists across stops/starts!
 
     DEEPGRAM_API_KEY    = deepgram_api_key
     GROQ_API_KEY        = groq_api_key
