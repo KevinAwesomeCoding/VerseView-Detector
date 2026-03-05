@@ -73,10 +73,11 @@ SMART_AMEN_KEYWORDS  = [
 
 llm_client = openai.OpenAI(base_url="https://api.groq.com/openai/v1", api_key=GROQ_API_KEY)
 
-# ── GLOBALS ──
+# ── GLOBALS & SERMON BUFFER ──
 stop_event   = None
 engine_loop  = None
 _controller  = None
+
 
 # ── STOP & PANIC LOGIC ──
 def request_stop():
@@ -104,6 +105,86 @@ def check_smart_amen(text, controller):
             return True
     return False
 
+# ── SERMON SUMMARY GENERATOR ──
+def generate_sermon_summary():
+    global full_sermon_transcript, verses_cited, LLM_ENABLED, llm_client
+    
+    if not LLM_ENABLED or not GROQ_API_KEY:
+        return "⚠️ LLM Fallback is disabled or missing Groq API Key. Required to generate notes."
+        
+    if len(full_sermon_transcript.strip()) < 100:
+        return "⚠️ Transcript is too short to generate meaningful notes."
+
+    prompt = (
+        "You are an expert sermon note-taker. Read the following sermon transcript "
+        "and generate structured sermon notes using the exact Markdown format below. "
+        "IMPORTANT: If the transcript contains any other languages (such as Malayalam, Hindi, or others), "
+        "you must translate those portions and write the final output strictly in English.\n\n"
+        "Extract the information from the transcript as best as you can.\n\n"
+        "---FORMAT TEMPLATE START---\n"
+        "## 📅 [Extract Date if present, or write 'Date'] | [Sermon Series Name if mentioned]\n"
+        "**Title:** [Create a short, compelling title]\n"
+        "**Speaker:** [Speaker Name if mentioned]\n\n"
+        "### 📖 Primary Scripture\n"
+        "**Main Passage:** [Identify the core passage]\n"
+        "**Key Verse:** [Quote the most central verse from the transcript]\n\n"
+        "### 💡 The Big Idea\n"
+        "* [In one clear sentence, summarize the absolute 'bottom line' of the message]\n\n"
+        "### 📝 Main Points & Observations\n"
+        "[Identify 3 main points from the sermon. For each point, use this exact structure:]\n"
+        "**1. [Point Name]**\n"
+        "* **Supporting Scripture:** [Reference if any]\n"
+        "* **Notes:** [Brief 1-2 sentence summary of this point]\n"
+        "* *Key Thought:* [One standout quote or idea from this section]\n\n"
+        "### ❓ Questions & Reflections\n"
+        "* **Reflection:** [Generate one challenging question based on the sermon for the listener]\n\n"
+        "### 🏃‍♂️ The 'So What?' (Application)\n"
+        "1. **Immediate Step:** [A practical action step the listener can do this week]\n"
+        "2. **Prayer Focus:** [A short prayer prompt related to the message]\n"
+        "---FORMAT TEMPLATE END---\n\n"
+        f"Transcript:\n{full_sermon_transcript}\n"
+    )
+
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            logger.info(f"⏳ Generating Structured Sermon Notes via AI... (Attempt {attempt + 1}/{max_retries})")
+            response = llm_client.chat.completions.create(
+                model="meta-llama/llama-4-scout-17b-16e-instruct", 
+                messages=[{"role": "user", "content": prompt}]
+            )
+            notes = response.choices[0].message.content.strip()
+            
+            verse_str = "\n".join([f"* {v}" for v in verses_cited])
+            if verse_str:
+                notes += "\n\n### 🪵 Extracted Cross-References:\n" + verse_str
+                
+            logger.info("✅ Sermon Notes generated!")
+            return notes
+            
+        except Exception as e:
+            error_msg = str(e).lower()
+            if "429" in error_msg or "rate limit" in error_msg:
+                if attempt < max_retries - 1:
+                    logger.warning("⚠️ Rate limit hit. Waiting 65 seconds before retrying...")
+                    time.sleep(65) 
+                else:
+                    logger.error(f"❌ Failed after {max_retries} attempts due to rate limits: {e}")
+                    return f"Error: Rate limit exceeded after {max_retries} retries."
+            else:
+                if attempt < max_retries - 1:
+                    logger.warning(f"⚠️ Error encountered: {e}. Retrying in 5 seconds...")
+                    time.sleep(5)
+                else:
+                    logger.error(f"❌ Failed to generate notes: {e}")
+                    return f"Error generating notes: {e}"
+                
+def clear_sermon_buffer():
+    global full_sermon_transcript, verses_cited
+    full_sermon_transcript = ""
+    verses_cited = []
+    logger.info("🗑️ Sermon memory has been manually cleared.")
+
 # ── CONFIGURE ──
 def configure(
     language="en", mic_index=1, rate=16000, chunk=4096,
@@ -118,6 +199,11 @@ def configure(
     global PRIMARY_PARSER, MIC_INDEX, RATE, CHUNK, REMOTE_URL
     global DEDUP_WINDOW, COOLDOWN, LLM_ENABLED, BIBLE_TRANSLATION, USE_XPATH, llm_client
     global CONFIDENCE_THRESHOLD, REQUIRE_MANUAL_CONFIRM, CONFIRM_CALLBACK, REQUIRE_VERIFY, PANIC_KEY, SMART_AMEN_ENABLED
+    global full_sermon_transcript, verses_cited
+
+    # Reset buffer on start
+    full_sermon_transcript = ""
+    verses_cited = []
 
     DEEPGRAM_API_KEY    = deepgram_api_key
     GROQ_API_KEY        = groq_api_key
@@ -484,7 +570,7 @@ class VerseController:
             logger.debug(f"Could not click close button (maybe already closed): {e}")
 
     def send_verse(self, ref, bypass_cooldown=False, confidence=1.0):
-        global current_book, current_chapter, current_verse
+        global current_book, current_chapter, current_verse, verses_cited
         now = time.time()
 
         # ── MANUAL CONFIRMATION LOGIC ──
@@ -537,6 +623,10 @@ class VerseController:
             self.driver.execute_script("arguments[0].value = arguments[1];", self.box, ref)
             self.driver.execute_script("arguments[0].click();", self.btn)
             logger.info(f"✅ PRESENTED: {ref}")
+            
+            # --- Store presented verse for the Sermon Notes! ---
+            if ref not in verses_cited:
+                verses_cited.append(ref)
 
             send_to_discord(ref)
 
@@ -585,7 +675,7 @@ def detect_verse_hybrid(text, controller, confidence=1.0) -> bool:
     if not text or len(text.strip()) < 3:
         return False
 
-    # --- PHONETIC FIXES---
+    # --- PHONETIC FIXES (Catch common speech-to-text errors before parsing) ---
     fixes = {
         r"\b(?:sam's|sams|sam)\b": "psalms",
         r"\bnayan\b": "nine"
@@ -741,7 +831,6 @@ def detect_verse_hybrid(text, controller, confidence=1.0) -> bool:
             return False
 
         # --- LLM ANTI-SPAM (Debouncer) ---
-        # Prevent the LLM from triggering on tiny incomplete fragments (e.g. "Sa...")
         if len(text.split()) < 4 and not has_number:
             return False
         # ---------------------------------
@@ -764,8 +853,11 @@ def detect_verse_hybrid(text, controller, confidence=1.0) -> bool:
 
 # ── DEEPGRAM STREAMING ──
 async def stream_audio(controller):
+    global full_sermon_transcript
     import websockets
     import json
+
+    partial_context = ""
 
     audio  = pyaudio.PyAudio()
     stream = None
@@ -818,7 +910,8 @@ async def stream_audio(controller):
                     logger.error(f"Send error: {e}")
 
             async def recv_transcripts():
-                partial_context = ""
+                nonlocal partial_context
+                global full_sermon_transcript
                 try:
                     async for msg in ws:
                         try:
@@ -844,6 +937,9 @@ async def stream_audio(controller):
                             if data.get("is_final"):
                                 logger.info(f"📝 {sentence}")
                                 
+                                # --- Add to Sermon Buffer ---
+                                full_sermon_transcript += " " + sentence.strip()
+
                                 if check_smart_amen(sentence, controller):
                                     partial_context = "" 
                                     continue
@@ -885,6 +981,7 @@ async def stream_audio(controller):
 
 # ── SARVAM STREAMING ──
 async def stream_audio_sarvam(controller):
+    global full_sermon_transcript
     import base64
     from sarvamai import AsyncSarvamAI
 
@@ -938,6 +1035,7 @@ async def stream_audio_sarvam(controller):
                     logger.error(f"Sarvam send error: {e}")
 
             async def recv_transcripts():
+                global full_sermon_transcript
                 try:
                     async for message in ws:
                         try:
@@ -954,6 +1052,9 @@ async def stream_audio_sarvam(controller):
                             if sentence and sentence != "None":
                                 logger.info(f"📝 {sentence}")
                                 
+                                # --- Add to Sermon Buffer ---
+                                full_sermon_transcript += " " + sentence.strip()
+
                                 if check_smart_amen(sentence, controller):
                                     continue
                                 

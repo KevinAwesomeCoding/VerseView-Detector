@@ -87,12 +87,33 @@ class VerseViewApp(ctk.CTk):
         )
         self.log_box.grid(row=1, column=0, padx=10, pady=(0, 10), sticky="nsew")
 
+        action_frame = ctk.CTkFrame(left, fg_color="transparent")
+        action_frame.grid(row=2, column=0, padx=10, pady=(0, 10), sticky="ew")
+        
+        action_frame.grid_columnconfigure(1, weight=1)
+
         ctk.CTkButton(
-            left, text="Clear Log", height=28,
+            action_frame, text="Clear Log", height=28, width=70,
             fg_color="transparent", border_width=1,
             text_color=("gray40", "gray60"),
             command=self._clear_log
-        ).grid(row=2, column=0, padx=10, pady=(0, 8), sticky="e")
+        ).grid(row=0, column=0, padx=(0, 5), sticky="w")
+
+        self.btn_summary = ctk.CTkButton(
+            action_frame, text="📝 Generate Sermon Notes", height=32,
+            fg_color="#a07020", hover_color="#805010",
+            font=ctk.CTkFont(size=13, weight="bold"),
+            command=self._generate_summary
+        )
+        self.btn_summary.grid(row=0, column=1, padx=5, sticky="ew")
+
+        self.btn_clear_sermon = ctk.CTkButton(
+            action_frame, text="🗑️ Clear Memory", height=28, width=70,
+            fg_color="transparent", border_width=1,
+            text_color=("#b53b3b", "#e05a5a"), # Red text
+            command=self._clear_sermon_memory
+        )
+        self.btn_clear_sermon.grid(row=0, column=2, padx=(5, 0), sticky="e")
 
         # ── RIGHT PANEL ──
         right = ctk.CTkScrollableFrame(
@@ -641,6 +662,53 @@ class VerseViewApp(ctk.CTk):
         self.lbl_status.configure(text="● Stopped", text_color="#666666")
         self.lang_menu.configure(state="normal")
         self.mic_menu.configure(state="normal")
+
+    def _generate_summary(self):
+        def _task():
+            self._append_log("⏳ Asking AI to summarize the sermon... (Please wait)")
+            summary = engine.generate_sermon_summary()
+            self.after(0, lambda: self._show_summary_window(summary))
+            
+        threading.Thread(target=_task, daemon=True).start()
+
+    def _show_summary_window(self, content):
+        win = ctk.CTkToplevel(self)
+        win.title("Sermon Cliff Notes")
+        win.geometry("600x700")
+        
+        # Bring window to front
+        win.attributes("-topmost", True)
+        self.after(100, lambda: win.attributes("-topmost", False))
+        
+        textbox = ctk.CTkTextbox(win, font=("Segoe UI", 14), wrap="word")
+        textbox.pack(fill="both", expand=True, padx=15, pady=15)
+        textbox.insert("1.0", content)
+        textbox.configure(state="disabled")
+        
+        def _save():
+            import tkinter.filedialog as fd
+            path = fd.asksaveasfilename(
+                defaultextension=".txt", 
+                filetypes=[("Text Files", "*.txt")],
+                initialfile="Sermon_Notes.txt"
+            )
+            if path:
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write(content)
+                self._append_log(f"💾 Saved Sermon Notes to {path}")
+                win.destroy()
+                
+        btn_save = ctk.CTkButton(
+            win, text="💾 Save to File", 
+            font=ctk.CTkFont(size=14, weight="bold"), 
+            command=_save
+        )
+        btn_save.pack(pady=(0, 15))
+    
+    def _clear_sermon_memory(self):
+        if mb.askyesno("Clear Memory", "Are you sure you want to delete the current recorded sermon?\n\nThis cannot be undone!"):
+            engine.clear_sermon_buffer()
+            self._append_log("🗑️ Sermon memory wiped clean for the next service.")
 
     def on_closing(self):
         cfg.save(self._collect_settings())
