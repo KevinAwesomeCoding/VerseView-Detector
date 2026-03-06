@@ -37,7 +37,9 @@ jobs:
           path: "dist/VerseView_Detector.exe"
 
   build-mac-intel:
-    runs-on: macos-15-intel
+    runs-on: macos-13 # <--- CHANGED THIS to an older Mac environment
+    env:
+      MACOSX_DEPLOYMENT_TARGET: "10.15" # <--- APPLIES THIS to all installations and builds
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -56,8 +58,6 @@ jobs:
           pip install pyinstaller customtkinter selenium webdriver-manager certifi pyaudio requests websockets openai keyboard
 
       - name: Build App
-        env:
-          MACOSX_DEPLOYMENT_TARGET: "13.0"
         run: pyinstaller --clean verseview.spec
 
       - name: Ad-hoc sign App
