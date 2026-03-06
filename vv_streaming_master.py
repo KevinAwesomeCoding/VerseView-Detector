@@ -9,7 +9,7 @@ import requests
 import certifi
 import threading
 import openai
-import keyboard
+# import keyboard
 
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
@@ -1075,7 +1075,7 @@ async def main():
     # ── PANIC BUTTON BINDING ──
     try:
         if PANIC_KEY:
-            keyboard.add_hotkey(PANIC_KEY, trigger_panic)
+            # keyboard.add_hotkey(PANIC_KEY, trigger_panic)
             logger.info(f"🚨 Panic Button active on: '{PANIC_KEY}'")
     except Exception as e:
         logger.warning(f"⚠️ Could not bind panic key (Mac Accessibility Permissions may be needed): {e}")
