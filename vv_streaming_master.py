@@ -1123,6 +1123,7 @@ async def main():
         else:
             await stream_audio(_controller)
     finally:
+        panic_listener.stop()
         _controller.cleanup()
         _controller = None
         logger.info(f"📊 LLM calls: {LLM_CALL_COUNT}")
