@@ -56,7 +56,7 @@ To make an app again do this :
 
 source venv/bin/activate
 
-pip install pyinstaller customtkinter selenium webdriver-manager certifi pyaudio requests websockets openai
+pip install pyinstaller customtkinter selenium webdriver-manager certifi pyaudio requests websockets openai keyboard
 
 pyinstaller --clean verseview.spec
 
