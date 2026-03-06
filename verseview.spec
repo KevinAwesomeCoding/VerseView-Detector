@@ -35,6 +35,8 @@ a = Analysis(
 	    'selenium.webdriver.chrome.options', 
 	    'selenium.webdriver.chrome.webdriver',
 	    'selenium.webdriver.chrome.service',
+        'pynput.keyboard._darwin',
+        'pynput.keyboard._win32',
         'webdriver_manager',
         'sarvamai',
         'keyboard'

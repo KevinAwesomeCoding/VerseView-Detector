@@ -9,7 +9,7 @@ import requests
 import certifi
 import threading
 import openai
-# import keyboard
+from pynput import keyboard as pynput_kb
 
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
@@ -1075,10 +1075,24 @@ async def main():
     # ── PANIC BUTTON BINDING ──
     try:
         if PANIC_KEY:
-            # keyboard.add_hotkey(PANIC_KEY, trigger_panic)
+            def on_press(key):
+                try:
+                    k = key.char
+                except AttributeError:
+                    k = key.name
+                
+                # If the key they pressed matches their saved setting, clear the screen!
+                if k == PANIC_KEY:
+                    trigger_panic()
+
+            # Start a background thread to listen for the panic key
+            panic_listener = pynput_kb.Listener(on_press=on_press)
+            panic_listener.daemon = True
+            panic_listener.start()
+            
             logger.info(f"🚨 Panic Button active on: '{PANIC_KEY}'")
     except Exception as e:
-        logger.warning(f"⚠️ Could not bind panic key (Mac Accessibility Permissions may be needed): {e}")
+        logger.warning(f"⚠️ Could not bind panic key: {e}")
 
     _controller = VerseController()
     connected  = False

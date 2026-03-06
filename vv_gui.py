@@ -5,7 +5,7 @@ import threading
 import asyncio
 import logging
 import pyaudio
-# import keyboard
+from pynput import keyboard as pynput_kb
 import datetime
 import re
 import os
@@ -369,13 +369,23 @@ class VerseViewApp(ctk.CTk):
     # ─────────────────────────────────────────────────
     def _record_panic_key(self):
         """ Allows the user to press a key combo to record it safely without typing """
-        self.panic_btn.configure(text="Listening... Press your keys now!", fg_color="#a07020", state="disabled")
+        self.panic_btn.configure(text="Listening... Press a key now!", fg_color="#a07020", state="disabled")
+
+        def on_press(key):
+            try:
+                key_name = key.char
+            except AttributeError:
+                key_name = key.name
+            
+            if key_name:
+                self.after(0, lambda: self._on_panic_recorded(key_name))
+            
+            return False 
 
         def recorder():
             try:
-                # This safely blocks in the background thread until the user presses a combo!
-                combo = keyboard.read_hotkey(suppress=False)
-                self.after(0, lambda: self._on_panic_recorded(combo))
+                with pynput_kb.Listener(on_press=on_press) as listener:
+                    listener.join()
             except Exception as e:
                 self._append_log(f"⚠️ Key recording error: {e}")
                 self.after(0, lambda: self._on_panic_recorded(self.panic_var.get()))
@@ -388,7 +398,6 @@ class VerseViewApp(ctk.CTk):
             self.panic_btn.configure(text=f"Panic Key: {combo}", fg_color=["#3B8ED0", "#1F6AA5"], state="normal")
             self._append_log(f"⌨️ Panic key updated to: {combo}")
         else:
-            # Fallback if something went wrong
             self.panic_btn.configure(text=f"Panic Key: {self.panic_var.get()}", fg_color=["#3B8ED0", "#1F6AA5"], state="normal")
 
 
