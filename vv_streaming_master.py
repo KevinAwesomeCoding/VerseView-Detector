@@ -489,7 +489,7 @@ def send_to_discord(verse: str):
         try:
             r = requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=5, verify=certifi.where())
             if r.status_code == 204:
-                logger.info("📩 Sent to Discord")
+                # logger.info("📩 Sent to Discord")
         except Exception as e:
             logger.error(f"Discord failed: {e}")
 
