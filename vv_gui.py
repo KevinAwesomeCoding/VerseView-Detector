@@ -5,7 +5,7 @@ import threading
 import asyncio
 import logging
 import pyaudio
-import keyboard
+# import keyboard
 import datetime
 import re
 import os
