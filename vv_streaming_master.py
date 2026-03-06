@@ -61,6 +61,11 @@ CONFIRM_CALLBACK       = None
 REQUIRE_VERIFY       = True
 PANIC_KEY            = "esc"
 
+# ── LIVE POINTS CONFIG ──
+LIVE_POINTS_PROMPT         = ""
+LIVE_POINTS_CALLBACK       = None
+LIVE_POINTS_GET_CURRENT_CB = None
+
 # ── SMART AMEN CONFIG ──
 SMART_AMEN_ENABLED   = True
 SMART_AMEN_KEYWORDS  = [
@@ -107,7 +112,51 @@ def check_smart_amen(text, controller):
             return True
     return False
 
-# ── SERMON SUMMARY GENERATOR ──
+# ── LIVE POINTS GENERATOR (BACKGROUND LOOP) ──
+async def live_points_loop():
+    """ Periodically asks Groq to extract main points from the growing transcript """
+    global full_sermon_transcript, LLM_ENABLED, llm_client
+    global LIVE_POINTS_PROMPT, LIVE_POINTS_CALLBACK, LIVE_POINTS_GET_CURRENT_CB
+    
+    last_processed_length = 0
+    
+    while not stop_event.is_set():
+        await asyncio.sleep(15) 
+        
+        if not LLM_ENABLED or not GROQ_API_KEY or not LIVE_POINTS_CALLBACK:
+            continue
+            
+        current_transcript = full_sermon_transcript.strip()
+        
+        if len(current_transcript) < 150 or len(current_transcript) <= last_processed_length + 50:
+            continue 
+            
+        last_processed_length = len(current_transcript)
+        
+        current_display = LIVE_POINTS_GET_CURRENT_CB().strip() if LIVE_POINTS_GET_CURRENT_CB else ""
+    if current_display:
+        prompt = (
+            f"{LIVE_POINTS_PROMPT}\n\n"
+            f"Current Outline (may include manual edits — preserve and build on this):\n{current_display}\n\n"
+            f"Full Transcript:\n{current_transcript}"
+        )
+    else:
+        prompt = f"{LIVE_POINTS_PROMPT}\n\nTranscript:\n{current_transcript}"
+        
+        try:
+            def fetch_points():
+                response = llm_client.chat.completions.create(
+                    model="llama-3.3-70b-versatile",
+                    messages=[{"role": "user", "content": prompt}]
+                )
+                return response.choices[0].message.content.strip()
+                
+            points = await engine_loop.run_in_executor(None, fetch_points)
+            LIVE_POINTS_CALLBACK(points)
+        except Exception as e:
+            logger.error(f"Live points generation failed: {e}")
+
+# ── SERMON SUMMARY GENERATOR (POST-SERMON) ──
 def generate_sermon_summary():
     global full_sermon_transcript, verses_cited, LLM_ENABLED, llm_client
     
@@ -150,7 +199,7 @@ def generate_sermon_summary():
     try:
         logger.info("⏳ Generating Sermon Cliff Notes via AI... (This may take a moment)")
         response = llm_client.chat.completions.create(
-            model="meta-llama/llama-4-scout-17b-16e-instruct",
+            model="llama-3.3-70b-versatile",
             messages=[{"role": "user", "content": prompt}]
         )
         summary = response.choices[0].message.content.strip()
@@ -179,7 +228,9 @@ def configure(
     dedup_window=60, cooldown=3.0, llm_enabled=True,
     bible_translation="kjv", deepgram_api_key="",
     groq_api_key="", sarvam_api_key="",
-    discord_webhook_url="", confidence=0.75, manual_confirm=True, confirm_callback=None, verify=True, panic_key="esc", smart_amen=True
+    discord_webhook_url="", confidence=0.75, manual_confirm=True, 
+    confirm_callback=None, verify=True, panic_key="esc", smart_amen=True,
+    live_points_prompt="", live_points_callback=None, live_points_get_current_cb=None
 ):
     global DEEPGRAM_API_KEY, GROQ_API_KEY, SARVAM_API_KEY, DISCORD_WEBHOOK_URL
     global USE_SARVAM, DEEPGRAM_LANGUAGE, DEEPGRAM_MODEL, SARVAM_LANGUAGE
@@ -187,6 +238,7 @@ def configure(
     global DEDUP_WINDOW, COOLDOWN, LLM_ENABLED, BIBLE_TRANSLATION, USE_XPATH, llm_client
     global CONFIDENCE_THRESHOLD, REQUIRE_MANUAL_CONFIRM, CONFIRM_CALLBACK, REQUIRE_VERIFY, PANIC_KEY, SMART_AMEN_ENABLED
     global full_sermon_transcript, verses_cited
+    global LIVE_POINTS_PROMPT, LIVE_POINTS_CALLBACK, LIVE_POINTS_GET_CURRENT_CB
 
     # NOTE: Sermon buffer is intentionally NOT reset here so memory persists across stops/starts!
 
@@ -212,6 +264,9 @@ def configure(
     REQUIRE_VERIFY         = verify
     PANIC_KEY              = panic_key
     SMART_AMEN_ENABLED     = smart_amen
+    LIVE_POINTS_PROMPT     = live_points_prompt
+    LIVE_POINTS_CALLBACK       = live_points_callback
+    LIVE_POINTS_GET_CURRENT_CB = live_points_get_current_cb
 
     global normalize_numbers_only
     if language == "en":
@@ -1118,12 +1173,17 @@ async def main():
     logger.info("=" * 60)
 
     try:
+        # Start the Background AI Task for the Live Points App!
+        points_task = asyncio.create_task(live_points_loop())
+
         if USE_SARVAM:
             await stream_audio_sarvam(_controller)
         else:
             await stream_audio(_controller)
     finally:
-        panic_listener.stop()
+        points_task.cancel() # Stop the background LLM calls
+        if 'panic_listener' in locals():
+            panic_listener.stop()
         _controller.cleanup()
         _controller = None
         logger.info(f"📊 LLM calls: {LLM_CALL_COUNT}")

@@ -14,7 +14,10 @@ import sys
 import settings as cfg
 import vv_streaming_master as engine
 
-APP_VERSION = "1.0.0"
+# ── Import the new Live Points module ──
+from live_points_app import LivePointsController
+
+APP_VERSION = "1.2.0"
 
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
@@ -50,12 +53,19 @@ class VerseViewApp(ctk.CTk):
     # UI BUILD
     # ─────────────────────────────────────────────────
     def _build_ui(self):
-        self.grid_columnconfigure(0, weight=3)
-        self.grid_columnconfigure(1, weight=2)
-        self.grid_rowconfigure(0, weight=1)
+        self.tabview = ctk.CTkTabview(self)
+        self.tabview.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+
+        # Add the two tabs
+        self.tab_vv = self.tabview.add("VerseView Detector")
+        self.tab_live = self.tabview.add("Live Points") # Renamed from New App
+
+        self.tab_vv.grid_columnconfigure(0, weight=3)
+        self.tab_vv.grid_columnconfigure(1, weight=2)
+        self.tab_vv.grid_rowconfigure(0, weight=1)
 
         # ── LEFT PANEL ──
-        left = ctk.CTkFrame(self)
+        left = ctk.CTkFrame(self.tab_vv)
         left.grid(row=0, column=0, padx=(12, 6), pady=12, sticky="nsew")
         left.grid_rowconfigure(1, weight=1)
         left.grid_columnconfigure(0, weight=1)
@@ -122,7 +132,7 @@ class VerseViewApp(ctk.CTk):
 
         # ── RIGHT PANEL ──
         right = ctk.CTkScrollableFrame(
-            self, label_text="⚙   Settings",
+            self.tab_vv, label_text="⚙   Settings",
             label_font=ctk.CTkFont(size=14, weight="bold")
         )
         right.grid(row=0, column=1, padx=(6, 12), pady=12, sticky="nsew")
@@ -295,12 +305,15 @@ class VerseViewApp(ctk.CTk):
             command=self._import_settings
         ).grid(row=row + 12, column=0, sticky="ew", padx=14, pady=(0, 8))
 
-        # Version label
+        # Version label 
         ctk.CTkLabel(
-            self, text=f"v{APP_VERSION}",
+            self.tab_vv, text=f"v{APP_VERSION}",
             text_color=("gray50", "gray50"),
             font=ctk.CTkFont(size=10)
         ).grid(row=1, column=0, columnspan=2, pady=(0, 4), sticky="e", padx=12)
+
+        # ── Initialize the Live Points Controller ──
+        self.live_app = LivePointsController(self.tab_live)
 
         self.after(2000, self._refresh_context)
 
@@ -408,6 +421,7 @@ class VerseViewApp(ctk.CTk):
         s = self._s
         self.lang_var.set(s.get("language", "English (Nova-2)"))
         self.bible_var.set(s.get("bible_translation", "WEB").upper())
+        self.live_app.set_screen(s.get("display_screen", "Display 2 (Right/Extended)"))
         self.url_entry.delete(0, "end")
         self.url_entry.insert(0, s.get("remote_url", "http://localhost:50010/control.html"))
         
@@ -424,6 +438,23 @@ class VerseViewApp(ctk.CTk):
         saved_panic = s.get("panic_key", "esc")
         self.panic_var.set(saved_panic)
         self.panic_btn.configure(text=f"Panic Key: {saved_panic}")
+
+        # Set the prompt inside the live app module
+        default_prompt = (
+            "You are a real-time sermon outliner.\n\n"
+            "STRICT RULES:\n"
+            "1. ONLY extract explicitly stated points from the transcript.\n"
+            "2. DO NOT hallucinate, guess, or add information not present in the text.\n"
+            "3. If the speaker has only mentioned a title or intro, ONLY output the Title.\n"
+            "4. DO NOT output 'Listening...', 'Waiting...', or any status messages.\n"
+            "5. Keep points as brief, single-line bullet points.\n\n"
+            "Output Format:\n"
+            "[TITLE IN ALL CAPS]\n"
+            "• Point 1\n"
+            "• Point 2"
+        )
+        
+        self.live_app.set_prompt(s.get("live_points_prompt", default_prompt))
 
         self.rate_entry.delete(0, "end");     self.rate_entry.insert(0,     str(s.get("rate",        16000)))
         self.chunk_entry.delete(0, "end");    self.chunk_entry.insert(0,    str(s.get("chunk",        4096)))
@@ -445,6 +476,7 @@ class VerseViewApp(ctk.CTk):
         return {
             "language":            self.lang_var.get(),
             "bible_translation":   self.bible_var.get().lower(),
+            "display_screen":      self.live_app.get_screen(),
             "remote_url":          self.url_entry.get(),
             "confidence":          self.conf_var.get(),
             "manual_confirm":      self.manual_var.get(),
@@ -452,6 +484,7 @@ class VerseViewApp(ctk.CTk):
             "smart_amen":          self.smart_amen_var.get(),
             "auto_save_notes":     self.auto_save_var.get(),
             "panic_key":           self.panic_var.get(),
+            "live_points_prompt":  self.live_app.get_prompt(),
             "rate":                self._safe_int(self.rate_entry,       16000),
             "chunk":               self._safe_int(self.chunk_entry,      4096),
             "cooldown":            self._safe_float(self.cooldown_entry,  3.0),
@@ -622,7 +655,7 @@ class VerseViewApp(ctk.CTk):
                 self._append_log(f"⚠️ Missing keys: {', '.join(missing)}")
                 return
 
-            # Pass new args down to engine
+            # Pass new args down to engine, including Live Points configurations
             engine.configure(
                 language            = self._lang_code(),
                 mic_index           = self._mic_index(),
@@ -643,6 +676,9 @@ class VerseViewApp(ctk.CTk):
                 verify              = s["verify"],
                 smart_amen          = s["smart_amen"],
                 panic_key           = s["panic_key"],
+                live_points_prompt  = s["live_points_prompt"],
+                live_points_callback       = self.live_app.update_live_points,
+            live_points_get_current_cb = self.live_app.get_current_display
             )
 
             self._running = True
