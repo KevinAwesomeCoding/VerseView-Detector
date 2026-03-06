@@ -37,9 +37,9 @@ jobs:
           path: "dist/VerseView_Detector.exe"
 
   build-mac-intel:
-    runs-on: macos-13 # <--- CHANGED THIS to an older Mac environment
+    runs-on: macos-15-intel # <--- Back to the supported Intel runner
     env:
-      MACOSX_DEPLOYMENT_TARGET: "10.15" # <--- APPLIES THIS to all installations and builds
+      MACOSX_DEPLOYMENT_TARGET: "10.15" # <--- Forces maximum compatibility for OLDER Intel Macs across the entire build!
     steps:
       - name: Checkout
         uses: actions/checkout@v4
