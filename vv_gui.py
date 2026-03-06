@@ -455,6 +455,7 @@ class VerseViewApp(ctk.CTk):
         )
         
         self.live_app.set_prompt(s.get("live_points_prompt", default_prompt))
+        self.live_app.set_live_llm_enabled(s.get("live_points_llm_enabled", False))
 
         self.rate_entry.delete(0, "end");     self.rate_entry.insert(0,     str(s.get("rate",        16000)))
         self.chunk_entry.delete(0, "end");    self.chunk_entry.insert(0,    str(s.get("chunk",        4096)))

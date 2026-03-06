@@ -1,29 +1,24 @@
 # -*- coding: utf-8 -*-
 import customtkinter as ctk
 
+
 class LiveDisplayWindow(ctk.CTkToplevel):
     """ Secondary borderless window to display the live main points. """
     def __init__(self, parent, monitor_offset_x=0):
         super().__init__(parent)
         self.title("Live Sermon Points")
-        
-        # Move to selected monitor and fullscreen
         self.geometry(f"1280x720+{monitor_offset_x}+0")
         self.attributes("-fullscreen", True)
-        self.configure(fg_color="#0d0d0d")  # Deep black background
-
-        # Press Escape to exit fullscreen/close
+        self.configure(fg_color="#0d0d0d")
         self.bind("<Escape>", lambda e: self.destroy())
-
-        # Main text display
         self.content_label = ctk.CTkLabel(
-            self, 
-            text="", 
+            self,
+            text="",
             font=ctk.CTkFont(family="Segoe UI", size=48, weight="bold"),
             text_color="#e0e0e0",
             justify="left",
             anchor="nw",
-            wraplength=1600 
+            wraplength=1600
         )
         self.content_label.pack(fill="both", expand=True, padx=80, pady=80)
         self.bind("<Configure>", self._resize_wraplength)
@@ -40,14 +35,13 @@ class LivePointsController:
     def __init__(self, parent_frame):
         self.parent = parent_frame
         self.display_win = None
-        
         self._build_tab()
 
     def _build_tab(self):
         self.parent.grid_columnconfigure(0, weight=1)
         self.parent.grid_rowconfigure(4, weight=2)
 
-        # Top Controls
+        # Top Controls Bar
         top_bar = ctk.CTkFrame(self.parent, fg_color="transparent")
         top_bar.grid(row=0, column=0, padx=10, pady=10, sticky="ew")
 
@@ -58,13 +52,23 @@ class LivePointsController:
             command=self._toggle_audience_display
         )
         self.btn_launch_display.pack(side="left", padx=(0, 10))
-        
+
         ctk.CTkLabel(
-            top_bar, text="Note: Start the main Engine in VerseView tab to begin transcribing.",
-            text_color="gray50", font=ctk.CTkFont(size=12, slant="italic")
+            top_bar,
+            text="Note: Start the main Engine in VerseView tab to begin transcribing.",
+            text_color="gray50",
+            font=ctk.CTkFont(size=12, slant="italic")
         ).pack(side="left", padx=10)
 
-        # ── Display Monitor selector (moved here from Settings panel) ──
+        # Toggle: only run AI Live Outline when explicitly enabled (saves Groq tokens)
+        self.live_llm_enabled = ctk.BooleanVar(value=False)
+        ctk.CTkCheckBox(
+            top_bar,
+            text="Enable AI Live Outline (tokens)",
+            variable=self.live_llm_enabled
+        ).pack(side="left", padx=(10, 0))
+
+        # Display Monitor selector
         ctk.CTkLabel(
             top_bar, text="Monitor:",
             font=ctk.CTkFont(size=13)
@@ -80,40 +84,53 @@ class LivePointsController:
 
         # AI Prompt Configuration
         ctk.CTkLabel(
-            self.parent, text="⚙️ AI Behavior Prompt (Instructions for Groq LLM)", 
+            self.parent, text="⚙️ AI Behavior Prompt (Instructions for Groq LLM)",
             anchor="w", font=ctk.CTkFont(size=14, weight="bold")
         ).grid(row=1, column=0, padx=10, pady=(10, 0), sticky="w")
 
-        self.prompt_box = ctk.CTkTextbox(self.parent, height=120, font=("Segoe UI", 13), wrap="word")
+        self.prompt_box = ctk.CTkTextbox(
+            self.parent, height=120, font=("Segoe UI", 13), wrap="word"
+        )
         self.prompt_box.grid(row=2, column=0, padx=10, pady=(5, 15), sticky="ew")
 
         # Live Output Preview
         ctk.CTkLabel(
-            self.parent, text="👁️ Live Display Preview", 
+            self.parent, text="👁️ Live Display Preview",
             anchor="w", font=ctk.CTkFont(size=14, weight="bold")
         ).grid(row=3, column=0, padx=10, pady=(5, 0), sticky="w")
 
-        self.preview_box = ctk.CTkTextbox(self.parent, font=("Segoe UI", 16, "bold"), wrap="word", fg_color="#1c1c1c", text_color="#d0d0d0")
+        self.preview_box = ctk.CTkTextbox(
+            self.parent,
+            font=("Segoe UI", 16, "bold"),
+            wrap="word",
+            fg_color="#1c1c1c",
+            text_color="#d0d0d0"
+        )
         self.preview_box.grid(row=4, column=0, padx=10, pady=(5, 10), sticky="nsew")
-        self.preview_box.insert("1.0", "When the engine is running, the generated points will appear here and on the audience display...")
+        self.preview_box.insert(
+            "1.0",
+            "When the engine is running, the generated points will appear here and on the audience display..."
+        )
+        # preview_box is intentionally editable so operators can fix points in real time
 
+    # ── Audience Display ──
     def _toggle_audience_display(self):
         if self.display_win is None or not self.display_win.winfo_exists():
             selection = self.screen_var.get()
-            
             offset_x = 0
             if "Display 2" in selection:
-                offset_x = 1920 
-
-            self.display_win = LiveDisplayWindow(self.parent.winfo_toplevel(), monitor_offset_x=offset_x)
-            
+                offset_x = 1920
+            self.display_win = LiveDisplayWindow(
+                self.parent.winfo_toplevel(), monitor_offset_x=offset_x
+            )
             if "Windowed" in selection:
                 self.display_win.attributes("-fullscreen", False)
                 self.display_win.geometry("800x600")
-
-            self.btn_launch_display.configure(text="🖥️ Close Audience Display", fg_color="#a02020", hover_color="#801010")
+            self.btn_launch_display.configure(
+                text="🖥️ Close Audience Display",
+                fg_color="#a02020", hover_color="#801010"
+            )
             self.update_live_points("")
-            
             self.display_win.bind("<Destroy>", lambda e: self._reset_display_button())
         else:
             self.display_win.destroy()
@@ -121,18 +138,21 @@ class LivePointsController:
 
     def _reset_display_button(self):
         self.display_win = None
-        self.btn_launch_display.configure(text="🖥️ Launch Audience Display", fg_color="#1a5a8a", hover_color="#144a72")
+        self.btn_launch_display.configure(
+            text="🖥️ Launch Audience Display",
+            fg_color="#1a5a8a", hover_color="#144a72"
+        )
 
+    # ── Live Points Update ──
     def update_live_points(self, text):
         def _update():
             self.preview_box.delete("1.0", "end")
             self.preview_box.insert("1.0", text)
-            
             if self.display_win and self.display_win.winfo_exists():
                 self.display_win.update_text(text)
-                
         self.parent.after(0, _update)
 
+    # ── Getters / Setters ──
     def get_prompt(self):
         return self.prompt_box.get("1.0", "end-1c")
 
@@ -149,3 +169,10 @@ class LivePointsController:
     def get_current_display(self):
         """Returns current preview box content including any manual edits."""
         return self.preview_box.get("1.0", "end-1c")
+
+    def is_live_llm_enabled(self):
+        """Whether the AI Live Outline LLM should run for this service."""
+        return bool(self.live_llm_enabled.get())
+
+    def set_live_llm_enabled(self, value: bool):
+        self.live_llm_enabled.set(bool(value))
