@@ -274,7 +274,6 @@ def configure(
     llm_client = _GroqClient(api_key=GROQ_API_KEY)
 
     DISCORD_WEBHOOK_URL = discord_webhook_url
-    llm_client = None  # initialized lazily inside configure()
 
     USE_XPATH     = sys.platform == "darwin"
     MIC_INDEX     = mic_index
