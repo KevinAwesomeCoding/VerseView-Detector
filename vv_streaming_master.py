@@ -1,27 +1,49 @@
 # -*- coding: utf-8 -*-
+import sys, os
+
 import asyncio
-import sys
 import time
 import re
 import logging
-import pyaudio
 import requests
 import certifi
 import threading
-import openai
-from pynput import keyboard as pynput_kb
-
-from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from webdriver_manager.chrome import ChromeDriverManager
+# openai imported lazily inside configure()
+# selenium imported lazily inside connect()
 
 from parse_reference_eng   import parse_references as parse_eng, normalize_numbers_only as norm_eng
 from parse_reference_hindi import parse_references as parse_hindi, normalize_numbers_only as norm_hindi
 from parse_reference_ml    import parse_references as parse_ml, normalize_numbers_only as norm_ml
 from bible_fetcher         import fetch_verse as multi_fetch
+
+# ── GROQ CLIENT (pure-requests, no openai/pydantic-core) ──
+class _GroqResponse:
+    class _Choice:
+        class _Msg:
+            def __init__(self, content): self.content = content
+        def __init__(self, content):    self.message = self._Msg(content)
+    def __init__(self, content):        self.choices = [self._Choice(content)]
+
+class _GroqCompletions:
+    def __init__(self, api_key): self._key = api_key
+    def create(self, model, messages, temperature=0.2, max_tokens=None, **kw):
+        headers = {"Authorization": f"Bearer {self._key}", "Content-Type": "application/json"}
+        body    = {"model": model, "messages": messages, "temperature": temperature}
+        if max_tokens is not None:
+            body["max_tokens"] = max_tokens
+        r = requests.post(
+            "https://api.groq.com/openai/v1/chat/completions",
+            headers=headers, json=body, timeout=30, verify=certifi.where()
+        )
+        r.raise_for_status()
+        return _GroqResponse(r.json()["choices"][0]["message"]["content"])
+
+class _GroqChat:
+    def __init__(self, api_key): self.completions = _GroqCompletions(api_key)
+
+class _GroqClient:
+    """Drop-in replacement for openai.OpenAI() — uses requests only, no native extensions."""
+    def __init__(self, api_key): self.chat = _GroqChat(api_key)
 
 # ── LOGGING ──
 logging.basicConfig(
@@ -76,7 +98,7 @@ SMART_AMEN_KEYWORDS  = [
     "thank you jesus"
 ]
 
-llm_client = openai.OpenAI(base_url="https://api.groq.com/openai/v1", api_key=GROQ_API_KEY)
+llm_client = None  # initialized lazily inside configure()
 
 # ── GLOBALS & SERMON BUFFER ──
 stop_event   = None
@@ -245,8 +267,13 @@ def configure(
     DEEPGRAM_API_KEY    = deepgram_api_key
     GROQ_API_KEY        = groq_api_key
     SARVAM_API_KEY      = sarvam_api_key
+
+    # Init lightweight Groq client (no openai/pydantic-core — avoids macOS ARM64 SIGTRAP)
+    global llm_client
+    llm_client = _GroqClient(api_key=GROQ_API_KEY)
+
     DISCORD_WEBHOOK_URL = discord_webhook_url
-    llm_client = openai.OpenAI(base_url="https://api.groq.com/openai/v1", api_key=GROQ_API_KEY)
+    llm_client = None  # initialized lazily inside configure()
 
     USE_XPATH     = sys.platform == "darwin"
     MIC_INDEX     = mic_index
@@ -488,8 +515,8 @@ def send_to_discord(verse: str):
     def do_send(payload):
         try:
             r = requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=5, verify=certifi.where())
-            # if r.status_code == 204:
-                # logger.info("📩 Sent to Discord")
+            if r.status_code == 204:
+                logger.info("📩 Sent to Discord")
         except Exception as e:
             logger.error(f"Discord failed: {e}")
 
@@ -545,6 +572,12 @@ class VerseController:
 
     def connect(self):
         try:
+            from selenium import webdriver
+            from selenium.webdriver.chrome.service import Service
+            from selenium.webdriver.common.by import By
+            from selenium.webdriver.support.ui import WebDriverWait
+            from selenium.webdriver.support import expected_conditions as EC
+            from webdriver_manager.chrome import ChromeDriverManager
             logger.info(f"Connecting to VerseView at {REMOTE_URL}...")
             options = webdriver.ChromeOptions()
             options.add_argument("--headless=new")
@@ -603,6 +636,8 @@ class VerseController:
         """ Clears the screen via the VerseView X button """
         if not self.driver: return
         try:
+            from selenium.webdriver.common.by import By
+            from selenium.webdriver.common.by import By
             close_btn = self.driver.find_element(By.ID, "iconClose")
             close_btn.click()
             logger.info("🚫 Presentation cleared off the screen!")
@@ -899,6 +934,7 @@ async def stream_audio(controller):
 
     partial_context = ""
 
+    import pyaudio
     audio  = pyaudio.PyAudio()
     stream = None
 
@@ -1025,6 +1061,7 @@ async def stream_audio_sarvam(controller):
     import base64
     from sarvamai import AsyncSarvamAI
 
+    import pyaudio
     audio  = pyaudio.PyAudio()
     stream = None
 
@@ -1127,28 +1164,7 @@ async def main():
     stop_event  = asyncio.Event()
     engine_loop = asyncio.get_event_loop()
 
-    # ── PANIC BUTTON BINDING ──
-    try:
-        if PANIC_KEY:
-            def on_press(key):
-                try:
-                    k = key.char
-                except AttributeError:
-                    k = key.name
-                
-                # If the key they pressed matches their saved setting, clear the screen!
-                if k == PANIC_KEY:
-                    trigger_panic()
-
-            # Start a background thread to listen for the panic key
-            panic_listener = pynput_kb.Listener(on_press=on_press)
-            panic_listener.daemon = True
-            panic_listener.start()
-            
-            logger.info(f"🚨 Panic Button active on: '{PANIC_KEY}'")
-    except Exception as e:
-        logger.warning(f"⚠️ Could not bind panic key: {e}")
-
+    logger.info("\U0001f6a8 Panic: press Shift+Escape in the app window to clear the screen")
     _controller = VerseController()
     connected  = False
 
@@ -1182,8 +1198,6 @@ async def main():
             await stream_audio(_controller)
     finally:
         points_task.cancel() # Stop the background LLM calls
-        if 'panic_listener' in locals():
-            panic_listener.stop()
         _controller.cleanup()
         _controller = None
         logger.info(f"📊 LLM calls: {LLM_CALL_COUNT}")

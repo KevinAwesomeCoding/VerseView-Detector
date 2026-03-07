@@ -4,8 +4,8 @@ import tkinter.messagebox as mb
 import threading
 import asyncio
 import logging
-import pyaudio
-from pynput import keyboard as pynput_kb
+# pyaudio imported lazily inside _populate_mics
+# pynput imported lazily inside _record_panic_key
 import datetime
 import re
 import os
@@ -14,12 +14,12 @@ import sys
 import settings as cfg
 import vv_streaming_master as engine
 
-# ── Import the new Live Points module ──
 from live_points_app import LivePointsController
 
 APP_VERSION = "1.2.0"
 
 ctk.set_appearance_mode("dark")
+
 ctk.set_default_color_theme("blue")
 
 
@@ -48,6 +48,10 @@ class VerseViewApp(ctk.CTk):
         self._populate_mics()
         self._attach_log_handler()
         self._load_into_ui()
+        # Shift+Escape panic binding — no pynput, no permissions needed
+        self.bind("<Shift-Escape>", lambda e: self._panic_shortcut())
+        # Shift+Escape panic binding — no pynput, no permissions needed
+        self.bind("<Shift-Escape>", lambda e: self._panic_shortcut())
 
     # ─────────────────────────────────────────────────
     # UI BUILD
@@ -397,6 +401,7 @@ class VerseViewApp(ctk.CTk):
 
         def recorder():
             try:
+                from pynput import keyboard as pynput_kb
                 with pynput_kb.Listener(on_press=on_press) as listener:
                     listener.join()
             except Exception as e:
@@ -404,6 +409,12 @@ class VerseViewApp(ctk.CTk):
                 self.after(0, lambda: self._on_panic_recorded(self.panic_var.get()))
 
         threading.Thread(target=recorder, daemon=True).start()
+
+    def _panic_shortcut(self):
+        """Shift+Escape clears the screen — uses tkinter binding, no pynput."""
+        if self._running:
+            engine.trigger_panic()
+            self._append_log("\U0001f6a8 Panic! Screen cleared via Shift+Escape")
 
     def _on_panic_recorded(self, combo):
         if combo:
@@ -562,6 +573,7 @@ class VerseViewApp(ctk.CTk):
         self.after(2000, self._refresh_context)
 
     def _populate_mics(self):
+        import pyaudio
         p    = pyaudio.PyAudio()
         mics = {}
         for i in range(p.get_device_count()):
@@ -832,6 +844,6 @@ class VerseViewApp(ctk.CTk):
 
 
 if __name__ == "__main__":
-    app = VerseViewApp()
-    app.protocol("WM_DELETE_WINDOW", app.on_closing)
-    app.mainloop()
+        app = VerseViewApp()
+        app.protocol("WM_DELETE_WINDOW", app.on_closing)
+        app.mainloop()
