@@ -1,9 +1,9 @@
+verseview
 import sys
 import os
-from PyInstaller.utils.hooks import collect_data_files
+from PyInstaller.utils.hooks import collect_data_files, collect_all
 
 block_cipher = None
-
 
 datas = collect_data_files('customtkinter')
 datas += [
@@ -14,33 +14,56 @@ datas += [
     ('parse_reference_ml.py', '.'),
 ]
 
-
 if sys.platform == 'darwin':
     tcl_lib = '/usr/local/opt/tcl-tk/lib/tcl8.6'
-    tk_lib = '/usr/local/opt/tcl-tk/lib/tk8.6'
+    tk_lib  = '/usr/local/opt/tcl-tk/lib/tk8.6'
     if os.path.exists(tcl_lib):
         datas += [(tcl_lib, 'tcl'), (tk_lib, 'tk')]
+
+# Pull in all of deepgram and sarvamai so nothing is missing at runtime
+tmp_ret = collect_all('deepgram')
+datas    += tmp_ret[0]; binaries  = tmp_ret[1]; hiddenimports_dg = tmp_ret[2]
+
+tmp_ret2 = collect_all('sarvamai')
+datas    += tmp_ret2[0]; binaries += tmp_ret2[1]; hiddenimports_sv = tmp_ret2[2]
 
 a = Analysis(
     ['vv_gui.py'],
     pathex=[],
-    binaries=[],
+    binaries=binaries,
     datas=datas,
     hiddenimports=[
-        'customtkinter', 
-        'pyaudio', 
-        'websockets.legacy.client', 
+        # UI
+        'customtkinter',
+        # Audio
+        'pyaudio',
+        # Networking / requests
+        'requests',
+        'charset_normalizer',
+        'charset_normalizer.md__mypyc',
+        'certifi',
+        'websockets',
+        'websockets.legacy.client',
+        # Selenium
         'selenium',
-	    'selenium.webdriver',
-	    'selenium.webdriver.chrome.options', 
-	    'selenium.webdriver.chrome.webdriver',
-	    'selenium.webdriver.chrome.service',
+        'selenium.webdriver',
+        'selenium.webdriver.chrome.options',
+        'selenium.webdriver.chrome.webdriver',
+        'selenium.webdriver.chrome.service',
+        'webdriver_manager',
+        # STT / LLM
+        'openai',
+        'deepgram',
+        'sarvamai',
+        # Input / keyboard
+        'pynput',
+        'pynput.keyboard',
         'pynput.keyboard._darwin',
         'pynput.keyboard._win32',
-        'webdriver_manager',
-        'sarvamai',
-        'keyboard'
-    ],
+        'pynput.mouse._darwin',
+        'pynput.mouse._win32',
+        'keyboard',
+    ] + hiddenimports_dg + hiddenimports_sv,
     hookspath=[],
     runtime_hooks=[],
     excludes=[],
@@ -58,14 +81,14 @@ exe = EXE(
     a.binaries,
     a.zipfiles,
     a.datas,
-    name='VerseView_Detector', 
+    name='VerseView_Detector',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
     upx_exclude=[],
     runtime_tmpdir=None,
-    console=False, 
+    console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
