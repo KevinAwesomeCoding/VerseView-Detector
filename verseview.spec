@@ -3,13 +3,13 @@ import sys
 import os
 from PyInstaller.utils.hooks import collect_data_files, collect_all
 
-# ── Collect all files from deepgram and sarvamai ──
-datas_dg, bins_dg, hidden_dg = collect_all('deepgram')
-datas_sv, bins_sv, hidden_sv = collect_all('sarvamai')
+# ── Collect all files from packages that need full bundling ──
+datas_dg,  bins_dg,  hidden_dg  = collect_all('deepgram')
+datas_sv,  bins_sv,  hidden_sv  = collect_all('sarvamai')
+datas_cn,  bins_cn,  hidden_cn  = collect_all('charset_normalizer')
 
 datas = collect_data_files('customtkinter')
-datas += datas_dg
-datas += datas_sv
+datas += datas_dg + datas_sv + datas_cn
 datas += [
     ('settings.py', '.'),
     ('bible_fetcher.py', '.'),
@@ -24,10 +24,13 @@ if sys.platform == 'darwin':
     if os.path.exists(tcl_lib):
         datas += [(tcl_lib, 'tcl'), (tk_lib, 'tk')]
 
+# UPX crashes on macOS ARM64 (Apple Silicon) — disable it on mac, keep for Windows
+USE_UPX = sys.platform == 'win32'
+
 a = Analysis(
     ['vv_gui.py'],
     pathex=[],
-    binaries=bins_dg + bins_sv,
+    binaries=bins_dg + bins_sv + bins_cn,
     datas=datas,
     hiddenimports=[
         'customtkinter',
@@ -54,7 +57,7 @@ a = Analysis(
         'pynput.mouse._darwin',
         'pynput.mouse._win32',
         'keyboard',
-    ] + hidden_dg + hidden_sv,
+    ] + hidden_dg + hidden_sv + hidden_cn,
     hookspath=[],
     runtime_hooks=[],
     excludes=[],
@@ -75,7 +78,7 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
+    upx=USE_UPX,        # ← False on macOS (UPX causes SIGTRAP on Apple Silicon)
     upx_exclude=[],
     runtime_tmpdir=None,
     console=False,
@@ -93,7 +96,7 @@ if sys.platform == 'darwin':
         a.zipfiles,
         a.datas,
         strip=False,
-        upx=True,
+        upx=False,          # ← Always False on macOS — UPX + ARM64 = SIGTRAP crash
         upx_exclude=[],
         name='VerseView Detector',
     )
