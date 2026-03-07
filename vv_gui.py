@@ -29,9 +29,15 @@ from live_points_app import LivePointsController
 print("[DIAG] live_points_app OK", flush=True)
 
 APP_VERSION = "1.2.0"
+print("[DIAG] APP_VERSION OK", flush=True)
 
+print("[DIAG] calling ctk.set_appearance_mode...", flush=True)
 ctk.set_appearance_mode("dark")
+print("[DIAG] set_appearance_mode OK", flush=True)
+
+print("[DIAG] calling ctk.set_default_color_theme...", flush=True)
 ctk.set_default_color_theme("blue")
+print("[DIAG] set_default_color_theme OK", flush=True)
 
 
 class GUILogHandler(logging.Handler):
@@ -845,6 +851,9 @@ class VerseViewApp(ctk.CTk):
 
 
 if __name__ == "__main__":
+    print("[DIAG] creating VerseViewApp()...", flush=True)
     app = VerseViewApp()
+    print("[DIAG] VerseViewApp created OK", flush=True)
     app.protocol("WM_DELETE_WINDOW", app.on_closing)
+    print("[DIAG] calling mainloop...", flush=True)
     app.mainloop()
