@@ -4,7 +4,7 @@ import tkinter.messagebox as mb
 import threading
 import asyncio
 import logging
-import pyaudio
+# pyaudio imported lazily to avoid macOS SIGTRAP during startup
 # pynput is imported lazily inside _record_panic_key to avoid macOS SIGTRAP on startup
 import datetime
 import re
@@ -563,6 +563,7 @@ class VerseViewApp(ctk.CTk):
         self.after(2000, self._refresh_context)
 
     def _populate_mics(self):
+        import pyaudio
         p    = pyaudio.PyAudio()
         mics = {}
         for i in range(p.get_device_count()):
