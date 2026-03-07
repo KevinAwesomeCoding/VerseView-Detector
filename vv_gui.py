@@ -253,7 +253,7 @@ class VerseViewApp(ctk.CTk):
         self.panic_var = ctk.StringVar(value="esc")
         
         self.panic_btn = ctk.CTkButton(
-            right, text="Panic Key: esc",
+            right, text="Panic Key: Shift + Esc",
             fg_color="#4a4a4a", hover_color="#333333",
             command=self._record_panic_key
         )
