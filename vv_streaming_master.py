@@ -9,7 +9,7 @@ import requests
 import certifi
 import threading
 import openai
-from pynput import keyboard as pynput_kb
+# pynput is imported lazily inside main() to avoid macOS SIGTRAP on startup
 
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
@@ -488,8 +488,8 @@ def send_to_discord(verse: str):
     def do_send(payload):
         try:
             r = requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=5, verify=certifi.where())
-            # if r.status_code == 204:
-                # logger.info("📩 Sent to Discord")
+            if r.status_code == 204:
+                logger.info("📩 Sent to Discord")
         except Exception as e:
             logger.error(f"Discord failed: {e}")
 
@@ -1141,6 +1141,7 @@ async def main():
                     trigger_panic()
 
             # Start a background thread to listen for the panic key
+            from pynput import keyboard as pynput_kb
             panic_listener = pynput_kb.Listener(on_press=on_press)
             panic_listener.daemon = True
             panic_listener.start()
