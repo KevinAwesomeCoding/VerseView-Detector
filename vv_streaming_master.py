@@ -1,37 +1,50 @@
 # -*- coding: utf-8 -*-
 import sys, os
-print("[DIAG] engine: start", flush=True)
 
 import asyncio
-print("[DIAG] asyncio OK", flush=True)
 import time
-print("[DIAG] time OK", flush=True)
 import re
-print("[DIAG] re OK", flush=True)
 import logging
-print("[DIAG] logging OK", flush=True)
 import requests
-print("[DIAG] requests OK", flush=True)
 import certifi
-print("[DIAG] certifi OK", flush=True)
 import threading
-print("[DIAG] threading OK", flush=True)
 # openai imported lazily inside configure()
 # pynput imported lazily inside main()
 # selenium imported lazily inside connect()
 
-print("[DIAG] importing parse_reference_eng...", flush=True)
 from parse_reference_eng   import parse_references as parse_eng, normalize_numbers_only as norm_eng
-print("[DIAG] parse_reference_eng OK", flush=True)
-print("[DIAG] importing parse_reference_hindi...", flush=True)
 from parse_reference_hindi import parse_references as parse_hindi, normalize_numbers_only as norm_hindi
-print("[DIAG] parse_reference_hindi OK", flush=True)
-print("[DIAG] importing parse_reference_ml...", flush=True)
 from parse_reference_ml    import parse_references as parse_ml, normalize_numbers_only as norm_ml
-print("[DIAG] parse_reference_ml OK", flush=True)
-print("[DIAG] importing bible_fetcher...", flush=True)
 from bible_fetcher         import fetch_verse as multi_fetch
-print("[DIAG] bible_fetcher OK", flush=True)
+
+# ── GROQ CLIENT (pure-requests, no openai/pydantic-core) ──
+class _GroqResponse:
+    class _Choice:
+        class _Msg:
+            def __init__(self, content): self.content = content
+        def __init__(self, content):    self.message = self._Msg(content)
+    def __init__(self, content):        self.choices = [self._Choice(content)]
+
+class _GroqCompletions:
+    def __init__(self, api_key): self._key = api_key
+    def create(self, model, messages, temperature=0.2, max_tokens=None, **kw):
+        headers = {"Authorization": f"Bearer {self._key}", "Content-Type": "application/json"}
+        body    = {"model": model, "messages": messages, "temperature": temperature}
+        if max_tokens is not None:
+            body["max_tokens"] = max_tokens
+        r = requests.post(
+            "https://api.groq.com/openai/v1/chat/completions",
+            headers=headers, json=body, timeout=30, verify=certifi.where()
+        )
+        r.raise_for_status()
+        return _GroqResponse(r.json()["choices"][0]["message"]["content"])
+
+class _GroqChat:
+    def __init__(self, api_key): self.completions = _GroqCompletions(api_key)
+
+class _GroqClient:
+    """Drop-in replacement for openai.OpenAI() — uses requests only, no native extensions."""
+    def __init__(self, api_key): self.chat = _GroqChat(api_key)
 
 # ── LOGGING ──
 logging.basicConfig(
@@ -256,10 +269,9 @@ def configure(
     GROQ_API_KEY        = groq_api_key
     SARVAM_API_KEY      = sarvam_api_key
 
-    # Lazy-init openai client here (avoids pydantic-core SIGTRAP on macOS at startup)
+    # Init lightweight Groq client (no openai/pydantic-core — avoids macOS ARM64 SIGTRAP)
     global llm_client
-    import openai
-    llm_client = openai.OpenAI(base_url="https://api.groq.com/openai/v1", api_key=GROQ_API_KEY)
+    llm_client = _GroqClient(api_key=GROQ_API_KEY)
 
     DISCORD_WEBHOOK_URL = discord_webhook_url
     llm_client = None  # initialized lazily inside configure()
