@@ -3,7 +3,7 @@ name: Build VerseView Detector
 on:
   push:
     branches: [main]
-  workflow_dispatch: # This is the magic button to run it manually!
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -24,8 +24,11 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
+          pip install pyinstaller
           pip install pyaudio
-          pip install pyinstaller customtkinter selenium webdriver-manager certifi requests websockets openai pynput
+          pip install customtkinter selenium webdriver-manager certifi requests charset-normalizer websockets openai pynput
+          pip install "deepgram-sdk>=3.0.0"
+          pip install sarvamai
 
       - name: Build EXE
         run: pyinstaller --clean verseview.spec
@@ -37,9 +40,9 @@ jobs:
           path: "dist/VerseView_Detector.exe"
 
   build-mac-intel:
-    runs-on: macos-15-intel # <--- Back to the supported Intel runner
+    runs-on: macos-15-intel
     env:
-      MACOSX_DEPLOYMENT_TARGET: "10.15" # <--- Forces maximum compatibility for OLDER Intel Macs across the entire build!
+      MACOSX_DEPLOYMENT_TARGET: "10.15"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -55,7 +58,11 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pyinstaller customtkinter selenium webdriver-manager certifi pyaudio requests websockets openai pynput
+          pip install pyinstaller
+          pip install pyaudio
+          pip install customtkinter selenium webdriver-manager certifi requests charset-normalizer websockets openai pynput
+          pip install "deepgram-sdk>=3.0.0"
+          pip install sarvamai
 
       - name: Build App
         run: pyinstaller --clean verseview.spec
@@ -63,19 +70,12 @@ jobs:
       - name: Ad-hoc sign App
         run: codesign --force --deep --sign - "dist/VerseView Detector.app"
 
-      # Safely stage and zip both the .app AND the raw UNIX folder!
       - name: Zip the Intel App and Raw UNIX Folder
         run: |
           cd dist
           mkdir "VerseView-Mac-Intel-Release"
-          
-          # Move the compiled .app into the folder
           mv "VerseView Detector.app" "VerseView-Mac-Intel-Release/"
-          
-          # Move the raw UNIX executable folder into the same folder
           mv "VerseView Detector" "VerseView-Mac-Intel-Release/VerseView Detector (Raw Executable)"
-          
-          # Zip the parent folder
           zip -r "VerseView-Detector-Mac-Intel.zip" "VerseView-Mac-Intel-Release"
 
       - name: Upload Mac Intel Zip
@@ -101,7 +101,11 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pyinstaller customtkinter selenium webdriver-manager certifi pyaudio requests websockets openai pynput
+          pip install pyinstaller
+          pip install pyaudio
+          pip install customtkinter selenium webdriver-manager certifi requests charset-normalizer websockets openai pynput
+          pip install "deepgram-sdk>=3.0.0"
+          pip install sarvamai
 
       - name: Build App
         run: pyinstaller --clean verseview.spec
@@ -120,7 +124,7 @@ jobs:
         with:
           name: VerseView-Detector-Mac-Silicon-App
           path: "dist/VerseView-Detector-Mac-Silicon-App.zip"
-          
+
       - name: Upload Mac Silicon Crash File
         uses: actions/upload-artifact@v4
         with:
@@ -153,7 +157,7 @@ jobs:
 
             **Standard Downloads:**
             - `VerseView_Detector.exe` → Windows
-            - `VerseView-Detector-Mac-Intel.zip` → Older Macs (Intel chips) — *Includes the .app AND the raw UNIX executable folder.*
+            - `VerseView-Detector-Mac-Intel.zip` → Older Macs (Intel chips)
             - `VerseView-Detector-Mac-Silicon-App.zip` → Newer Macs (M1/M2/M3 chips)
 
             **Crash/Debug Versions (Only use if the app crashes!):**
