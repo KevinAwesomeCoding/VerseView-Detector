@@ -4,19 +4,14 @@ import sys
 import time
 import re
 import logging
-import pyaudio
+# pyaudio imported lazily to avoid macOS SIGTRAP during startup
 import requests
 import certifi
 import threading
 import openai
 # pynput is imported lazily inside main() to avoid macOS SIGTRAP on startup
 
-from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from webdriver_manager.chrome import ChromeDriverManager
+# selenium imported lazily inside connect() to avoid macOS startup issues
 
 from parse_reference_eng   import parse_references as parse_eng, normalize_numbers_only as norm_eng
 from parse_reference_hindi import parse_references as parse_hindi, normalize_numbers_only as norm_hindi
@@ -545,6 +540,12 @@ class VerseController:
 
     def connect(self):
         try:
+            from selenium import webdriver
+            from selenium.webdriver.chrome.service import Service
+            from selenium.webdriver.common.by import By
+            from selenium.webdriver.support.ui import WebDriverWait
+            from selenium.webdriver.support import expected_conditions as EC
+            from webdriver_manager.chrome import ChromeDriverManager
             logger.info(f"Connecting to VerseView at {REMOTE_URL}...")
             options = webdriver.ChromeOptions()
             options.add_argument("--headless=new")
@@ -899,6 +900,8 @@ async def stream_audio(controller):
 
     partial_context = ""
 
+    import pyaudio
+    import pyaudio
     audio  = pyaudio.PyAudio()
     stream = None
 
@@ -1025,6 +1028,7 @@ async def stream_audio_sarvam(controller):
     import base64
     from sarvamai import AsyncSarvamAI
 
+    import pyaudio
     audio  = pyaudio.PyAudio()
     stream = None
 
