@@ -4,8 +4,8 @@ import tkinter.messagebox as mb
 import threading
 import asyncio
 import logging
-# pyaudio imported lazily inside _populate_mics
-# pynput imported lazily inside _record_panic_key
+import pyaudio
+from pynput import keyboard as pynput_kb
 import datetime
 import re
 import os
@@ -14,12 +14,12 @@ import sys
 import settings as cfg
 import vv_streaming_master as engine
 
+# ── Import the new Live Points module ──
 from live_points_app import LivePointsController
 
 APP_VERSION = "1.2.0"
 
 ctk.set_appearance_mode("dark")
-
 ctk.set_default_color_theme("blue")
 
 
@@ -397,7 +397,6 @@ class VerseViewApp(ctk.CTk):
 
         def recorder():
             try:
-                from pynput import keyboard as pynput_kb
                 with pynput_kb.Listener(on_press=on_press) as listener:
                     listener.join()
             except Exception as e:
@@ -563,7 +562,6 @@ class VerseViewApp(ctk.CTk):
         self.after(2000, self._refresh_context)
 
     def _populate_mics(self):
-        import pyaudio
         p    = pyaudio.PyAudio()
         mics = {}
         for i in range(p.get_device_count()):
@@ -834,6 +832,6 @@ class VerseViewApp(ctk.CTk):
 
 
 if __name__ == "__main__":
-        app = VerseViewApp()
-        app.protocol("WM_DELETE_WINDOW", app.on_closing)
-        app.mainloop()
+    app = VerseViewApp()
+    app.protocol("WM_DELETE_WINDOW", app.on_closing)
+    app.mainloop()

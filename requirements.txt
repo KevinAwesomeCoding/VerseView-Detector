@@ -8,5 +8,4 @@ webdriver-manager
 certifi
 openai
 requests
-charset-normalizer
 pynput
