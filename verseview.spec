@@ -1,11 +1,15 @@
-verseview
+# -*- mode: python ; coding: utf-8 -*-
 import sys
 import os
 from PyInstaller.utils.hooks import collect_data_files, collect_all
 
-block_cipher = None
+# ── Collect all files from deepgram and sarvamai ──
+datas_dg, bins_dg, hidden_dg = collect_all('deepgram')
+datas_sv, bins_sv, hidden_sv = collect_all('sarvamai')
 
 datas = collect_data_files('customtkinter')
+datas += datas_dg
+datas += datas_sv
 datas += [
     ('settings.py', '.'),
     ('bible_fetcher.py', '.'),
@@ -20,42 +24,29 @@ if sys.platform == 'darwin':
     if os.path.exists(tcl_lib):
         datas += [(tcl_lib, 'tcl'), (tk_lib, 'tk')]
 
-# Pull in all of deepgram and sarvamai so nothing is missing at runtime
-tmp_ret = collect_all('deepgram')
-datas    += tmp_ret[0]; binaries  = tmp_ret[1]; hiddenimports_dg = tmp_ret[2]
-
-tmp_ret2 = collect_all('sarvamai')
-datas    += tmp_ret2[0]; binaries += tmp_ret2[1]; hiddenimports_sv = tmp_ret2[2]
-
 a = Analysis(
     ['vv_gui.py'],
     pathex=[],
-    binaries=binaries,
+    binaries=bins_dg + bins_sv,
     datas=datas,
     hiddenimports=[
-        # UI
         'customtkinter',
-        # Audio
         'pyaudio',
-        # Networking / requests
         'requests',
         'charset_normalizer',
         'charset_normalizer.md__mypyc',
         'certifi',
         'websockets',
         'websockets.legacy.client',
-        # Selenium
         'selenium',
         'selenium.webdriver',
         'selenium.webdriver.chrome.options',
         'selenium.webdriver.chrome.webdriver',
         'selenium.webdriver.chrome.service',
         'webdriver_manager',
-        # STT / LLM
         'openai',
         'deepgram',
         'sarvamai',
-        # Input / keyboard
         'pynput',
         'pynput.keyboard',
         'pynput.keyboard._darwin',
@@ -63,17 +54,16 @@ a = Analysis(
         'pynput.mouse._darwin',
         'pynput.mouse._win32',
         'keyboard',
-    ] + hiddenimports_dg + hiddenimports_sv,
+    ] + hidden_dg + hidden_sv,
     hookspath=[],
     runtime_hooks=[],
     excludes=[],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
-    cipher=block_cipher,
     noarchive=False,
 )
 
-pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
+pyz = PYZ(a.pure)
 
 exe = EXE(
     pyz,
