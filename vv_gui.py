@@ -5,7 +5,7 @@ import threading
 import asyncio
 import logging
 import pyaudio
-from pynput import keyboard as pynput_kb
+# pynput is imported lazily inside _record_panic_key to avoid macOS SIGTRAP on startup
 import datetime
 import re
 import os
@@ -397,6 +397,7 @@ class VerseViewApp(ctk.CTk):
 
         def recorder():
             try:
+                from pynput import keyboard as pynput_kb
                 with pynput_kb.Listener(on_press=on_press) as listener:
                     listener.join()
             except Exception as e:
