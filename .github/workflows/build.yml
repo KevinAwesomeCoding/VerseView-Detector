@@ -29,7 +29,6 @@ jobs:
           pip install customtkinter selenium webdriver-manager certifi requests charset-normalizer websockets openai pynput
           pip install "deepgram-sdk>=3.0.0"
           pip install sarvamai
-          pip install pyobjc-core pyobjc-framework-Quartz pyobjc-framework-AppKit pyobjc-framework-Foundation
 
       - name: Build EXE
         run: pyinstaller --clean verseview.spec
@@ -64,7 +63,6 @@ jobs:
           pip install customtkinter selenium webdriver-manager certifi requests charset-normalizer websockets openai pynput
           pip install "deepgram-sdk>=3.0.0"
           pip install sarvamai
-          pip install pyobjc-core pyobjc-framework-Quartz pyobjc-framework-AppKit pyobjc-framework-Foundation
 
       - name: Build App
         run: pyinstaller --clean verseview.spec
@@ -108,7 +106,6 @@ jobs:
           pip install customtkinter selenium webdriver-manager certifi requests charset-normalizer websockets openai pynput
           pip install "deepgram-sdk>=3.0.0"
           pip install sarvamai
-          pip install pyobjc-core pyobjc-framework-Quartz pyobjc-framework-AppKit pyobjc-framework-Foundation
 
       - name: Build App
         run: pyinstaller --clean verseview.spec
