@@ -1,21 +1,32 @@
 # -*- coding: utf-8 -*-
-import customtkinter as ctk
-import tkinter.messagebox as mb
-import threading
-import asyncio
-import logging
-# pyaudio imported lazily to avoid macOS SIGTRAP during startup
-# pynput is imported lazily inside _record_panic_key to avoid macOS SIGTRAP on startup
-import datetime
-import re
-import os
 import sys
+print("[DIAG] gui: start", flush=True)
+import customtkinter as ctk
+print("[DIAG] customtkinter OK", flush=True)
+import tkinter.messagebox as mb
+print("[DIAG] tkinter OK", flush=True)
+import threading
+print("[DIAG] threading OK", flush=True)
+import asyncio
+print("[DIAG] asyncio OK", flush=True)
+import logging
+print("[DIAG] logging OK", flush=True)
+# pyaudio imported lazily
+# pynput imported lazily
+import datetime
+print("[DIAG] datetime OK", flush=True)
+import re, os
+print("[DIAG] re/os OK", flush=True)
 
+print("[DIAG] importing settings...", flush=True)
 import settings as cfg
+print("[DIAG] settings OK", flush=True)
+print("[DIAG] importing vv_streaming_master...", flush=True)
 import vv_streaming_master as engine
-
-# ── Import the new Live Points module ──
+print("[DIAG] vv_streaming_master OK", flush=True)
+print("[DIAG] importing live_points_app...", flush=True)
 from live_points_app import LivePointsController
+print("[DIAG] live_points_app OK", flush=True)
 
 APP_VERSION = "1.2.0"
 
