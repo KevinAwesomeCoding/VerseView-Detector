@@ -1,43 +1,26 @@
 # -*- coding: utf-8 -*-
-import sys
-print("[DIAG] gui: start", flush=True)
 import customtkinter as ctk
-print("[DIAG] customtkinter OK", flush=True)
 import tkinter.messagebox as mb
-print("[DIAG] tkinter OK", flush=True)
 import threading
-print("[DIAG] threading OK", flush=True)
 import asyncio
-print("[DIAG] asyncio OK", flush=True)
 import logging
-print("[DIAG] logging OK", flush=True)
-# pyaudio imported lazily
-# pynput imported lazily
+# pyaudio imported lazily inside _populate_mics
+# pynput imported lazily inside _record_panic_key
 import datetime
-print("[DIAG] datetime OK", flush=True)
-import re, os
-print("[DIAG] re/os OK", flush=True)
+import re
+import os
+import sys
 
-print("[DIAG] importing settings...", flush=True)
 import settings as cfg
-print("[DIAG] settings OK", flush=True)
-print("[DIAG] importing vv_streaming_master...", flush=True)
 import vv_streaming_master as engine
-print("[DIAG] vv_streaming_master OK", flush=True)
-print("[DIAG] importing live_points_app...", flush=True)
+
 from live_points_app import LivePointsController
-print("[DIAG] live_points_app OK", flush=True)
 
 APP_VERSION = "1.2.0"
-print("[DIAG] APP_VERSION OK", flush=True)
 
-print("[DIAG] calling ctk.set_appearance_mode...", flush=True)
 ctk.set_appearance_mode("dark")
-print("[DIAG] set_appearance_mode OK", flush=True)
 
-print("[DIAG] calling ctk.set_default_color_theme...", flush=True)
 ctk.set_default_color_theme("blue")
-print("[DIAG] set_default_color_theme OK", flush=True)
 
 
 class GUILogHandler(logging.Handler):
@@ -851,9 +834,6 @@ class VerseViewApp(ctk.CTk):
 
 
 if __name__ == "__main__":
-    print("[DIAG] creating VerseViewApp()...", flush=True)
-    app = VerseViewApp()
-    print("[DIAG] VerseViewApp created OK", flush=True)
-    app.protocol("WM_DELETE_WINDOW", app.on_closing)
-    print("[DIAG] calling mainloop...", flush=True)
-    app.mainloop()
+        app = VerseViewApp()
+        app.protocol("WM_DELETE_WINDOW", app.on_closing)
+        app.mainloop()
