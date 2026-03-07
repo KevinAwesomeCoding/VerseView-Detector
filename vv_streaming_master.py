@@ -1,850 +1,1219 @@
 # -*- coding: utf-8 -*-
-import sys
-print("[DIAG] gui: start", flush=True)
-import customtkinter as ctk
-print("[DIAG] customtkinter OK", flush=True)
-import tkinter.messagebox as mb
-print("[DIAG] tkinter OK", flush=True)
-import threading
-print("[DIAG] threading OK", flush=True)
+import sys, os
+print("[DIAG] engine: start", flush=True)
+
 import asyncio
 print("[DIAG] asyncio OK", flush=True)
+import time
+print("[DIAG] time OK", flush=True)
+import re
+print("[DIAG] re OK", flush=True)
 import logging
 print("[DIAG] logging OK", flush=True)
-# pyaudio imported lazily
-# pynput imported lazily
-import datetime
-print("[DIAG] datetime OK", flush=True)
-import re, os
-print("[DIAG] re/os OK", flush=True)
+import requests
+print("[DIAG] requests OK", flush=True)
+import certifi
+print("[DIAG] certifi OK", flush=True)
+import threading
+print("[DIAG] threading OK", flush=True)
+# openai imported lazily inside configure()
+# pynput imported lazily inside main()
+# selenium imported lazily inside connect()
 
-print("[DIAG] importing settings...", flush=True)
-import settings as cfg
-print("[DIAG] settings OK", flush=True)
-print("[DIAG] importing vv_streaming_master...", flush=True)
-import vv_streaming_master as engine
-print("[DIAG] vv_streaming_master OK", flush=True)
-print("[DIAG] importing live_points_app...", flush=True)
-from live_points_app import LivePointsController
-print("[DIAG] live_points_app OK", flush=True)
+print("[DIAG] importing parse_reference_eng...", flush=True)
+from parse_reference_eng   import parse_references as parse_eng, normalize_numbers_only as norm_eng
+print("[DIAG] parse_reference_eng OK", flush=True)
+print("[DIAG] importing parse_reference_hindi...", flush=True)
+from parse_reference_hindi import parse_references as parse_hindi, normalize_numbers_only as norm_hindi
+print("[DIAG] parse_reference_hindi OK", flush=True)
+print("[DIAG] importing parse_reference_ml...", flush=True)
+from parse_reference_ml    import parse_references as parse_ml, normalize_numbers_only as norm_ml
+print("[DIAG] parse_reference_ml OK", flush=True)
+print("[DIAG] importing bible_fetcher...", flush=True)
+from bible_fetcher         import fetch_verse as multi_fetch
+print("[DIAG] bible_fetcher OK", flush=True)
 
-APP_VERSION = "1.2.0"
+# ── LOGGING ──
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)-5s  %(message)s",
+    handlers=[
+        logging.FileHandler("verseview.log", encoding="utf-8"),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
 
-ctk.set_appearance_mode("dark")
-ctk.set_default_color_theme("blue")
+# ── DEFAULTS ──
+USE_XPATH        = sys.platform == "darwin"
+USE_SARVAM       = False
+DEEPGRAM_LANGUAGE = "en"
+DEEPGRAM_MODEL    = "nova-2"
+SARVAM_LANGUAGE   = "ml-IN"
+PRIMARY_PARSER    = parse_eng
+MIC_INDEX         = 1
+RATE              = 16000
+CHUNK             = 4096
+REMOTE_URL        = "http://localhost:50010/control.html"
+DEDUP_WINDOW      = 60
+COOLDOWN          = 3.0
+LLM_ENABLED       = True
+LLM_CALL_COUNT    = 0
+BIBLE_TRANSLATION = "web"
+DEEPGRAM_API_KEY  = ""
+GROQ_API_KEY      = ""
+DISCORD_WEBHOOK_URL = ""
+SARVAM_API_KEY    = ""
 
+CONFIDENCE_THRESHOLD = 0.75
+REQUIRE_MANUAL_CONFIRM = True
+CONFIRM_CALLBACK       = None
+REQUIRE_VERIFY       = True
+PANIC_KEY            = "esc"
 
-class GUILogHandler(logging.Handler):
-    def __init__(self, callback):
-        super().__init__()
-        self.callback = callback
+# ── LIVE POINTS CONFIG ──
+LIVE_POINTS_PROMPT         = ""
+LIVE_POINTS_CALLBACK       = None
+LIVE_POINTS_GET_CURRENT_CB = None
 
-    def emit(self, record):
-        self.callback(self.format(record))
+# ── SMART AMEN CONFIG ──
+SMART_AMEN_ENABLED   = True
+SMART_AMEN_KEYWORDS  = [
+    "let us pray",
+    "let's pray",
+    "please be seated",
+    "bow our heads",
+    "thank you jesus"
+]
 
+llm_client = None  # initialized lazily inside configure()
 
-class VerseViewApp(ctk.CTk):
+# ── GLOBALS & SERMON BUFFER ──
+stop_event   = None
+engine_loop  = None
+_controller  = None
+
+full_sermon_transcript = ""
+verses_cited           = []
+
+# ── STOP & PANIC LOGIC ──
+def request_stop():
+    """ Called ONLY by the GUI's Stop Button """
+    global stop_event, engine_loop
+    if engine_loop and stop_event:
+        engine_loop.call_soon_threadsafe(stop_event.set)
+    logger.info("🛑 Stop requested from GUI.")
+
+def trigger_panic():
+    """ Called ONLY by the keyboard Hotkey """
+    global _controller
+    if _controller:
+        _controller.close_presentation()
+
+# ── SMART AMEN LOGIC ──
+def check_smart_amen(text, controller):
+    if not SMART_AMEN_ENABLED:
+        return False
+    text_lower = text.lower()
+    for kw in SMART_AMEN_KEYWORDS:
+        if kw in text_lower:
+            logger.info(f"🙏 Smart Amen triggered by phrase: '{kw}'")
+            controller.close_presentation()
+            return True
+    return False
+
+# ── LIVE POINTS GENERATOR (BACKGROUND LOOP) ──
+async def live_points_loop():
+    """ Periodically asks Groq to extract main points from the growing transcript """
+    global full_sermon_transcript, LLM_ENABLED, llm_client
+    global LIVE_POINTS_PROMPT, LIVE_POINTS_CALLBACK, LIVE_POINTS_GET_CURRENT_CB
+    
+    last_processed_length = 0
+    
+    while not stop_event.is_set():
+        await asyncio.sleep(15) 
+        
+        if not LLM_ENABLED or not GROQ_API_KEY or not LIVE_POINTS_CALLBACK:
+            continue
+            
+        current_transcript = full_sermon_transcript.strip()
+        
+        if len(current_transcript) < 150 or len(current_transcript) <= last_processed_length + 50:
+            continue 
+            
+        last_processed_length = len(current_transcript)
+        
+        current_display = LIVE_POINTS_GET_CURRENT_CB().strip() if LIVE_POINTS_GET_CURRENT_CB else ""
+    if current_display:
+        prompt = (
+            f"{LIVE_POINTS_PROMPT}\n\n"
+            f"Current Outline (may include manual edits — preserve and build on this):\n{current_display}\n\n"
+            f"Full Transcript:\n{current_transcript}"
+        )
+    else:
+        prompt = f"{LIVE_POINTS_PROMPT}\n\nTranscript:\n{current_transcript}"
+        
+        try:
+            def fetch_points():
+                response = llm_client.chat.completions.create(
+                    model="llama-3.3-70b-versatile",
+                    messages=[{"role": "user", "content": prompt}]
+                )
+                return response.choices[0].message.content.strip()
+                
+            points = await engine_loop.run_in_executor(None, fetch_points)
+            LIVE_POINTS_CALLBACK(points)
+        except Exception as e:
+            logger.error(f"Live points generation failed: {e}")
+
+# ── SERMON SUMMARY GENERATOR (POST-SERMON) ──
+def generate_sermon_summary():
+    global full_sermon_transcript, verses_cited, LLM_ENABLED, llm_client
+    
+    if not LLM_ENABLED or not GROQ_API_KEY:
+        return "⚠️ LLM Fallback is disabled or missing Groq API Key. Required to generate summaries."
+        
+    if len(full_sermon_transcript.strip()) < 100:
+        return "⚠️ Transcript is too short to generate a meaningful summary."
+
+    prompt = (
+        "You are an expert sermon note-taker. Read the following sermon transcript "
+        "and generate structured sermon notes using the exact Markdown format below. "
+        "IMPORTANT: If the transcript contains any other languages (such as Malayalam, Hindi, or others), "
+        "you must translate those portions and write the final output strictly in English.\n\n"
+        "Extract the information from the transcript as best as you can.\n\n"
+        "---FORMAT TEMPLATE START---\n"
+        "## 📅 [Extract Date if present, or write 'Date'] | [Sermon Series Name if mentioned]\n"
+        "**Title:** [Create a short, compelling title]\n"
+        "**Speaker:** [Speaker Name if mentioned]\n\n"
+        "### 📖 Primary Scripture\n"
+        "**Main Passage:** [Identify the core passage]\n"
+        "**Key Verse:** [Quote the most central verse from the transcript]\n\n"
+        "### 💡 The Big Idea\n"
+        "* [In one clear sentence, summarize the absolute 'bottom line' of the message]\n\n"
+        "### 📝 Main Points & Observations\n"
+        "[Identify 3 main points from the sermon. For each point, use this exact structure:]\n"
+        "**1. [Point Name]**\n"
+        "* **Supporting Scripture:** [Reference if any]\n"
+        "* **Notes:** [Brief 1-2 sentence summary of this point]\n"
+        "* *Key Thought:* [One standout quote or idea from this section]\n\n"
+        "### ❓ Questions & Reflections\n"
+        "* **Reflection:** [Generate one challenging question based on the sermon for the listener]\n\n"
+        "### 🏃‍♂️ The 'So What?' (Application)\n"
+        "1. **Immediate Step:** [A practical action step the listener can do this week]\n"
+        "2. **Prayer Focus:** [A short prayer prompt related to the message]\n"
+        "---FORMAT TEMPLATE END---\n\n"
+        f"Transcript:\n{full_sermon_transcript}\n"
+    )
+
+    try:
+        logger.info("⏳ Generating Sermon Cliff Notes via AI... (This may take a moment)")
+        response = llm_client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[{"role": "user", "content": prompt}]
+        )
+        summary = response.choices[0].message.content.strip()
+        
+        # Append verses
+        verse_str = "\n".join([f"- {v}" for v in verses_cited])
+        if verse_str:
+            summary += "\n\n### Verses Cited:\n" + verse_str
+            
+        logger.info("✅ Sermon Summary generated!")
+        return summary
+    except Exception as e:
+        logger.error(f"❌ Failed to generate summary: {e}")
+        return f"Error generating summary: {e}"
+
+def clear_sermon_buffer():
+    global full_sermon_transcript, verses_cited
+    full_sermon_transcript = ""
+    verses_cited = []
+    logger.info("🗑️ Sermon memory has been manually cleared.")
+
+# ── CONFIGURE ──
+def configure(
+    language="en", mic_index=1, rate=16000, chunk=4096,
+    remote_url="http://localhost:50010/control.html",
+    dedup_window=60, cooldown=3.0, llm_enabled=True,
+    bible_translation="kjv", deepgram_api_key="",
+    groq_api_key="", sarvam_api_key="",
+    discord_webhook_url="", confidence=0.75, manual_confirm=True, 
+    confirm_callback=None, verify=True, panic_key="esc", smart_amen=True,
+    live_points_prompt="", live_points_callback=None, live_points_get_current_cb=None
+):
+    global DEEPGRAM_API_KEY, GROQ_API_KEY, SARVAM_API_KEY, DISCORD_WEBHOOK_URL
+    global USE_SARVAM, DEEPGRAM_LANGUAGE, DEEPGRAM_MODEL, SARVAM_LANGUAGE
+    global PRIMARY_PARSER, MIC_INDEX, RATE, CHUNK, REMOTE_URL
+    global DEDUP_WINDOW, COOLDOWN, LLM_ENABLED, BIBLE_TRANSLATION, USE_XPATH, llm_client
+    global CONFIDENCE_THRESHOLD, REQUIRE_MANUAL_CONFIRM, CONFIRM_CALLBACK, REQUIRE_VERIFY, PANIC_KEY, SMART_AMEN_ENABLED
+    global full_sermon_transcript, verses_cited
+    global LIVE_POINTS_PROMPT, LIVE_POINTS_CALLBACK, LIVE_POINTS_GET_CURRENT_CB
+
+    # NOTE: Sermon buffer is intentionally NOT reset here so memory persists across stops/starts!
+
+    DEEPGRAM_API_KEY    = deepgram_api_key
+    GROQ_API_KEY        = groq_api_key
+    SARVAM_API_KEY      = sarvam_api_key
+
+    # Lazy-init openai client here (avoids pydantic-core SIGTRAP on macOS at startup)
+    global llm_client
+    import openai
+    llm_client = openai.OpenAI(base_url="https://api.groq.com/openai/v1", api_key=GROQ_API_KEY)
+
+    DISCORD_WEBHOOK_URL = discord_webhook_url
+    llm_client = None  # initialized lazily inside configure()
+
+    USE_XPATH     = sys.platform == "darwin"
+    MIC_INDEX     = mic_index
+    RATE          = rate
+    CHUNK         = chunk
+    REMOTE_URL    = remote_url
+    DEDUP_WINDOW  = dedup_window
+    COOLDOWN      = cooldown
+    LLM_ENABLED   = llm_enabled
+    BIBLE_TRANSLATION = bible_translation
+    
+    CONFIDENCE_THRESHOLD   = confidence
+    REQUIRE_MANUAL_CONFIRM = manual_confirm
+    CONFIRM_CALLBACK       = confirm_callback
+    REQUIRE_VERIFY         = verify
+    PANIC_KEY              = panic_key
+    SMART_AMEN_ENABLED     = smart_amen
+    LIVE_POINTS_PROMPT     = live_points_prompt
+    LIVE_POINTS_CALLBACK       = live_points_callback
+    LIVE_POINTS_GET_CURRENT_CB = live_points_get_current_cb
+
+    global normalize_numbers_only
+    if language == "en":
+        USE_SARVAM        = False
+        DEEPGRAM_LANGUAGE = "en"
+        DEEPGRAM_MODEL    = "nova-2"
+        PRIMARY_PARSER    = parse_eng
+        normalize_numbers_only = norm_eng
+        
+    elif language == "hi":
+        USE_SARVAM        = False
+        DEEPGRAM_LANGUAGE = "hi"
+        DEEPGRAM_MODEL    = "nova-3"
+        PRIMARY_PARSER    = parse_hindi
+        normalize_numbers_only = norm_hindi
+        
+    elif language == "ml":
+        USE_SARVAM        = True
+        SARVAM_LANGUAGE   = "ml-IN"
+        PRIMARY_PARSER    = parse_ml
+        normalize_numbers_only = norm_ml
+        
+    else:
+        USE_SARVAM        = False
+        DEEPGRAM_LANGUAGE = "multi"
+        DEEPGRAM_MODEL    = "nova-2"
+        PRIMARY_PARSER    = parse_eng
+        normalize_numbers_only = norm_eng
+
+# ── CONTEXT TRACKING ──
+current_book    = None
+current_chapter = None
+current_verse   = None
+
+def get_context() -> dict:
+    return {"book": current_book or "", "chapter": current_chapter or "", "verse": current_verse or ""}
+
+def set_context(book: str, chapter: str, verse: str):
+    global current_book, current_chapter, current_verse
+    current_book    = book.strip()    or None
+    current_chapter = chapter.strip() or None
+    current_verse   = verse.strip()   or None
+    logger.info(f"Context manually set: {current_book} {current_chapter}:{current_verse}")
+
+# ── VERSE RANGE QUEUE ──
+verse_queue      = []
+verse_queue_lock = threading.Lock()
+
+RANGE_RE = re.compile(r'(?P<start>\d+)\s*(?:through|thru|to|and|ending\s+at|-|–)\s*(?P<end>\d+)', re.IGNORECASE | re.VERBOSE)
+
+BOOK_KEYWORDS = (
+    "genesis,exodus,leviticus,numbers,deuteronomy,"
+    "joshua,judges,ruth,samuel,kings,chronicles,"
+    "ezra,nehemiah,esther,job,psalm,psalms,"
+    "proverbs,ecclesiastes,isaiah,jeremiah,"
+    "lamentations,ezekiel,daniel,hosea,joel,"
+    "amos,obadiah,jonah,micah,nahum,habakkuk,"
+    "zephaniah,haggai,zechariah,malachi,"
+    "matthew,mark,luke,john,acts,romans,"
+    "corinthians,galatians,ephesians,philippians,"
+    "colossians,thessalonians,timothy,titus,"
+    "philemon,hebrews,james,peter,jude,revelation"
+).split(",")
+
+NUMBER_WORDS = (
+    "one,two,three,four,five,six,seven,eight,"
+    "nine,ten,eleven,twelve,thirteen,fourteen,fifteen,"
+    "sixteen,seventeen,eighteen,nineteen,twenty,thirty,"
+    "forty,fifty,sixty,seventy,eighty,ninety,hundred"
+).split(",")
+
+# ── BIBLE FETCH ──
+def fetch_verse_text(ref: str) -> str | None:
+    text = multi_fetch(ref, BIBLE_TRANSLATION)
+    if text:
+        return text
+    logger.warning(f"All APIs failed for {ref}")
+    return None
+
+# ── ONWARDS MODE ──
+onwards_active     = False
+onwards_book       = None
+onwards_chapter    = None
+onwards_verse      = None
+onwards_timer      = None
+onwards_target_ref = None
+onwards_trigger    = None
+
+def _stop_onwards():
+    global onwards_active, onwards_timer, onwards_target_ref, onwards_trigger
+    onwards_active = False
+    if onwards_timer:
+        onwards_timer.cancel()
+    onwards_timer = None
+    onwards_target_ref = None
+    onwards_trigger = None
+    logger.info("⏹️  ONWARDS mode stopped")
+
+def _reset_onwards_timer():
+    global onwards_timer
+    if onwards_timer:
+        onwards_timer.cancel()
+    onwards_timer = threading.Timer(60.0, _stop_onwards)
+    onwards_timer.daemon = True
+    onwards_timer.start()
+
+def _fetch_next_onwards():
+    global onwards_target_ref, onwards_trigger
+    if not onwards_active:
+        return
+    next_v = onwards_verse + 1
+    ref = f"{onwards_book} {onwards_chapter}:{next_v}"
+    text = fetch_verse_text(ref)
+    
+    if text:
+        words = re.findall(r'[a-z]+', text.lower())[:6]
+        onwards_trigger = " ".join(words)
+        onwards_target_ref = ref
+        logger.info(f"⏭️  ONWARDS LISTENING FOR: {ref} | Trigger: '{onwards_trigger}'")
+    else:
+        logger.warning(f"⚠️  ONWARDS couldn't fetch {ref} - stopping onwards mode.")
+        _stop_onwards()
+
+def _start_onwards(book, chapter, verse):
+    global onwards_active, onwards_book, onwards_chapter, onwards_verse
+    _stop_onwards()
+    onwards_active  = True
+    onwards_book    = book
+    onwards_chapter = chapter
+    onwards_verse   = int(verse)
+    _reset_onwards_timer()
+    logger.info(f"▶️  ONWARDS mode started from {book} {chapter}:{verse}")
+    threading.Thread(target=_fetch_next_onwards, daemon=True).start()
+
+def _check_onwards_advance(text, controller) -> bool:
+    global onwards_verse
+    if not onwards_active or not onwards_target_ref or not onwards_trigger:
+        return False
+        
+    transcript_words = set(re.findall(r'[a-z]+', text.lower()))
+    check_words      = onwards_trigger.split()[:4]
+    
+    if not check_words:
+        return False
+        
+    matches   = sum(1 for w in check_words if w in transcript_words)
+    threshold = min(2, len(check_words))
+    
+    if matches >= threshold:
+        logger.info(f"🎯 ONWARDS ADVANCE: {onwards_target_ref} (heard '{onwards_trigger[:30]}')")
+        controller.send_verse(onwards_target_ref, bypass_cooldown=True)
+        
+        onwards_verse += 1
+        _reset_onwards_timer()
+        threading.Thread(target=_fetch_next_onwards, daemon=True).start()
+        return True
+        
+    return False
+
+def queue_verse_range(book, chapter, start_verse, end_verse, controller):
+    with verse_queue_lock:
+        verse_queue.clear()
+
+    def fetch_all():
+        for v in range(start_verse + 1, end_verse + 1):
+            ref = f"{book} {chapter}:{v}"
+            text = fetch_verse_text(ref)
+            if text:
+                words = re.findall(r'[a-z]+', text.lower())[:6]
+                trigger = " ".join(words)
+                with verse_queue_lock:
+                    verse_queue.append((ref, trigger))
+                logger.info(f"📚 Queued: {ref} | Trigger: '{trigger}'")
+
+    threading.Thread(target=fetch_all, daemon=True).start()
+    logger.info(f"📖 Range queued: {book} {chapter}:{start_verse} → {end_verse}")
+
+def check_verse_queue(transcript, controller) -> bool:
+    with verse_queue_lock:
+        if not verse_queue:
+            return False
+        next_ref, trigger = verse_queue[0]
+        transcript_words  = set(re.findall(r'[a-z]+', transcript.lower()))
+        check_words       = trigger.split()[:4]
+        matches           = sum(1 for w in check_words if w in transcript_words)
+        threshold         = min(2, len(check_words))
+        if matches >= threshold:
+            verse_queue.pop(0)
+        else:
+            return False
+
+    logger.info(f"🎯 AUTO-ADVANCE: {next_ref} (heard '{trigger[:30]}')")
+    controller.send_verse(next_ref, bypass_cooldown=True)
+    return True
+
+def check_and_queue_range(text, base_ref, controller):
+    if ":" not in base_ref:
+        return
+        
+    num_norm = normalize_numbers_only(text)
+    range_m = RANGE_RE.search(num_norm)
+    if not range_m:
+        return
+        
+    try:
+        end_v = int(range_m.group("end"))
+        parts = base_ref.split()
+        book = " ".join(parts[:-1])
+        chap_str, startv_str = parts[-1].split(":")
+        start_v = int(startv_str)
+        
+        if end_v > start_v and end_v <= start_v + 30:
+            queue_verse_range(book, chap_str, start_v, end_v, controller)
+    except Exception:
+        return
+
+# ── DISCORD ──
+def send_to_discord(verse: str):
+    def do_send(payload):
+        try:
+            r = requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=5, verify=certifi.where())
+            if r.status_code == 204:
+                logger.info("📩 Sent to Discord")
+        except Exception as e:
+            logger.error(f"Discord failed: {e}")
+
+    lower = verse.lower().replace(" ", "")
+    if "67" in lower or "6:7" in lower or re.search(r'6\s*7', lower):
+        threading.Thread(target=do_send, args=({"content": "SIXX SEVENNN 🔥"},), daemon=True).start()
+
+    threading.Thread(target=do_send, args=({"content": f"✝️ Verse Detected: {verse}"},), daemon=True).start()
+
+# ── LLM FALLBACK ──
+def extract_verse_with_llm(text):
+    global LLM_CALL_COUNT
+    
+    context_hint = ""
+    if current_book and current_chapter:
+        context_hint = f"\nContext: The speaker is currently reading from {current_book} chapter {current_chapter}."
+
+    try:
+        LLM_CALL_COUNT += 1
+        response = llm_client.chat.completions.create(
+            model="llama-3.1-8b-instant",
+            messages=[{
+                "role": "user",
+                "content": (
+                    f"Extract the Bible verse reference from this text. "
+                    f"Return ONLY in format Book Chapter:Verse (e.g., John 3:16). "
+                    f"If no verse found, return exactly NONE.{context_hint}\nText: {text}"
+                )
+            }]
+        )
+        verse = response.choices[0].message.content.strip()
+        if verse == "NONE":
+            return None
+        if re.match(r'^[1-3]?[A-Za-z ]{1,30}\d{1,3}:\d{1,3}$', verse):
+            logger.info(f"🤖 LLM extracted: {verse}")
+            return verse
+        return None
+    except Exception as e:
+        logger.error(f"❌ LLM error: {e}")
+        return None
+
+# ── VERSE CONTROLLER ──
+class VerseController:
     def __init__(self):
-        super().__init__()
-        self.title(f"VerseView Detector  v{APP_VERSION}")
-        self.geometry("1060x700")
-        self.minsize(800, 500)
+        self.driver        = None
+        self.box           = None
+        self.btn           = None
+        self.last_sent     = None
+        self.last_time     = 0
+        self.history       = {}
+        self.pending_verse = None
+        self.match_count   = 0
 
-        self._s             = cfg.load()
-        self._running       = False
-        self._engine_thread = None
-        self._notes_saved   = False
+    def connect(self):
+        try:
+            from selenium import webdriver
+            from selenium.webdriver.chrome.service import Service
+            from selenium.webdriver.common.by import By
+            from selenium.webdriver.support.ui import WebDriverWait
+            from selenium.webdriver.support import expected_conditions as EC
+            from webdriver_manager.chrome import ChromeDriverManager
+            logger.info(f"Connecting to VerseView at {REMOTE_URL}...")
+            options = webdriver.ChromeOptions()
+            options.add_argument("--headless=new")
+            options.add_argument("--disable-gpu")
+            options.add_argument("--no-sandbox")
+            options.add_argument("--disable-sync")
+            options.add_argument("--disable-background-networking")
+            options.add_argument("--disable-default-apps")
+            options.add_argument("--disable-extensions")
+            options.add_argument("--disable-translate")
+            options.add_argument("--metrics-recording-only")
+            options.add_argument("--mute-audio")
+            options.add_argument("--log-level=3")
+            options.add_experimental_option("excludeSwitches", ["enable-logging"])
+            options.add_argument("--window-size=800,600")
 
-        self._build_ui()
-        self._populate_mics()
-        self._attach_log_handler()
-        self._load_into_ui()
-
-    # ─────────────────────────────────────────────────
-    # UI BUILD
-    # ─────────────────────────────────────────────────
-    def _build_ui(self):
-        self.tabview = ctk.CTkTabview(self)
-        self.tabview.pack(fill="both", expand=True, padx=10, pady=(0, 10))
-
-        # Add the two tabs
-        self.tab_vv = self.tabview.add("VerseView Detector")
-        self.tab_live = self.tabview.add("Live Points") # Renamed from New App
-
-        self.tab_vv.grid_columnconfigure(0, weight=3)
-        self.tab_vv.grid_columnconfigure(1, weight=2)
-        self.tab_vv.grid_rowconfigure(0, weight=1)
-
-        # ── LEFT PANEL ──
-        left = ctk.CTkFrame(self.tab_vv)
-        left.grid(row=0, column=0, padx=(12, 6), pady=12, sticky="nsew")
-        left.grid_rowconfigure(1, weight=1)
-        left.grid_columnconfigure(0, weight=1)
-
-        top = ctk.CTkFrame(left, fg_color="transparent")
-        top.grid(row=0, column=0, padx=10, pady=(10, 6), sticky="ew")
-
-        self.btn_start = ctk.CTkButton(
-            top, text="▶  START", width=130,
-            fg_color="#2a7a2a", hover_color="#1f5c1f",
-            font=ctk.CTkFont(size=13, weight="bold"),
-            command=self._start
-        )
-        self.btn_start.pack(side="left", padx=(0, 8))
-
-        self.btn_stop = ctk.CTkButton(
-            top, text="⏹  STOP", width=130,
-            fg_color="#7a2a2a", hover_color="#5c1f1f",
-            font=ctk.CTkFont(size=13, weight="bold"),
-            state="disabled", command=self._stop
-        )
-        self.btn_stop.pack(side="left", padx=(0, 16))
-
-        self.lbl_status = ctk.CTkLabel(
-            top, text="● Stopped",
-            text_color="#666666",
-            font=ctk.CTkFont(size=13)
-        )
-        self.lbl_status.pack(side="left")
-
-        self.log_box = ctk.CTkTextbox(
-            left, state="disabled",
-            font=("Segoe UI", 12), wrap="word"
-        )
-        self.log_box.grid(row=1, column=0, padx=10, pady=(0, 10), sticky="nsew")
-
-        # ── ACTION BUTTONS ROW ──
-        action_frame = ctk.CTkFrame(left, fg_color="transparent")
-        action_frame.grid(row=2, column=0, padx=10, pady=(0, 10), sticky="ew")
-        action_frame.grid_columnconfigure(1, weight=1)
-
-        ctk.CTkButton(
-            action_frame, text="Clear Log", height=28, width=70,
-            fg_color="transparent", border_width=1,
-            text_color=("gray40", "gray60"),
-            command=self._clear_log
-        ).grid(row=0, column=0, padx=(0, 5), sticky="w")
-
-        self.btn_summary = ctk.CTkButton(
-            action_frame, text="📝 Generate Sermon Notes", height=32,
-            fg_color="#a07020", hover_color="#805010",
-            font=ctk.CTkFont(size=13, weight="bold"),
-            command=self._generate_summary
-        )
-        self.btn_summary.grid(row=0, column=1, padx=5, sticky="ew")
-
-        self.btn_clear_sermon = ctk.CTkButton(
-            action_frame, text="🗑️ Clear Memory", height=28, width=70,
-            fg_color="transparent", border_width=1,
-            text_color=("#b53b3b", "#e05a5a"), 
-            command=self._clear_sermon_memory
-        )
-        self.btn_clear_sermon.grid(row=0, column=2, padx=(5, 0), sticky="e")
-
-        # ── RIGHT PANEL ──
-        right = ctk.CTkScrollableFrame(
-            self.tab_vv, label_text="⚙   Settings",
-            label_font=ctk.CTkFont(size=14, weight="bold")
-        )
-        right.grid(row=0, column=1, padx=(6, 12), pady=12, sticky="nsew")
-        right.grid_columnconfigure(0, weight=1)
-
-        row = 0
-
-        def sep_label(text):
-            nonlocal row
-            lbl = ctk.CTkLabel(
-                right, text=text, anchor="w",
-                font=ctk.CTkFont(size=12, weight="bold"),
-                text_color=("gray30", "gray70")
+            self.driver = webdriver.Chrome(
+                service=Service(ChromeDriverManager().install()),
+                options=options
             )
-            lbl.grid(row=row, column=0, sticky="ew", padx=14, pady=(14, 2))
-            row += 1
-            return lbl
+            self.driver.get(REMOTE_URL)
+            wait = WebDriverWait(self.driver, 15)
+            self.box = wait.until(EC.presence_of_element_located((By.ID, "remote_bibleRefID")))
 
-        def add_entry(placeholder="", show=""):
-            nonlocal row
-            e = ctk.CTkEntry(right, placeholder_text=placeholder, show=show)
-            e.grid(row=row, column=0, sticky="ew", padx=14, pady=(0, 4))
-            row += 1
-            return e
+            btn = None
+            selectors = [
+                (By.ID,    "remote_bible_present"),
+                (By.XPATH, "//button[contains(normalize-space(text()),'PRESENT')]"),
+                (By.XPATH, "//button[contains(normalize-space(text()),'Present')]"),
+                (By.XPATH, "//button[contains(@onclick,'present')]"),
+                (By.XPATH, "//input[@type='button'][contains(@value,'PRESENT')]"),
+            ]
+            for by, selector in selectors:
+                try:
+                    btn = self.driver.find_element(by, selector)
+                    logger.info(f"Found PRESENT button: {selector}")
+                    break
+                except:
+                    continue
 
-        def add_option(values):
-            nonlocal row
-            var = ctk.StringVar(value=values[0])
-            m   = ctk.CTkOptionMenu(right, variable=var, values=values)
-            m.grid(row=row, column=0, sticky="ew", padx=14, pady=(0, 4))
-            row += 1
-            return var, m
-
-        # Language
-        sep_label("Language")
-        self.lang_var, self.lang_menu = add_option([
-            "English (Nova-2)",
-            "Malayalam (Sarvam AI)",
-            "Hindi (Nova-3)",
-            "Multi (Nova-2)",
-        ])
-
-        # Bible Translation
-        sep_label("Bible Translation")
-        self.bible_var, self.bible_menu = add_option([
-            "KJV", "WEB", "ASV", "NET", "NLT",
-            "NIV", "ESV", "NASB", "NKJV", "AMP",
-            "CSB", "MSG", "OEB", "WEBBE",
-        ])
-
-        # Microphone
-        sep_label("Microphone")
-        self.mic_var  = ctk.StringVar(value="Loading...")
-        self.mic_menu = ctk.CTkOptionMenu(right, variable=self.mic_var, values=["Loading..."])
-        self.mic_menu.grid(row=row, column=0, sticky="ew", padx=14, pady=(0, 4))
-        row += 1
-        ctk.CTkButton(
-            right, text="↺  Refresh Mics", height=28,
-            fg_color="transparent", border_width=1,
-            text_color=("gray40", "gray60"),
-            command=self._populate_mics
-        ).grid(row=row, column=0, sticky="ew", padx=14, pady=(0, 8))
-        row += 1
-
-        # VerseView URL
-        sep_label("VerseView URL")
-        self.url_entry = add_entry("http://localhost:50010/control.html")
-
-        # ── Current Context ──
-        sep_label("📌  Current Context")
-
-        ctx_frame = ctk.CTkFrame(right, fg_color="transparent")
-        ctx_frame.grid(row=row, column=0, sticky="ew", padx=14, pady=(0, 4))
-        ctx_frame.grid_columnconfigure((0, 1, 2), weight=1)
-        row += 1
-
-        ctk.CTkLabel(ctx_frame, text="Book",    anchor="center", font=ctk.CTkFont(size=11)).grid(row=0, column=0, padx=2)
-        ctk.CTkLabel(ctx_frame, text="Chapter", anchor="center", font=ctk.CTkFont(size=11)).grid(row=0, column=1, padx=2)
-        ctk.CTkLabel(ctx_frame, text="Verse",   anchor="center", font=ctk.CTkFont(size=11)).grid(row=0, column=2, padx=2)
-
-        self.ctx_book    = ctk.CTkEntry(ctx_frame, placeholder_text="e.g. John", width=80)
-        self.ctx_chapter = ctk.CTkEntry(ctx_frame, placeholder_text="e.g. 3",    width=50)
-        self.ctx_verse   = ctk.CTkEntry(ctx_frame, placeholder_text="e.g. 16",   width=50)
-
-        self.ctx_book.grid(row=1,    column=0, padx=2, pady=2)
-        self.ctx_chapter.grid(row=1, column=1, padx=2, pady=2)
-        self.ctx_verse.grid(row=1,   column=2, padx=2, pady=2)
-
-        ctk.CTkButton(
-            right, text="📌  Set Context", height=28,
-            fg_color="#5a3a8a", hover_color="#3f2060",
-            command=self._set_context
-        ).grid(row=row, column=0, sticky="ew", padx=14, pady=(0, 8))
-        row += 1
-
-        # ── Verification & Confidence ──
-        self.conf_val_label = sep_label("Confidence Threshold: 75%")
-        
-        self.conf_var = ctk.DoubleVar(value=0.75)
-        
-        def update_conf_label(val):
-            self.conf_val_label.configure(text=f"Confidence Threshold: {int(float(val)*100)}%")
-
-        self.conf_slider = ctk.CTkSlider(right, from_=0.5, to=1.0, variable=self.conf_var, command=update_conf_label)
-        self.conf_slider.grid(row=row, column=0, sticky="ew", padx=14, pady=(0, 4))
-        row += 1
-
-        self.manual_var = ctk.BooleanVar(value=True)
-        ctk.CTkCheckBox(right, text="Require Manual Confirmation (Ask Y/N if low)", variable=self.manual_var).grid(row=row, column=0, sticky="w", padx=14, pady=(10, 4))
-        row += 1
-
-        # ── PANIC KEYBIND RECORDER ──
-        sep_label("Panic Keybind")
-        self.panic_var = ctk.StringVar(value="esc")
-        
-        self.panic_btn = ctk.CTkButton(
-            right, text="Panic Key: esc",
-            fg_color="#4a4a4a", hover_color="#333333",
-            command=self._record_panic_key
-        )
-        self.panic_btn.grid(row=row, column=0, sticky="ew", padx=14, pady=(0, 4))
-        row += 1
-
-        self.verify_var = ctk.BooleanVar(value=True)
-        ctk.CTkCheckBox(right, text="Require Verification (Hear verse twice)", variable=self.verify_var).grid(row=row, column=0, sticky="w", padx=14, pady=(10, 4))
-        row += 1
-
-        # ── SMART AMEN TOGGLE ──
-        self.smart_amen_var = ctk.BooleanVar(value=True)
-        ctk.CTkCheckBox(right, text="Smart Amen (Auto-Clear on 'Let us pray')", variable=self.smart_amen_var).grid(row=row, column=0, sticky="w", padx=14, pady=(10, 4))
-        row += 1
-
-        # ── AUTO-SAVE TOGGLE ──
-        self.auto_save_var = ctk.BooleanVar(value=True)
-        ctk.CTkCheckBox(right, text="Auto-Save Sermon Notes on App Close", variable=self.auto_save_var).grid(row=row, column=0, sticky="w", padx=14, pady=(10, 4))
-        row += 1
-
-        # ── Advanced toggle ──
-        self._adv_open = False
-        self.btn_adv = ctk.CTkButton(
-            right, text="▶   Advanced Settings",
-            fg_color="transparent",
-            text_color=("gray40", "gray60"),
-            anchor="w", hover=False,
-            command=self._toggle_advanced
-        )
-        self.btn_adv.grid(row=row, column=0, sticky="ew", padx=10, pady=(14, 2))
-        self._adv_row = row
-        row += 1
-
-        self.adv_frame = ctk.CTkFrame(right)
-        self.adv_frame.grid_columnconfigure(1, weight=1)
-        self._build_advanced()
-
-        ctk.CTkButton(
-            right, text="💾  Save Settings",
-            fg_color="#1a5a8a", hover_color="#144a72",
-            command=self._save_settings
-        ).grid(row=row + 10, column=0, sticky="ew", padx=14, pady=(16, 4))
-
-        ctk.CTkButton(
-            right, text="📤  Export Settings",
-            fg_color="#4a4a4a", hover_color="#333333",
-            command=self._export_settings
-        ).grid(row=row + 11, column=0, sticky="ew", padx=14, pady=(0, 4))
-
-        ctk.CTkButton(
-            right, text="📥  Import Settings",
-            fg_color="#4a4a4a", hover_color="#333333",
-            command=self._import_settings
-        ).grid(row=row + 12, column=0, sticky="ew", padx=14, pady=(0, 8))
-
-        # Version label 
-        ctk.CTkLabel(
-            self.tab_vv, text=f"v{APP_VERSION}",
-            text_color=("gray50", "gray50"),
-            font=ctk.CTkFont(size=10)
-        ).grid(row=1, column=0, columnspan=2, pady=(0, 4), sticky="e", padx=12)
-
-        # ── Initialize the Live Points Controller ──
-        self.live_app = LivePointsController(self.tab_live)
-
-        self.after(2000, self._refresh_context)
-
-    def _build_advanced(self):
-        fields = [
-            ("Sample Rate",      "16000", "rate_entry"),
-            ("Chunk Size",       "4096",  "chunk_entry"),
-            ("Cooldown (s)",     "3.0",   "cooldown_entry"),
-            ("Dedup Window (s)", "60",    "dedup_entry"),
-        ]
-        for i, (lbl, default, attr) in enumerate(fields):
-            ctk.CTkLabel(self.adv_frame, text=lbl, anchor="w").grid(
-                row=i, column=0, padx=10, pady=4, sticky="w"
-            )
-            e = ctk.CTkEntry(self.adv_frame, width=90)
-            e.insert(0, default)
-            e.grid(row=i, column=1, padx=10, pady=4, sticky="ew")
-            setattr(self, attr, e)
-
-        n = len(fields)
-
-        ctk.CTkLabel(self.adv_frame, text="LLM Fallback", anchor="w").grid(
-            row=n, column=0, padx=10, pady=4, sticky="w"
-        )
-        self.llm_var = ctk.StringVar(value="Enabled")
-        ctk.CTkOptionMenu(
-            self.adv_frame, variable=self.llm_var,
-            values=["Enabled", "Disabled"], width=100
-        ).grid(row=n, column=1, padx=10, pady=4, sticky="ew")
-
-        ctk.CTkLabel(
-            self.adv_frame, text="─── API Keys ───", anchor="w",
-            font=ctk.CTkFont(size=12, weight="bold"),
-            text_color=("gray30", "gray70")
-        ).grid(row=n+1, column=0, columnspan=2, padx=10, pady=(14, 2), sticky="ew")
-
-        key_fields = [
-            ("Deepgram Key",        "dg_key_entry"),
-            ("Groq API Key",      "or_key_entry"),
-            ("Sarvam Key",          "sv_key_entry"),
-            ("Discord Webhook URL", "dc_key_entry"),
-        ]
-        for j, (lbl, attr) in enumerate(key_fields):
-            ctk.CTkLabel(self.adv_frame, text=lbl, anchor="w").grid(
-                row=n+2+j, column=0, padx=10, pady=4, sticky="w"
-            )
-            e = ctk.CTkEntry(self.adv_frame, show="•", width=200,
-                             placeholder_text="Paste key here")
-            e.grid(row=n+2+j, column=1, padx=10, pady=4, sticky="ew")
-            setattr(self, attr, e)
-
-    def _toggle_advanced(self):
-        self._adv_open = not self._adv_open
-        if self._adv_open:
-            self.adv_frame.grid(
-                row=self._adv_row + 1, column=0,
-                sticky="ew", padx=14, pady=(0, 10)
-            )
-            self.btn_adv.configure(text="▼   Advanced Settings")
-        else:
-            self.adv_frame.grid_forget()
-            self.btn_adv.configure(text="▶   Advanced Settings")
-
-    # ─────────────────────────────────────────────────
-    # PANIC RECORDING LOGIC
-    # ─────────────────────────────────────────────────
-    def _record_panic_key(self):
-        """ Allows the user to press a key combo to record it safely without typing """
-        self.panic_btn.configure(text="Listening... Press a key now!", fg_color="#a07020", state="disabled")
-
-        def on_press(key):
-            try:
-                key_name = key.char
-            except AttributeError:
-                key_name = key.name
-            
-            if key_name:
-                self.after(0, lambda: self._on_panic_recorded(key_name))
-            
-            return False 
-
-        def recorder():
-            try:
-                from pynput import keyboard as pynput_kb
-                with pynput_kb.Listener(on_press=on_press) as listener:
-                    listener.join()
-            except Exception as e:
-                self._append_log(f"⚠️ Key recording error: {e}")
-                self.after(0, lambda: self._on_panic_recorded(self.panic_var.get()))
-
-        threading.Thread(target=recorder, daemon=True).start()
-
-    def _on_panic_recorded(self, combo):
-        if combo:
-            self.panic_var.set(combo)
-            self.panic_btn.configure(text=f"Panic Key: {combo}", fg_color=["#3B8ED0", "#1F6AA5"], state="normal")
-            self._append_log(f"⌨️ Panic key updated to: {combo}")
-        else:
-            self.panic_btn.configure(text=f"Panic Key: {self.panic_var.get()}", fg_color=["#3B8ED0", "#1F6AA5"], state="normal")
-
-
-    # ─────────────────────────────────────────────────
-    # SETTINGS PERSISTENCE
-    # ─────────────────────────────────────────────────
-    def _load_into_ui(self):
-        s = self._s
-        self.lang_var.set(s.get("language", "English (Nova-2)"))
-        self.bible_var.set(s.get("bible_translation", "WEB").upper())
-        self.live_app.set_screen(s.get("display_screen", "Display 2 (Right/Extended)"))
-        self.url_entry.delete(0, "end")
-        self.url_entry.insert(0, s.get("remote_url", "http://localhost:50010/control.html"))
-        
-        # Load Verification / Confidence settings
-        saved_conf = s.get("confidence", 0.75)
-        self.conf_var.set(saved_conf)
-        self.conf_val_label.configure(text=f"Confidence Threshold: {int(saved_conf * 100)}%")
-        
-        self.manual_var.set(s.get("manual_confirm", True))
-        self.verify_var.set(s.get("verify", True))
-        self.smart_amen_var.set(s.get("smart_amen", True))
-        self.auto_save_var.set(s.get("auto_save_notes", True))
-        
-        saved_panic = s.get("panic_key", "esc")
-        self.panic_var.set(saved_panic)
-        self.panic_btn.configure(text=f"Panic Key: {saved_panic}")
-
-        # Set the prompt inside the live app module
-        default_prompt = (
-            "You are a real-time sermon outliner.\n\n"
-            "STRICT RULES:\n"
-            "1. ONLY extract explicitly stated points from the transcript.\n"
-            "2. DO NOT hallucinate, guess, or add information not present in the text.\n"
-            "3. If the speaker has only mentioned a title or intro, ONLY output the Title.\n"
-            "4. DO NOT output 'Listening...', 'Waiting...', or any status messages.\n"
-            "5. Keep points as brief, single-line bullet points.\n\n"
-            "Output Format:\n"
-            "[TITLE IN ALL CAPS]\n"
-            "• Point 1\n"
-            "• Point 2"
-        )
-        
-        self.live_app.set_prompt(s.get("live_points_prompt", default_prompt))
-        self.live_app.set_live_llm_enabled(s.get("live_points_llm_enabled", False))
-
-        self.rate_entry.delete(0, "end");     self.rate_entry.insert(0,     str(s.get("rate",        16000)))
-        self.chunk_entry.delete(0, "end");    self.chunk_entry.insert(0,    str(s.get("chunk",        4096)))
-        self.cooldown_entry.delete(0, "end"); self.cooldown_entry.insert(0, str(s.get("cooldown",     3.0)))
-        self.dedup_entry.delete(0, "end");    self.dedup_entry.insert(0,    str(s.get("dedup_window", 60)))
-        self.llm_var.set("Enabled" if s.get("llm_enabled", True) else "Disabled")
-
-        for attr, key in [
-            ("dg_key_entry", "deepgram_api_key"),
-            ("or_key_entry", "groq_api_key"),
-            ("sv_key_entry", "sarvam_api_key"),
-            ("dc_key_entry", "discord_webhook_url"),
-        ]:
-            e = getattr(self, attr)
-            e.delete(0, "end")
-            e.insert(0, s.get(key, ""))
-
-    def _collect_settings(self) -> dict:
-        return {
-            "language":            self.lang_var.get(),
-            "bible_translation":   self.bible_var.get().lower(),
-            "display_screen":      self.live_app.get_screen(),
-            "remote_url":          self.url_entry.get(),
-            "confidence":          self.conf_var.get(),
-            "manual_confirm":      self.manual_var.get(),
-            "verify":              self.verify_var.get(),
-            "smart_amen":          self.smart_amen_var.get(),
-            "auto_save_notes":     self.auto_save_var.get(),
-            "panic_key":           self.panic_var.get(),
-            "live_points_prompt":  self.live_app.get_prompt(),
-            "rate":                self._safe_int(self.rate_entry,       16000),
-            "chunk":               self._safe_int(self.chunk_entry,      4096),
-            "cooldown":            self._safe_float(self.cooldown_entry,  3.0),
-            "dedup_window":        self._safe_int(self.dedup_entry,      60),
-            "llm_enabled":         self.llm_var.get() == "Enabled",
-            "deepgram_api_key":    self.dg_key_entry.get(),
-            "groq_api_key":        self.or_key_entry.get(),
-            "sarvam_api_key":      self.sv_key_entry.get(),
-            "discord_webhook_url": self.dc_key_entry.get(),
-            "mic_index":           self._mic_index(),
-        }
-
-    def _save_settings(self):
-        self._s = self._collect_settings()
-        cfg.save(self._s)
-        self._append_log("✅ Settings saved.")
-
-    def _export_settings(self):
-        data = self._collect_settings()
-        if cfg.export_settings(data):
-            self._append_log("📤 Settings exported successfully.")
-        else:
-            self._append_log("⚠️ Export cancelled.")
-
-    def _import_settings(self):
-        data = cfg.import_settings()
-        if data:
-            self._s = data
-            cfg.save(data)
-            self._load_into_ui()
-            self._append_log("📥 Settings imported successfully.")
-        else:
-            self._append_log("⚠️ Import cancelled.")
-
-    # ─────────────────────────────────────────────────
-    # CONTEXT & LOGGING
-    # ─────────────────────────────────────────────────
-    def _set_context(self):
-        typed_book = self.ctx_book.get().strip()
-        typed_chapter = self.ctx_chapter.get().strip()
-        typed_verse = self.ctx_verse.get().strip()
-
-        final_book = typed_book if typed_book else engine.current_book
-        final_chapter = typed_chapter if typed_chapter else engine.current_chapter
-        final_verse = typed_verse if typed_verse else engine.current_verse
-
-        final_book = final_book or ""
-        final_chapter = final_chapter or ""
-        final_verse = final_verse or ""
-
-        engine.set_context(final_book, final_chapter, final_verse)
-
-        self.ctx_book.delete(0, "end")
-        self.ctx_chapter.delete(0, "end")
-        self.ctx_verse.delete(0, "end")
-
-        self._append_log(f"📌 Context updated: {final_book} {final_chapter}:{final_verse}")
-
-    def _refresh_context(self):
-        focused = self.focus_get()
-
-        def is_inside(widget):
-            try:
-                f = str(focused)
-                return str(widget) in f or f.startswith(str(widget))
-            except:
+            if not btn:
+                all_btns = self.driver.find_elements(By.TAG_NAME, "button")
+                logger.error("Could not find PRESENT button.")
+                for b in all_btns:
+                    logger.error(f"  id={b.get_attribute('id')} text={b.text}")
                 return False
 
-        if not (is_inside(self.ctx_book) or is_inside(self.ctx_chapter) or is_inside(self.ctx_verse)):
-            self.ctx_book.configure(placeholder_text=engine.current_book or "e.g. John")
-            self.ctx_chapter.configure(placeholder_text=engine.current_chapter or "e.g. 3")
-            self.ctx_verse.configure(placeholder_text=engine.current_verse or "e.g. 16")
-
-        self.after(2000, self._refresh_context)
-
-    def _populate_mics(self):
-        import pyaudio
-        p    = pyaudio.PyAudio()
-        mics = {}
-        for i in range(p.get_device_count()):
-            info = p.get_device_info_by_index(i)
-            if info.get("maxInputChannels", 0) > 0:
-                mics[i] = f"[{i}]  {info['name']}"
-        p.terminate()
-
-        if mics:
-            values       = list(mics.values())
-            self.mic_map = {v: k for k, v in mics.items()}
-            self.mic_menu.configure(values=values)
-            saved_idx    = self._s.get("mic_index", 0)
-            match        = next((v for v in values if f"[{saved_idx}]" in v), values[0])
-            self.mic_var.set(match)
-        else:
-            self.mic_map = {}
-            self.mic_menu.configure(values=["No input devices found"])
-
-    def _attach_log_handler(self):
-        handler = GUILogHandler(self._append_log)
-        handler.setFormatter(logging.Formatter('%(asctime)s %(levelname)s  %(message)s'))
-        logging.getLogger().addHandler(handler)
-
-    def _append_log(self, msg: str):
-        def _do():
-            self.log_box.configure(state="normal")
-            self.log_box.insert("end", msg + "\n")
-            self.log_box.see("end")
-            self.log_box.configure(state="disabled")
-        self.after(0, _do)
-
-    def _clear_log(self):
-        self.log_box.configure(state="normal")
-        self.log_box.delete("1.0", "end")
-        self.log_box.configure(state="disabled")
-
-    def _lang_code(self) -> str:
-        return {
-            "English (Nova-2)":      "en",
-            "Malayalam (Sarvam AI)": "ml",
-            "Hindi (Nova-3)":        "hi",
-            "Multi (Nova-2)":        "multi",
-        }.get(self.lang_var.get(), "en")
-
-    def _mic_index(self) -> int:
-        return self.mic_map.get(self.mic_var.get(), 0)
-
-    def _safe_int(self, e, d):
-        try:    return int(e.get())
-        except: return d
-
-    def _safe_float(self, e, d):
-        try:    return float(e.get())
-        except: return d
-
-    # ─────────────────────────────────────────────────
-    # ENGINE CONTROL & CALLBACKS
-    # ─────────────────────────────────────────────────
-    def _user_confirm_callback(self, ref: str, confidence: float) -> bool:
-        """ Thread-safe popup to ask the user if they want to send a low-confidence verse. """
-        result = [False]
-        ev = threading.Event()
-        
-        def _ask():
-            ans = mb.askyesno(
-                title="Low Confidence Verse", 
-                message=f"The AI is only {int(confidence * 100)}% sure.\n\nDetected: {ref}\n\nDo you want to send this to VerseView?"
-            )
-            result[0] = ans
-            ev.set()
-
-        self.after(0, _ask)
-        ev.wait() 
-        return result[0]
-
-    def _start(self):
-        try:
-            if self._running:
-                return
-
-            s = self._collect_settings()
-            cfg.save(s)
-
-            missing = []
-            if not s["deepgram_api_key"] and self._lang_code() != "ml":
-                missing.append("Deepgram API Key")
-            if not s["sarvam_api_key"] and self._lang_code() == "ml":
-                missing.append("Sarvam API Key")
-            if missing:
-                mb.showwarning("Missing Keys", f"Please enter in Advanced Settings:\n\n{chr(10).join(missing)}")
-                self._append_log(f"⚠️ Missing keys: {', '.join(missing)}")
-                return
-
-            # Pass new args down to engine, including Live Points configurations
-            engine.configure(
-                language            = self._lang_code(),
-                mic_index           = self._mic_index(),
-                rate                = s["rate"],
-                chunk               = s["chunk"],
-                remote_url          = s["remote_url"],
-                dedup_window        = s["dedup_window"],
-                cooldown            = s["cooldown"],
-                llm_enabled         = s["llm_enabled"],
-                bible_translation   = s["bible_translation"],
-                deepgram_api_key    = s["deepgram_api_key"],
-                groq_api_key        = s["groq_api_key"],
-                sarvam_api_key      = s["sarvam_api_key"],
-                discord_webhook_url = s["discord_webhook_url"],
-                confidence          = s["confidence"],
-                manual_confirm      = s["manual_confirm"],
-                confirm_callback    = self._user_confirm_callback,
-                verify              = s["verify"],
-                smart_amen          = s["smart_amen"],
-                panic_key           = s["panic_key"],
-                live_points_prompt  = s["live_points_prompt"],
-                live_points_callback       = self.live_app.update_live_points,
-            live_points_get_current_cb = self.live_app.get_current_display
-            )
-
-            self._running = True
-            self.btn_start.configure(state="disabled")
-            self.btn_stop.configure(state="normal")
-            self.lbl_status.configure(text="● Running", text_color="#2a7a2a")
-            self.lang_menu.configure(state="disabled")
-            self.mic_menu.configure(state="disabled")
-
-            self._engine_thread = threading.Thread(target=self._run_engine, daemon=True)
-            self._engine_thread.start()
-            self.after(2000, self._refresh_context)
-
+            self.btn = btn
+            logger.info("Connected to VerseView (headless mode)")
+            return True
         except Exception as e:
-            mb.showerror("Start Error", f"Failed to start:\n\n{e}")
-            self._append_log(f"❌ Start failed: {e}")
+            logger.error(f"VerseView connection failed: {e}")
+            return False
 
-    def _run_engine(self):
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
+    def close_presentation(self):
+        """ Clears the screen via the VerseView X button """
+        if not self.driver: return
         try:
-            loop.run_until_complete(engine.main())
+            close_btn = self.driver.find_element(By.ID, "iconClose")
+            close_btn.click()
+            logger.info("🚫 Presentation cleared off the screen!")
         except Exception as e:
-            self._append_log(f"ENGINE ERROR: {e}")
-            self.after(0, lambda: mb.showerror("Engine Error", str(e)))
-        finally:
-            loop.close()
-            self.after(0, self._on_stopped)
+            logger.debug(f"Could not click close button (maybe already closed): {e}")
 
-    def _stop(self):
-        self.btn_stop.configure(state="disabled")
-        self.lbl_status.configure(text="● Stopping...", text_color="#a07020")
-        engine.request_stop()
+    def send_verse(self, ref, bypass_cooldown=False, confidence=1.0):
+        global current_book, current_chapter, current_verse, verses_cited
+        now = time.time()
 
-    def _on_stopped(self):
-        self._running = False
-        self.btn_start.configure(state="normal")
-        self.btn_stop.configure(state="disabled")
-        self.lbl_status.configure(text="● Stopped", text_color="#666666")
-        self.lang_menu.configure(state="normal")
-        self.mic_menu.configure(state="normal")
+        # ── MANUAL CONFIRMATION LOGIC ──
+        if confidence < CONFIDENCE_THRESHOLD and not bypass_cooldown:
+            if REQUIRE_MANUAL_CONFIRM and CONFIRM_CALLBACK:
+                def _ask_thread():
+                    logger.info(f"🤔 Holding for manual confirmation: {ref} (Confidence: {int(confidence*100)}%)")
+                    if CONFIRM_CALLBACK(ref, confidence):
+                        logger.info(f"✅ User manually approved: {ref}")
+                        self.send_verse(ref, bypass_cooldown=True, confidence=1.0)
+                    else:
+                        logger.info(f"❌ User rejected: {ref}")
+                threading.Thread(target=_ask_thread, daemon=True).start()
+                return False
+            else:
+                logger.warning(f"⚠️ Blocked: {ref} (Confidence {int(confidence*100)}% < Threshold {int(CONFIDENCE_THRESHOLD*100)}%)")
+                return False
 
-    # ── FOLDER MANAGER ──
-    def _get_sermon_notes_dir(self):
-        if getattr(sys, 'frozen', False):
-            app_dir = os.path.dirname(sys.executable)
-        else:
-            app_dir = os.path.dirname(os.path.abspath(__file__))
-            
-        parent_dir = os.path.dirname(app_dir)
-        
-        notes_dir = os.path.join(parent_dir, "Sermon Notes")
-        os.makedirs(notes_dir, exist_ok=True)
-        
-        return notes_dir
-
-    # ── SERMON CLIFF NOTES ──
-    def _generate_summary(self):
-        def _task():
-            self._append_log("⏳ Asking AI to summarize the sermon... (Please wait)")
-            summary = engine.generate_sermon_summary()
-            self.after(0, lambda: self._show_summary_window(summary))
-            
-        threading.Thread(target=_task, daemon=True).start()
-
-    def _show_summary_window(self, content):
-        win = ctk.CTkToplevel(self)
-        win.title("Sermon Cliff Notes")
-        win.geometry("600x700")
-        
-        # Bring window to front
-        win.attributes("-topmost", True)
-        self.after(100, lambda: win.attributes("-topmost", False))
-        
-        textbox = ctk.CTkTextbox(win, font=("Segoe UI", 14), wrap="word")
-        textbox.pack(fill="both", expand=True, padx=15, pady=15)
-        textbox.insert("1.0", content)
-        textbox.configure(state="disabled")
-        
-        def _save():
-            default_title = "Sermon_Notes"
-            first_line = content.split('\n')[0]
-            if first_line.startswith("TITLE:"):
-                raw_title = first_line.replace("TITLE:", "").strip()
-                default_title = re.sub(r'[\\/*?:"<>|]', "", raw_title)
-            
-            date_str = datetime.date.today().strftime("%B %d %Y")
-            suggested_filename = f"{default_title} {date_str}.txt"
-
-            notes_folder = self._get_sermon_notes_dir()
-
-            import tkinter.filedialog as fd
-            path = fd.asksaveasfilename(
-                initialdir=notes_folder, 
-                defaultextension=".txt", 
-                filetypes=[("Text Files", "*.txt")],
-                initialfile=suggested_filename
-            )
-            if path:
-                with open(path, "w", encoding="utf-8") as f:
-                    f.write(content)
-                self._append_log(f"💾 Saved Sermon Notes to {path}")
-                self._notes_saved = True # <--- Note is safely saved!
-                win.destroy()
+        # ── VERIFICATION LOGIC (Hear Twice) ──
+        if REQUIRE_VERIFY and not bypass_cooldown:
+            if self.pending_verse == ref:
+                self.match_count += 1
+            else:
+                self.pending_verse = ref
+                self.match_count = 1
+                logger.info(f"⏳ Verification pending for: {ref} (Heard once...)")
+                return False
                 
-        btn_save = ctk.CTkButton(
-            win, text="💾 Save to File", 
-            font=ctk.CTkFont(size=14, weight="bold"), 
-            command=_save
-        )
-        btn_save.pack(pady=(0, 15))
+            if self.match_count < 2:
+                return False
+                
+            self.pending_verse = None
+            self.match_count = 0
 
-    def _clear_sermon_memory(self):
-        if mb.askyesno("Clear Memory", "Are you sure you want to delete the current recorded sermon?\n\nThis cannot be undone!"):
-            engine.clear_sermon_buffer()
-            self._notes_saved = False 
-            self._append_log("🗑️ Sermon memory wiped clean for the next service.")
+        # ── STANDARD COOLDOWNS ──
+        if ref in self.history and (now - self.history[ref]) < DEDUP_WINDOW:
+            logger.debug(f"Skipped duplicate: {ref}")
+            return False
 
-    def on_closing(self):
-        if self.auto_save_var.get() and not self._notes_saved and engine.full_sermon_transcript and len(engine.full_sermon_transcript.strip()) > 100:
-            self.lbl_status.configure(text="● Auto-Saving Notes...", text_color="#a07020")
-            self.update()
+        if not bypass_cooldown and self.last_sent and (now - self.last_time) < COOLDOWN:
+            logger.debug(f"Cooldown active: {ref}")
+            return False
+
+        # ── SEND TO VERSEVIEW ──
+        try:
+            if not self.driver:
+                if not self.connect():
+                    return False
+
+            self.driver.execute_script("arguments[0].value = arguments[1];", self.box, ref)
+            self.driver.execute_script("arguments[0].click();", self.btn)
+            logger.info(f"✅ PRESENTED: {ref}")
+            
+            # --- Store presented verse for the Sermon Notes! ---
+            if ref not in verses_cited:
+                verses_cited.append(ref)
+
+            send_to_discord(ref)
+
+            parts = ref.split()
+            if len(parts) >= 2:
+                if ":" in parts[-1]:
+                    current_book                   = " ".join(parts[:-1])
+                    current_chapter, current_verse = parts[-1].split(":")
+                else:
+                    current_book    = " ".join(parts[:-1])
+                    current_chapter = parts[-1]
+                    current_verse   = None
+
+            self.history[ref] = now
+            self.last_sent    = ref
+            self.last_time    = now
+
+            if len(self.history) > 20:
+                oldest = min(self.history.items(), key=lambda x: x[1])
+                del self.history[oldest[0]]
+
+            return True
+        except Exception as e:
+            logger.error(f"Failed to send {ref}: {e}")
             try:
-                self._append_log("⚠️ App closed without saving! Auto-generating summary...")
-                content = engine.generate_sermon_summary()
-                
-                default_title = "Unsaved_Sermon"
-                first_line = content.split('\n')[0]
-                if first_line.startswith("TITLE:"):
-                    raw_title = first_line.replace("TITLE:", "").strip()
-                    default_title = re.sub(r'[\\/*?:"<>|]', "", raw_title)
-                
-                date_str = datetime.date.today().strftime("%B %d %Y")
-                filename = f"{default_title} {date_str}.txt"
-                
-                notes_folder = self._get_sermon_notes_dir()
-                filepath = os.path.join(notes_folder, filename)
-                
-                with open(filepath, "w", encoding="utf-8") as f:
-                    f.write(content)
-                print(f"Emergency Auto-Save triggered: {filepath}")
-            except Exception as e:
-                print(f"Emergency Auto-Save Failed: {e}")
+                self.driver.quit()
+            except:
+                pass
+            self.driver = None
+            return False
 
-        # Shut down normally
-        cfg.save(self._collect_settings())
-        if self._running:
-            engine.request_stop()
-        self.destroy()
+    def cleanup(self):
+        if self.driver:
+            try:
+                self.driver.quit()
+                logger.info("VerseView connection closed")
+            except:
+                pass
 
+# ── HYBRID VERSE DETECTOR ──
+ONWARDS_KEYWORDS = ["onwards", "onward", "and following", "and beyond", "and after"]
+
+def detect_verse_hybrid(text, controller, confidence=1.0) -> bool:
+    global current_book, current_chapter, current_verse
+
+    if not text or len(text.strip()) < 3:
+        return False
+
+    # --- PHONETIC FIXES (Catch common speech-to-text errors before parsing) ---
+    fixes = {
+        r"\b(?:sam's|sams|sam)\b": "psalms",
+        r"\bnayan\b": "nine"
+    }
+    for pattern, replacement in fixes.items():
+        text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
+    # --------------------------------------------------------------------------
+
+    def trigger_onwards_if_needed(ref_string, original_text):
+        if any(kw in original_text.lower() for kw in ONWARDS_KEYWORDS):
+            parts = ref_string.split()
+            if ":" in parts[-1]:
+                ch, vs = parts[-1].split(":")
+                bk = " ".join(parts[:-1])
+                _start_onwards(bk, ch, vs)
+
+    try:
+        if check_verse_queue(text, controller):
+            return True
+            
+        if _check_onwards_advance(text, controller):
+            return True
+        
+        num_norm = normalize_numbers_only(text)
+        num_norm = re.sub(
+            r'\b(20|30|40|50|60|70|80|90)\s+([1-9])\b', 
+            lambda m: str(int(m.group(1)) + int(m.group(2))), 
+            num_norm
+        )
+
+        # Layer 1 — parser
+        refs = PRIMARY_PARSER(text)
+        if refs:
+            verse = refs[0]
+            
+            is_blocked = False
+            if ":" not in verse:
+                chap_num = verse.split()[-1]
+                blockers = ["days", "weeks", "months", "years", "minutes", "hours", "people", "men", "women", "points", "dollars"]
+                if any(re.search(rf'\b{chap_num}\s+{b}\b', num_norm) for b in blockers):
+                    logger.info(f"🚫 BLOCKED Layer 1 False Positive: {verse} (Time/People phrase)")
+                    is_blocked = True
+            
+            if not is_blocked:
+                logger.info(f"🔍 PARSER: {verse} ({int(confidence*100)}% Acc)")
+                controller.send_verse(verse, confidence=confidence)
+                
+                trigger_onwards_if_needed(verse, text)
+                
+                if ":" in verse:
+                    check_and_queue_range(text, verse, controller)
+                return True
+
+        # Layer 2 — contextual (number only, same book/chapter)
+        m = re.search(r'\b(\d+)\b', num_norm)
+        if m and current_book and current_chapter:
+            candidate = m.group(1)
+            text_lower = num_norm.lower()
+            
+            is_valid = False
+            
+            if len(text.split()) <= 2:
+                is_valid = True
+            elif re.search(r'\b(?:verse|verses|v|vs)\s+' + candidate + r'\b', text_lower):
+                is_valid = True
+            elif any(kw in text_lower for kw in ["വാക്യം", "വചനം", "വചന", "वचन", "पद"]):
+                is_valid = True
+                
+            if is_valid:
+                ref = f"{current_book} {current_chapter}:{candidate}"
+                logger.info(f"🔍 CONTEXTUAL: {ref} ({int(confidence*100)}% Acc)")
+                controller.send_verse(ref, confidence=confidence)
+                
+                trigger_onwards_if_needed(ref, text)
+                check_and_queue_range(num_norm, ref, controller)
+                return True
+
+       # Layer 3 — Hindi contextual
+        m_hi = re.search(r'([\u0966-\u096F]+)', text)
+        if m_hi and current_book and current_chapter:
+            ref = f"{current_book} {current_chapter}:{m_hi.group(1)}"
+            logger.info(f"🔍 HINDI CTX: {ref} ({int(confidence*100)}% Acc)")
+            controller.send_verse(ref, confidence=confidence)
+            trigger_onwards_if_needed(ref, text)
+            return True
+
+        # Layer 4 — Malayalam contextual
+        m_ml = re.search(r'([\u0D66-\u0D6F]+)', text)
+        if m_ml and current_book and current_chapter:
+            ref = f"{current_book} {current_chapter}:{m_ml.group(1)}"
+            logger.info(f"🔍 MALAYALAM CTX: {ref} ({int(confidence*100)}% Acc)")
+            controller.send_verse(ref, confidence=confidence)
+            trigger_onwards_if_needed(ref, text)
+            return True
+
+        # Layer 5 — sequential (next verse)
+        if current_book and current_chapter and current_verse:
+            m_num = re.search(r'\b(\d{1,3})\b', num_norm)
+            if m_num:
+                candidate = m_num.group(1)
+                try:
+                    if int(candidate) == int(current_verse) + 1:
+                        ref = f"{current_book} {current_chapter}:{candidate}"
+                        logger.info(f"🔍 SEQUENTIAL: {ref} ({int(confidence*100)}% Acc)")
+                        controller.send_verse(ref, confidence=confidence)
+                        trigger_onwards_if_needed(ref, text)
+                        return True
+                except ValueError:
+                    pass
+
+        # Layer 6 — range without explicit verse
+        if current_book and current_chapter:
+            range_m = RANGE_RE.search(num_norm)
+            if range_m:
+                start_v = int(range_m.group("start"))
+                end_v   = int(range_m.group("end"))
+                text_after = num_norm[range_m.end():].strip()
+                blockers = [
+                    "bibles","dollars","days","weeks","months","years",
+                    "minutes","hours","times","people","men","women",
+                    "students","countries","churches","teams"
+                ]
+                if not any(text_after.startswith(b) for b in blockers):
+                    if 1 <= start_v < end_v <= start_v + 30:
+                        ref_start = f"{current_book} {current_chapter}:{start_v}"
+                        logger.info(f"🔍 RANGE: {current_book} {current_chapter}:{start_v} → {end_v} ({int(confidence*100)}% Acc)")
+                        controller.send_verse(ref_start, confidence=confidence)
+                        queue_verse_range(current_book, current_chapter, start_v, end_v, controller)
+                        trigger_onwards_if_needed(ref_start, text)
+                        return True
+
+        # Layer 8 — simple "Book chapter" pattern
+        m_simple = re.search(
+            r'\b((?:[1-3]\s*)?(?:' + '|'.join(BOOK_KEYWORDS[:40]) + r'))\s+(\d{1,3})\b',
+            text, re.IGNORECASE
+        )
+        if m_simple:
+            ref = f"{m_simple.group(1).strip().title()} {m_simple.group(2)}"
+            logger.info(f"🔍 SIMPLE: {ref} ({int(confidence*100)}% Acc)")
+            controller.send_verse(ref, confidence=confidence)
+            trigger_onwards_if_needed(ref, text)
+            return True
+
+        # Layer 9 — LLM fallback
+        if not LLM_ENABLED:
+            return False
+
+        text_lower  = text.lower()
+        has_book    = any(kw in text_lower for kw in BOOK_KEYWORDS)
+        has_number  = bool(re.search(r'\d+', text)) or any(w in text_lower for w in NUMBER_WORDS)
+
+        if not has_book and not has_number:
+            return False
+
+        # --- LLM ANTI-SPAM (Debouncer) ---
+        if len(text.split()) < 4 and not has_number:
+            return False
+        # ---------------------------------
+
+        logger.info(f"📞 LLM: '{text[:80]}'")
+
+        def llm_task():
+            verse = extract_verse_with_llm(text)
+            if verse:
+                controller.send_verse(verse, confidence=confidence)
+                trigger_onwards_if_needed(verse, text)
+                check_and_queue_range(text, verse, controller)
+
+        threading.Thread(target=llm_task, daemon=True).start()
+        return True
+
+    except Exception as e:
+        logger.error(f"Parse error: {e}")
+        return False
+
+# ── DEEPGRAM STREAMING ──
+async def stream_audio(controller):
+    global full_sermon_transcript
+    import websockets
+    import json
+
+    partial_context = ""
+
+    import pyaudio
+    import pyaudio
+    audio  = pyaudio.PyAudio()
+    stream = None
+
+    try:
+        mic_info = audio.get_device_info_by_index(MIC_INDEX)
+        logger.info(f"Using: [{MIC_INDEX}] {mic_info['name']}")
+        stream = audio.open(
+            format=pyaudio.paInt16, channels=1, rate=RATE,
+            input=True, input_device_index=MIC_INDEX,
+            frames_per_buffer=CHUNK
+        )
+        logger.info("Microphone opened")
+    except Exception as e:
+        logger.error(f"Microphone error: {e}")
+        return
+
+    url = (
+        f"wss://api.deepgram.com/v1/listen"
+        f"?language={DEEPGRAM_LANGUAGE}"
+        f"&model={DEEPGRAM_MODEL}"
+        f"&punctuate=true"
+        f"&smart_format=false"
+        f"&interim_results=true"
+        f"&utterance_end_ms=1000"
+        f"&endpointing=300"
+        f"&encoding=linear16"
+        f"&sample_rate={RATE}"
+    )
+    headers = {"Authorization": f"Token {DEEPGRAM_API_KEY}"}
+    loop    = asyncio.get_event_loop()
+
+    def read_audio():
+        return stream.read(CHUNK, exception_on_overflow=False)
+
+    try:
+        async with websockets.connect(url, additional_headers=headers) as ws:
+            logger.info(f"🎤 Language: {DEEPGRAM_LANGUAGE.upper()} | Model: {DEEPGRAM_MODEL.upper()}")
+            logger.info("Connected to Deepgram WebSocket")
+            logger.info("Press Stop to end")
+
+            async def send_audio():
+                try:
+                    while not stop_event.is_set():
+                        data = await loop.run_in_executor(None, read_audio)
+                        await ws.send(data)
+                except asyncio.CancelledError:
+                    pass
+                except Exception as e:
+                    logger.error(f"Send error: {e}")
+
+            async def recv_transcripts():
+                nonlocal partial_context
+                global full_sermon_transcript
+                try:
+                    async for msg in ws:
+                        try:
+                            data     = json.loads(msg)
+                            msg_type = data.get("type", "Results")
+                            if msg_type != "Results":
+                                continue
+                            channel = data.get("channel", {})
+                            if isinstance(channel, list):
+                                continue
+                            alts = channel.get("alternatives", [])
+                            if not alts or not isinstance(alts[0], dict):
+                                continue
+                                
+                            confidence = alts[0].get("confidence", 1.0)
+                            sentence = alts[0].get("transcript", "")
+                            
+                            if not sentence.strip():
+                                continue
+
+                            check_verse_queue(sentence, controller)
+
+                            if data.get("is_final"):
+                                logger.info(f"📝 {sentence}")
+                                
+                                # --- Add to Sermon Buffer ---
+                                full_sermon_transcript += " " + sentence.strip()
+
+                                if check_smart_amen(sentence, controller):
+                                    partial_context = "" 
+                                    continue
+
+                                partial_context += " " + sentence.strip()
+                                
+                                # Send confidence down into the detector
+                                found = detect_verse_hybrid(partial_context, controller, confidence=confidence)
+                                if found:
+                                    partial_context = ""
+                                else:
+                                    words = partial_context.split()
+                                    if len(words) > 30:
+                                        partial_context = " ".join(words[-15:])
+                        except Exception as e:
+                            logger.error(f"Recv error: {e}")
+                except asyncio.CancelledError:
+                    pass
+                except Exception as e:
+                    logger.warning(f"WebSocket closed: {e}")
+
+            sender   = asyncio.create_task(send_audio())
+            receiver = asyncio.create_task(recv_transcripts())
+            await stop_event.wait()
+            sender.cancel()
+            receiver.cancel()
+            await asyncio.gather(sender, receiver, return_exceptions=True)
+            try:
+                await ws.send(json.dumps({"type": "CloseStream"}))
+            except:
+                pass
+    except Exception as e:
+        logger.error(f"Deepgram WebSocket error: {e}")
+    finally:
+        if stream:
+            stream.stop_stream()
+            stream.close()
+        audio.terminate()
+
+# ── SARVAM STREAMING ──
+async def stream_audio_sarvam(controller):
+    global full_sermon_transcript
+    import base64
+    from sarvamai import AsyncSarvamAI
+
+    import pyaudio
+    audio  = pyaudio.PyAudio()
+    stream = None
+
+    try:
+        mic_info = audio.get_device_info_by_index(MIC_INDEX)
+        logger.info(f"Using: [{MIC_INDEX}] {mic_info['name']}")
+        stream = audio.open(
+            format=pyaudio.paInt16, channels=1, rate=RATE,
+            input=True, input_device_index=MIC_INDEX,
+            frames_per_buffer=CHUNK
+        )
+        logger.info("Microphone opened")
+    except Exception as e:
+        logger.error(f"Microphone error: {e}")
+        return
+
+    def read_chunk_blocking():
+        frames = []
+        for _ in range(max(1, int(RATE * 0.5 / CHUNK))):
+            frames.append(stream.read(CHUNK, exception_on_overflow=False))
+        return b"".join(frames)
+
+    logger.info("Connecting to Sarvam AI...")
+    try:
+        client = AsyncSarvamAI(api_subscription_key=SARVAM_API_KEY)
+        loop   = asyncio.get_event_loop()
+
+        async with client.speech_to_text_streaming.connect(
+            model="saaras:v3", 
+            mode="transcribe",
+            language_code=SARVAM_LANGUAGE,
+            sample_rate=RATE,
+            high_vad_sensitivity=False,
+            vad_signals=False,
+            input_audio_codec="pcm_s16le" 
+        ) as ws:
+            logger.info(f"Sarvam AI connected — {SARVAM_LANGUAGE} saaras:v3")
+
+            async def send_audio():
+                try:
+                    while not stop_event.is_set():
+                        pcm_data = await loop.run_in_executor(None, read_chunk_blocking)
+                        pcm_b64 = base64.b64encode(pcm_data).decode("utf-8")
+                        await ws.transcribe(audio=pcm_b64)
+                except asyncio.CancelledError:
+                    pass
+                except Exception as e:
+                    logger.error(f"Sarvam send error: {e}")
+
+            async def recv_transcripts():
+                global full_sermon_transcript
+                try:
+                    async for message in ws:
+                        try:
+                            if isinstance(message, dict):
+                                sentence = message.get("transcript", message.get("text", ""))
+                            else:
+                                if hasattr(message, "data"):
+                                    sentence = getattr(message.data, "transcript", "")
+                                else:
+                                    sentence = getattr(message, "transcript", getattr(message, "text", ""))
+                                
+                            sentence = str(sentence).strip()
+                            
+                            if sentence and sentence != "None":
+                                logger.info(f"📝 {sentence}")
+                                
+                                # --- Add to Sermon Buffer ---
+                                full_sermon_transcript += " " + sentence.strip()
+
+                                if check_smart_amen(sentence, controller):
+                                    continue
+                                
+                                check_verse_queue(sentence, controller)
+                                detect_verse_hybrid(sentence, controller, confidence=1.0)
+                        except Exception as e:
+                            logger.error(f"Sarvam message parsing error: {e}")
+                except asyncio.CancelledError:
+                    pass
+                except Exception as e:
+                    logger.warning(f"Sarvam closed: {e}")
+
+            sender   = asyncio.create_task(send_audio())
+            receiver = asyncio.create_task(recv_transcripts())
+            await stop_event.wait()
+            sender.cancel()
+            receiver.cancel()
+            await asyncio.gather(sender, receiver, return_exceptions=True)
+    except Exception as e:
+        logger.error(f"Sarvam connection error: {e}")
+    finally:
+        if stream:
+            stream.stop_stream()
+            stream.close()
+        audio.terminate()
+
+# ── MAIN ──
+async def main():
+    global stop_event, engine_loop, _controller
+    stop_event  = asyncio.Event()
+    engine_loop = asyncio.get_event_loop()
+
+    # ── PANIC BUTTON BINDING ──
+    try:
+        if PANIC_KEY:
+            def on_press(key):
+                try:
+                    k = key.char
+                except AttributeError:
+                    k = key.name
+                
+                # If the key they pressed matches their saved setting, clear the screen!
+                if k == PANIC_KEY:
+                    trigger_panic()
+
+            # Start a background thread to listen for the panic key
+            from pynput import keyboard as pynput_kb
+            panic_listener = pynput_kb.Listener(on_press=on_press)
+            panic_listener.daemon = True
+            panic_listener.start()
+            
+            logger.info(f"🚨 Panic Button active on: '{PANIC_KEY}'")
+    except Exception as e:
+        logger.warning(f"⚠️ Could not bind panic key: {e}")
+
+    _controller = VerseController()
+    connected  = False
+
+    for attempt in range(1, 6):
+        logger.info(f"Connection attempt {attempt}/5...")
+        if _controller.connect():
+            connected = True
+            break
+        if stop_event.is_set():
+            return
+        if attempt < 5:
+            logger.warning("Retrying in 5s...")
+            await asyncio.sleep(5)
+
+    if not connected:
+        logger.error("Could not connect to VerseView after 5 attempts.")
+        return
+
+    logger.info("=" * 60)
+    logger.info("🚀 VerseView Live Started")
+    logger.info(f"   Engine: {'Sarvam AI (Malayalam)' if USE_SARVAM else 'Deepgram'}")
+    logger.info("=" * 60)
+
+    try:
+        # Start the Background AI Task for the Live Points App!
+        points_task = asyncio.create_task(live_points_loop())
+
+        if USE_SARVAM:
+            await stream_audio_sarvam(_controller)
+        else:
+            await stream_audio(_controller)
+    finally:
+        points_task.cancel() # Stop the background LLM calls
+        if 'panic_listener' in locals():
+            panic_listener.stop()
+        _controller.cleanup()
+        _controller = None
+        logger.info(f"📊 LLM calls: {LLM_CALL_COUNT}")
+        logger.info("Shutdown complete")
 
 if __name__ == "__main__":
-    app = VerseViewApp()
-    app.protocol("WM_DELETE_WINDOW", app.on_closing)
-    app.mainloop()
+    asyncio.run(main())
