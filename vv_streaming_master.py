@@ -8,7 +8,7 @@ import logging
 import requests
 import certifi
 import threading
-import openai
+# openai imported lazily inside configure() to avoid pydantic-core SIGTRAP on macOS
 # pynput is imported lazily inside main() to avoid macOS SIGTRAP on startup
 
 # selenium imported lazily inside connect() to avoid macOS startup issues
@@ -71,7 +71,7 @@ SMART_AMEN_KEYWORDS  = [
     "thank you jesus"
 ]
 
-llm_client = openai.OpenAI(base_url="https://api.groq.com/openai/v1", api_key=GROQ_API_KEY)
+llm_client = None  # initialized lazily inside configure()
 
 # ── GLOBALS & SERMON BUFFER ──
 stop_event   = None
@@ -240,8 +240,14 @@ def configure(
     DEEPGRAM_API_KEY    = deepgram_api_key
     GROQ_API_KEY        = groq_api_key
     SARVAM_API_KEY      = sarvam_api_key
-    DISCORD_WEBHOOK_URL = discord_webhook_url
+
+    # Lazy-init openai client here (avoids pydantic-core SIGTRAP on macOS at startup)
+    global llm_client
+    import openai
     llm_client = openai.OpenAI(base_url="https://api.groq.com/openai/v1", api_key=GROQ_API_KEY)
+
+    DISCORD_WEBHOOK_URL = discord_webhook_url
+    llm_client = None  # initialized lazily inside configure()
 
     USE_XPATH     = sys.platform == "darwin"
     MIC_INDEX     = mic_index
