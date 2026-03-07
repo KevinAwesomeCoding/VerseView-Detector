@@ -3,7 +3,6 @@ import sys
 import os
 from PyInstaller.utils.hooks import collect_data_files, collect_all
 
-# ── Collect all files from packages that need full bundling ──
 datas_dg,  bins_dg,  hidden_dg  = collect_all('deepgram')
 datas_sv,  bins_sv,  hidden_sv  = collect_all('sarvamai')
 datas_cn,  bins_cn,  hidden_cn  = collect_all('charset_normalizer')
@@ -24,13 +23,27 @@ if sys.platform == 'darwin':
     if os.path.exists(tcl_lib):
         datas += [(tcl_lib, 'tcl'), (tk_lib, 'tk')]
 
-# UPX crashes on macOS ARM64 (Apple Silicon) — disable it on mac, keep for Windows
+# pyobjc (needed by pynput on macOS) — only collect on macOS builds
+extra_hidden = []
+extra_bins   = []
+extra_datas  = []
+if sys.platform == 'darwin':
+    try:
+        d, b, h = collect_all('objc');        extra_datas+=d; extra_bins+=b; extra_hidden+=h
+        d, b, h = collect_all('Foundation');  extra_datas+=d; extra_bins+=b; extra_hidden+=h
+        d, b, h = collect_all('AppKit');      extra_datas+=d; extra_bins+=b; extra_hidden+=h
+        d, b, h = collect_all('Quartz');      extra_datas+=d; extra_bins+=b; extra_hidden+=h
+    except Exception:
+        pass  # pyobjc not installed — pynput lazy import will handle gracefully
+    datas += extra_datas
+
+# UPX crashes on macOS ARM64 (Apple Silicon) — keep it only for Windows
 USE_UPX = sys.platform == 'win32'
 
 a = Analysis(
     ['vv_gui.py'],
     pathex=[],
-    binaries=bins_dg + bins_sv + bins_cn,
+    binaries=bins_dg + bins_sv + bins_cn + extra_bins,
     datas=datas,
     hiddenimports=[
         'customtkinter',
@@ -57,7 +70,11 @@ a = Analysis(
         'pynput.mouse._darwin',
         'pynput.mouse._win32',
         'keyboard',
-    ] + hidden_dg + hidden_sv + hidden_cn,
+        'objc',
+        'Foundation',
+        'AppKit',
+        'Quartz',
+    ] + hidden_dg + hidden_sv + hidden_cn + extra_hidden,
     hookspath=[],
     runtime_hooks=[],
     excludes=[],
@@ -78,7 +95,7 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=USE_UPX,        # ← False on macOS (UPX causes SIGTRAP on Apple Silicon)
+    upx=USE_UPX,
     upx_exclude=[],
     runtime_tmpdir=None,
     console=False,
@@ -96,11 +113,10 @@ if sys.platform == 'darwin':
         a.zipfiles,
         a.datas,
         strip=False,
-        upx=False,          # ← Always False on macOS — UPX + ARM64 = SIGTRAP crash
+        upx=False,
         upx_exclude=[],
         name='VerseView Detector',
     )
-
     app = BUNDLE(
         coll,
         name='VerseView Detector.app',
