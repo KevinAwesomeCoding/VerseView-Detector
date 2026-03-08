@@ -10,7 +10,7 @@ permissions:
 
 jobs:
 
-  build-windows:
+    build-windows:
     runs-on: windows-latest
     steps:
       - name: Checkout
@@ -24,21 +24,8 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          # Audio & core libs
           pip install pyaudio
-          # App dependencies
-          pip install \
-            pyinstaller \
-            customtkinter \
-            selenium \
-            webdriver-manager \
-            certifi \
-            requests \
-            websockets \
-            charset-normalizer \
-            sarvamai \
-            pynput \
-            deepgram-sdk
+          pip install pyinstaller customtkinter selenium webdriver-manager certifi requests websockets charset-normalizer sarvamai pynput deepgram-sdk
 
       - name: Build EXE
         run: pyinstaller --clean verseview.spec
