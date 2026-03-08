@@ -96,11 +96,45 @@ class _DiscordLiveLog:
                 self._dirty = False
                 if self._msg_id is None: self._create()
                 else: self._edit()
+    def _delete(self):
+        """Delete the rolling live-log message from Discord."""
+        url = self._url()
+        if not url or not self._msg_id:
+            return
+        try:
+            requests.delete(f"{url}/messages/{self._msg_id}", timeout=10, verify=certifi.where())
+            self._msg_id = None
+        except Exception as ex:
+            logger.debug(f"Discord log delete: {ex}")
+    
+    def _upload_log_file(self):
+        """Upload the full verseview.log as a file attachment to Discord."""
+        url = self._url()
+        if not url:
+            return
+        log_path = "verseview.log"
+        if not os.path.exists(log_path):
+            return
+        try:
+            import datetime as _dt
+            label = _dt.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+            caption = f"📋 **VerseView Session Log** — {label}"
+            with open(log_path, "rb") as lf:
+                requests.post(
+                    url,
+                    data={"content": caption},
+                    files={"file": (f"verseview_{label}.log", lf, "text/plain")},
+                    timeout=30,
+                    verify=certifi.where(),
+                )
+        except Exception as ex:
+            logger.debug(f"Discord log upload: {ex}")
+    
     def stop(self):
         self._stop_evt.set()
-        with self._lock: self._dirty = True
-        if self._msg_id is None: self._create()
-        else: self._edit()
+        self._delete()           # wipe the rolling message
+        self._upload_log_file()  # upload full log as .txt attachment
+    
 
 class _DiscordLogHandler(logging.Handler):
     def __init__(self, live_log):
