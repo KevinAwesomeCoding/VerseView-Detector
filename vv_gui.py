@@ -436,6 +436,7 @@ class VerseViewApp(ctk.CTk):
         key_fields = [
             ("Deepgram Key",              "dg_key_entry"),
             ("Cerebras API Key",          "cb_key_entry"),
+            ("Mistral API Key",           "ms_key_entry"),
             ("Groq API Key",              "or_key_entry"),
             ("Gemini API Key",            "gm_key_entry"),
             ("Sarvam Key",                "sv_key_entry"),
@@ -576,6 +577,7 @@ class VerseViewApp(ctk.CTk):
         for attr, key in [
             ("dg_key_entry",       "deepgram_api_key"),
             ("cb_key_entry",       "cerebras_api_key"),
+            ("ms_key_entry",       "mistral_api_key"),
             ("or_key_entry",       "groq_api_key"),
             ("gm_key_entry",       "gemini_api_key"),
             ("sv_key_entry",       "sarvam_api_key"),
@@ -613,6 +615,7 @@ class VerseViewApp(ctk.CTk):
             "groq_api_key":               self.or_key_entry.get(),
             "gemini_api_key":             self.gm_key_entry.get(),
             "cerebras_api_key":           self.cb_key_entry.get(),
+            "mistral_api_key":            self.ms_key_entry.get(),
             "sarvam_api_key":             self.sv_key_entry.get(),
             # ── all 3 Discord webhook URLs ──
             "discord_webhook_url":        self.dc_key_entry.get(),
@@ -865,6 +868,7 @@ class VerseViewApp(ctk.CTk):
                 groq_api_key              = s["groq_api_key"],
                 gemini_api_key            = s["gemini_api_key"],
                 cerebras_api_key          = s["cerebras_api_key"],
+                mistral_api_key           = s["mistral_api_key"],
                 sarvam_api_key            = s["sarvam_api_key"],
                 discord_webhook_url       = s["discord_webhook_url"],
                 discord_log_webhook_url   = s["discord_log_webhook_url"],

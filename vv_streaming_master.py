@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 import sys, os
 
-IS_WINDOWS = sys.platform.startswith("win") # pynput only on Windows
+IS_WINDOWS = sys.platform.startswith("win")
 
 import asyncio
 import time
@@ -10,16 +10,14 @@ import logging
 import requests
 import certifi
 import threading
-# openai imported lazily inside configure()
-# pynput imported lazily inside main()
-# selenium imported lazily inside connect()
 
-from parse_reference_eng import parse_references as parse_eng, normalize_numbers_only as norm_eng
+from parse_reference_eng   import parse_references as parse_eng,   normalize_numbers_only as norm_eng
 from parse_reference_hindi import parse_references as parse_hindi, normalize_numbers_only as norm_hindi
-from parse_reference_ml import parse_references as parse_ml, normalize_numbers_only as norm_ml
-from bible_fetcher import fetch_verse as multi_fetch
+from parse_reference_ml    import parse_references as parse_ml,    normalize_numbers_only as norm_ml
+from bible_fetcher         import fetch_verse as multi_fetch
 
-# ── GROQ CLIENT (pure-requests, no openai/pydantic-core) ──
+
+# ── GROQ CLIENT  (verse extraction — llama-3.1-8b-instant) ──────────────────
 class _GroqResponse:
     class _Choice:
         class _Msg:
@@ -29,14 +27,15 @@ class _GroqResponse:
 
 class _GroqCompletions:
     def __init__(self, api_key): self._key = api_key
+
     def create(self, model, messages, temperature=0.2, max_tokens=None, **kw):
         headers = {"Authorization": f"Bearer {self._key}", "Content-Type": "application/json"}
-        body = {"model": model, "messages": messages, "temperature": temperature}
+        body    = {"model": model, "messages": messages, "temperature": temperature}
         if max_tokens is not None:
             body["max_tokens"] = max_tokens
         r = requests.post(
             "https://api.groq.com/openai/v1/chat/completions",
-            headers=headers, json=body, timeout=30, verify=certifi.where()
+            headers=headers, json=body, timeout=30, verify=certifi.where(),
         )
         r.raise_for_status()
         return _GroqResponse(r.json()["choices"][0]["message"]["content"])
@@ -45,48 +44,22 @@ class _GroqChat:
     def __init__(self, api_key): self.completions = _GroqCompletions(api_key)
 
 class _GroqClient:
-    """Drop-in replacement for openai.OpenAI() — uses requests only, no native extensions."""
+    """Groq — ONLY used for extract_verse_with_llm (fast, fires every few seconds)."""
     def __init__(self, api_key): self.chat = _GroqChat(api_key)
 
-# ── GEMINI CLIENT (secondary — free but 15 RPM cap) ──
-class _GeminiCompletions:
-    def __init__(self, api_key): self._key = api_key
-    def create(self, model, messages, temperature=0.2, max_tokens=None, **kw):
-        combined = "\n".join(m["content"] for m in messages)
-        body = {
-            "contents": [{"role": "user", "parts": [{"text": combined}]}],
-            "generationConfig": {"temperature": temperature}
-        }
-        if max_tokens:
-            body["generationConfig"]["maxOutputTokens"] = max_tokens
-        r = requests.post(
-            f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={self._key}",
-            json=body, timeout=45, verify=certifi.where()
-        )
-        r.raise_for_status()
-        text = r.json()["candidates"][0]["content"]["parts"][0]["text"]
-        return _GroqResponse(text)
 
-class _GeminiChat:
-    def __init__(self, api_key): self.completions = _GeminiCompletions(api_key)
-
-class _GeminiClient:
-    """Gemini 2.0 Flash — free tier (15 RPM / 200 RPD). Use as secondary only."""
-    def __init__(self, api_key): self.chat = _GeminiChat(api_key)
-
-
-# ── CEREBRAS CLIENT (primary — free, blazing fast on dedicated silicon) ──
-# Production models (March 2026): llama3.1-8b (~2200 tok/s), gpt-oss-120b (~3000 tok/s)
+# ── CEREBRAS CLIENT  (live outline + sermon summary fallback — gpt-oss-120b) ─
 class _CerebrasCompletions:
     def __init__(self, api_key): self._key = api_key
+
     def create(self, model, messages, temperature=0.2, max_tokens=None, **kw):
         headers = {"Authorization": f"Bearer {self._key}", "Content-Type": "application/json"}
-        body = {"model": model, "messages": messages, "temperature": temperature}
+        body    = {"model": model, "messages": messages, "temperature": temperature}
         if max_tokens is not None:
             body["max_completion_tokens"] = max_tokens
         r = requests.post(
             "https://api.cerebras.ai/v1/chat/completions",
-            headers=headers, json=body, timeout=30, verify=certifi.where()
+            headers=headers, json=body, timeout=60, verify=certifi.where(),
         )
         r.raise_for_status()
         return _GroqResponse(r.json()["choices"][0]["message"]["content"])
@@ -95,60 +68,112 @@ class _CerebrasChat:
     def __init__(self, api_key): self.completions = _CerebrasCompletions(api_key)
 
 class _CerebrasClient:
-    """Cerebras Inference — gpt-oss-120b (large) / llama3.1-8b (fast).
-    No published rate limit. Works on all platforms via pure HTTP."""
+    """Cerebras — live_points_loop outline + sermon summary fallback."""
     def __init__(self, api_key): self.chat = _CerebrasChat(api_key)
 
-# ── LOGGING ──
+
+# ── MISTRAL CLIENT  (sermon summary primary — mistral-large-latest) ──────────
+class _MistralCompletions:
+    def __init__(self, api_key): self._key = api_key
+
+    def create(self, model, messages, temperature=0.2, max_tokens=None, **kw):
+        headers = {"Authorization": f"Bearer {self._key}", "Content-Type": "application/json"}
+        body    = {"model": model, "messages": messages, "temperature": temperature}
+        if max_tokens is not None:
+            body["max_tokens"] = max_tokens
+        r = requests.post(
+            "https://api.mistral.ai/v1/chat/completions",
+            headers=headers, json=body, timeout=90, verify=certifi.where(),
+        )
+        r.raise_for_status()
+        return _GroqResponse(r.json()["choices"][0]["message"]["content"])
+
+class _MistralChat:
+    def __init__(self, api_key): self.completions = _MistralCompletions(api_key)
+
+class _MistralClient:
+    """Mistral — ONLY used for generate_sermon_summary (mistral-large-latest)."""
+    def __init__(self, api_key): self.chat = _MistralChat(api_key)
+
+
+# ── LOGGING ──────────────────────────────────────────────────────────────────
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)-5s %(message)s",
     handlers=[
         logging.FileHandler("verseview.log", encoding="utf-8"),
-        logging.StreamHandler()
-    ]
+        logging.StreamHandler(),
+    ],
 )
 logger = logging.getLogger(__name__)
 
-# ── DISCORD LIVE LOG ──
+
+# ── DISCORD LIVE LOG ──────────────────────────────────────────────────────────
 class _DiscordLiveLog:
     """One Discord message per session, edited every 5s with new log lines."""
     MAX_CHARS = 1900
+
     def __init__(self):
-        self._msg_id = None; self._lines = []; self._dirty = False
-        self._lock = threading.Lock(); self._stop_evt = threading.Event()
+        self._msg_id   = None
+        self._lines    = []
+        self._dirty    = False
+        self._lock     = threading.Lock()
+        self._stop_evt = threading.Event()
         threading.Thread(target=self._flush_loop, daemon=True).start()
-    def _url(self): return DISCORD_LOG_WEBHOOK_URL.strip() if DISCORD_LOG_WEBHOOK_URL else ""
+
+    def _url(self):
+        return DISCORD_LOG_WEBHOOK_URL.strip() if DISCORD_LOG_WEBHOOK_URL else ""
+
     def _build(self):
-        h = "**\U0001f3d9\ufe0f VerseView Live Log**\n```\n"
-        f = "```"
+        h     = "**\U0001f3d9\ufe0f VerseView Live Log**\n```\n"
+        f_end = "```"
         lines = list(self._lines)
-        while lines and len(h) + len("\n".join(lines)) + len(f) > self.MAX_CHARS: lines.pop(0)
-        return h + "\n".join(lines) + "\n" + f
+        while lines and len(h) + len("\n".join(lines)) + len(f_end) > self.MAX_CHARS:
+            lines.pop(0)
+        return h + "\n".join(lines) + "\n" + f_end
+
     def _create(self):
         url = self._url()
-        if not url: return
+        if not url:
+            return
         try:
-            r = requests.post(url + "?wait=true", json={"content": self._build()}, timeout=10, verify=certifi.where())
-            if r.status_code in (200, 204): self._msg_id = r.json().get("id")
-        except Exception as ex: logger.debug(f"Discord log create: {ex}")
+            r = requests.post(url + "?wait=true", json={"content": self._build()},
+                              timeout=10, verify=certifi.where())
+            if r.status_code in (200, 204):
+                self._msg_id = r.json().get("id")
+        except Exception as ex:
+            logger.debug(f"Discord log create: {ex}")
+
     def _edit(self):
         url = self._url()
-        if not url or not self._msg_id: return
-        try: requests.patch(f"{url}/messages/{self._msg_id}", json={"content": self._build()}, timeout=10, verify=certifi.where())
-        except Exception as ex: logger.debug(f"Discord log edit: {ex}")
+        if not url or not self._msg_id:
+            return
+        try:
+            requests.patch(
+                f"{url}/messages/{self._msg_id}",
+                json={"content": self._build()}, timeout=10, verify=certifi.where(),
+            )
+        except Exception as ex:
+            logger.debug(f"Discord log edit: {ex}")
+
     def append(self, line: str):
-        with self._lock: self._lines.append(line); self._dirty = True
+        with self._lock:
+            self._lines.append(line)
+            self._dirty = True
+
     def _flush_loop(self):
         while not self._stop_evt.is_set():
             self._stop_evt.wait(5)
             with self._lock:
-                if not self._dirty: continue
+                if not self._dirty:
+                    continue
                 self._dirty = False
-                if self._msg_id is None: self._create()
-                else: self._edit()
+                if self._msg_id is None:
+                    self._create()
+                else:
+                    self._edit()
+
     def _delete(self):
-        """Delete the rolling live-log message from Discord."""
         url = self._url()
         if not url or not self._msg_id:
             return
@@ -157,9 +182,8 @@ class _DiscordLiveLog:
             self._msg_id = None
         except Exception as ex:
             logger.debug(f"Discord log delete: {ex}")
-    
+
     def _upload_log_file(self):
-        """Upload the full verseview.log as a file attachment to Discord."""
         url = self._url()
         if not url:
             return
@@ -168,7 +192,7 @@ class _DiscordLiveLog:
             return
         try:
             import datetime as _dt
-            label = _dt.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+            label   = _dt.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
             caption = f"📋 **VerseView Session Log** — {label}"
             with open(log_path, "rb") as lf:
                 requests.post(
@@ -180,117 +204,136 @@ class _DiscordLiveLog:
                 )
         except Exception as ex:
             logger.debug(f"Discord log upload: {ex}")
-    
+
     def stop(self):
         self._stop_evt.set()
-        self._delete()           # wipe the rolling message
-        self._upload_log_file()  # upload full log as .txt attachment
-    
+        self._delete()
+        self._upload_log_file()
+
 
 class _DiscordLogHandler(logging.Handler):
     def __init__(self, live_log):
-        super().__init__(); self._live = live_log
+        super().__init__()
+        self._live = live_log
+
     def emit(self, record):
-        if not DISCORD_LOG_WEBHOOK_URL: return
+        if not DISCORD_LOG_WEBHOOK_URL:
+            return
         try:
             import datetime as _dt
             if record.levelno >= logging.INFO:
-                self._live.append(f"{_dt.datetime.now().strftime('%H:%M:%S')} {record.getMessage()}")
-        except Exception: pass
+                self._live.append(
+                    f"{_dt.datetime.now().strftime('%H:%M:%S')} {record.getMessage()}"
+                )
+        except Exception:
+            pass
+
 
 def send_sermon_notes_to_discord(notes: str):
     """Post sermon notes to DISCORD_NOTES_WEBHOOK_URL, chunked for Discord's 2000-char limit."""
     url = DISCORD_NOTES_WEBHOOK_URL.strip() if DISCORD_NOTES_WEBHOOK_URL else ""
-    if not url: return
-    LIMIT = 1900
-    header = "📋 **Sermon Notes**\n"
-    chunks = []; current = header
+    if not url:
+        return
+    LIMIT   = 1900
+    header  = "📋 **Sermon Notes**\n"
+    chunks  = []
+    current = header
     for line in notes.splitlines():
         seg = line + "\n"
-        if len(current) + len(seg) > LIMIT: chunks.append(current); current = seg
-        else: current += seg
-    if current.strip(): chunks.append(current)
-    for i, chunk in enumerate(chunks):
+        if len(current) + len(seg) > LIMIT:
+            chunks.append(current)
+            current = seg
+        else:
+            current += seg
+    if current.strip():
+        chunks.append(current)
+    for chunk in chunks:
         try:
             requests.post(url, json={"content": chunk}, timeout=10, verify=certifi.where())
             if len(chunks) > 1:
-                import time as _t; _t.sleep(0.5)
-        except Exception as ex: logger.debug(f"Discord notes: {ex}")
+                import time as _t
+                _t.sleep(0.5)
+        except Exception as ex:
+            logger.debug(f"Discord notes: {ex}")
+
 
 _discord_live_log = _DiscordLiveLog()
 logger.addHandler(_DiscordLogHandler(_discord_live_log))
 
-# ── DEFAULTS ──
-USE_XPATH = sys.platform == "darwin"
-USE_SARVAM = False
-DEEPGRAM_LANGUAGE = "en"
-DEEPGRAM_MODEL = "nova-2"
-SARVAM_LANGUAGE = "ml-IN"
-PRIMARY_PARSER = parse_eng
-MIC_INDEX = 1
-RATE = 16000
-CHUNK = 4096
-REMOTE_URL = "http://localhost:50010/control.html"
-DEDUP_WINDOW = 60
-COOLDOWN = 3.0
-LLM_ENABLED = True
-LLM_CALL_COUNT = 0
-BIBLE_TRANSLATION = "web"
-DEEPGRAM_API_KEY = ""
-GROQ_API_KEY = ""
-GEMINI_API_KEY = ""
-CEREBRAS_API_KEY = ""
-DISCORD_WEBHOOK_URL = ""
-DISCORD_LOG_WEBHOOK_URL = ""
-DISCORD_NOTES_WEBHOOK_URL = ""
-SARVAM_API_KEY = ""
 
-CONFIDENCE_THRESHOLD = 0.75
+# ── DEFAULTS ─────────────────────────────────────────────────────────────────
+USE_XPATH             = sys.platform == "darwin"
+USE_SARVAM            = False
+DEEPGRAM_LANGUAGE     = "en"
+DEEPGRAM_MODEL        = "nova-2"
+SARVAM_LANGUAGE       = "ml-IN"
+PRIMARY_PARSER        = parse_eng
+MIC_INDEX             = 1
+RATE                  = 16000
+CHUNK                 = 4096
+REMOTE_URL            = "http://localhost:50010/control.html"
+DEDUP_WINDOW          = 60
+COOLDOWN              = 3.0
+LLM_ENABLED           = True
+LLM_CALL_COUNT        = 0
+BIBLE_TRANSLATION     = "web"
+DEEPGRAM_API_KEY      = ""
+GROQ_API_KEY          = ""
+GEMINI_API_KEY        = ""
+CEREBRAS_API_KEY      = ""
+MISTRAL_API_KEY       = ""
+DISCORD_WEBHOOK_URL         = ""
+DISCORD_LOG_WEBHOOK_URL     = ""
+DISCORD_NOTES_WEBHOOK_URL   = ""
+SARVAM_API_KEY        = ""
+
+CONFIDENCE_THRESHOLD   = 0.75
 REQUIRE_MANUAL_CONFIRM = True
-CONFIRM_CALLBACK = None
-REQUIRE_VERIFY = True
-PANIC_KEY = "esc"
+CONFIRM_CALLBACK       = None
+REQUIRE_VERIFY         = True
+PANIC_KEY              = "esc"
 
-# ── LIVE POINTS CONFIG ──
-LIVE_POINTS_PROMPT = ""
-LIVE_POINTS_CALLBACK = None
+LIVE_POINTS_PROMPT         = ""
+LIVE_POINTS_CALLBACK       = None
 LIVE_POINTS_GET_CURRENT_CB = None
 
-# ── SMART AMEN CONFIG ──
-SMART_AMEN_ENABLED = True
+SMART_AMEN_ENABLED  = True
 SMART_AMEN_KEYWORDS = [
     "let us pray",
     "let's pray",
     "please be seated",
     "bow our heads",
-    "thank you jesus"
+    "thank you jesus",
 ]
 
-llm_client = None # initialized lazily inside configure()
+# ── LLM CLIENTS (initialised in configure()) ─────────────────────────────────
+groq_client     = None   # verse extraction only            (Groq llama-3.1-8b-instant)
+cerebras_client = None   # live outline + summary fallback  (Cerebras gpt-oss-120b)
+mistral_client  = None   # sermon summary primary           (Mistral mistral-large-latest)
 
-# ── GLOBALS & SERMON BUFFER ──
-stop_event = None
-engine_loop = None
-_controller = None
-
+# ── GLOBALS & SERMON BUFFER ──────────────────────────────────────────────────
+stop_event             = None
+engine_loop            = None
+_controller            = None
 full_sermon_transcript = ""
-verses_cited = []
+verses_cited           = []
 
-# ── STOP & PANIC LOGIC ──
+
+# ── STOP & PANIC ─────────────────────────────────────────────────────────────
 def request_stop():
-    """ Called ONLY by the GUI's Stop Button """
     global stop_event, engine_loop
     if engine_loop and stop_event:
         engine_loop.call_soon_threadsafe(stop_event.set)
     logger.info("🛑 Stop requested from GUI.")
 
+
 def trigger_panic():
-    """ Called ONLY by the keyboard Hotkey """
     global _controller
     if _controller:
         _controller.close_presentation()
 
-# ── SMART AMEN LOGIC ──
+
+# ── SMART AMEN ───────────────────────────────────────────────────────────────
 def check_smart_amen(text, controller):
     if not SMART_AMEN_ENABLED:
         return False
@@ -302,22 +345,21 @@ def check_smart_amen(text, controller):
             return True
     return False
 
-# ── LIVE POINTS GENERATOR (BACKGROUND LOOP) ──
+
+# ── LIVE POINTS LOOP  (Cerebras → Groq fallback) ─────────────────────────────
 async def live_points_loop():
-    """ Periodically asks Groq to extract main points from the growing transcript """
-    global full_sermon_transcript, LLM_ENABLED, llm_client
+    global full_sermon_transcript, LLM_ENABLED, groq_client, cerebras_client
     global LIVE_POINTS_PROMPT, LIVE_POINTS_CALLBACK, LIVE_POINTS_GET_CURRENT_CB
 
     last_processed_length = 0
 
     while not stop_event.is_set():
-        await asyncio.sleep(45)
+        await asyncio.sleep(90)
 
-        if not LLM_ENABLED or (not GROQ_API_KEY and not GEMINI_API_KEY and not CEREBRAS_API_KEY) or not LIVE_POINTS_CALLBACK:
+        if not LLM_ENABLED or (not cerebras_client and not groq_client) or not LIVE_POINTS_CALLBACK:
             continue
 
         current_transcript = full_sermon_transcript.strip()
-
         if len(current_transcript) < 150 or len(current_transcript) <= last_processed_length + 50:
             continue
 
@@ -335,9 +377,10 @@ async def live_points_loop():
 
         try:
             def fetch_points():
-                response = llm_client.chat.completions.create(
-                    model=("gpt-oss-120b" if CEREBRAS_API_KEY else "gemini-2.0-flash" if GEMINI_API_KEY else "llama-3.3-70b-versatile"),
-                    messages=[{"role": "user", "content": prompt}]
+                _client = cerebras_client or groq_client
+                response = _client.chat.completions.create(
+                    model=("gpt-oss-120b" if cerebras_client else "llama-3.3-70b-versatile"),
+                    messages=[{"role": "user", "content": prompt}],
                 )
                 return response.choices[0].message.content.strip()
 
@@ -346,20 +389,21 @@ async def live_points_loop():
         except Exception as e:
             logger.error(f"Live points generation failed: {e}")
 
-# ── SERMON SUMMARY GENERATOR (POST-SERMON) ──
-def generate_sermon_summary():
-    global full_sermon_transcript, verses_cited, LLM_ENABLED, llm_client
 
-    if not LLM_ENABLED or (not GROQ_API_KEY and not GEMINI_API_KEY and not CEREBRAS_API_KEY):
-        return "⚠️ LLM Fallback is disabled — add a Cerebras, Gemini, or Groq API Key. Required to generate summaries."
+# ── SERMON SUMMARY  (Mistral → Cerebras → Groq) ──────────────────────────────
+def generate_sermon_summary():
+    global full_sermon_transcript, verses_cited, LLM_ENABLED
+    global groq_client, cerebras_client, mistral_client
+
+    if not LLM_ENABLED or (not mistral_client and not cerebras_client and not groq_client):
+        return "⚠️ LLM disabled — add a Mistral, Cerebras, or Groq API key to generate summaries."
 
     if len(full_sermon_transcript.strip()) < 100:
         return "⚠️ Transcript is too short to generate a meaningful summary."
-    
-    import datetime  
 
+    import datetime
     today_str = datetime.datetime.now().strftime("%B %d, %Y  ·  %I:%M %p")
-    
+
     prompt = (
         "You are an expert sermon note-taker. Read the following sermon transcript "
         "and generate structured sermon notes using the exact Markdown format below. "
@@ -383,7 +427,7 @@ def generate_sermon_summary():
         "* *Key Thought:* [One standout quote or idea from this section]\n\n"
         "### ❓ Questions & Reflections\n"
         "* **Reflection:** [Generate one challenging question based on the sermon for the listener]\n\n"
-        "### 🏃‍♂️ The 'So What?' (Application)\n"
+        "### 🏃\u200d♂️ The 'So What?' (Application)\n"
         "1. **Immediate Step:** [A practical action step the listener can do this week]\n"
         "2. **Prayer Focus:** [A short prayer prompt related to the message]\n"
         "---FORMAT TEMPLATE END---\n\n"
@@ -391,10 +435,21 @@ def generate_sermon_summary():
     )
 
     try:
-        logger.info("⏳ Generating Sermon Cliff Notes via AI... (This may take a moment)")
-        response = llm_client.chat.completions.create(
-            model=("gpt-oss-120b" if CEREBRAS_API_KEY else "gemini-2.0-flash" if GEMINI_API_KEY else "llama-3.3-70b-versatile"),
-            messages=[{"role": "user", "content": prompt}]
+        if mistral_client:
+            _which = "Mistral mistral-large-latest"
+            _model = "mistral-large-latest"
+        elif cerebras_client:
+            _which = "Cerebras gpt-oss-120b"
+            _model = "gpt-oss-120b"
+        else:
+            _which = "Groq llama-3.3-70b-versatile"
+            _model = "llama-3.3-70b-versatile"
+
+        logger.info(f"⏳ Generating Sermon Cliff Notes via {_which}...")
+        _client  = mistral_client or cerebras_client or groq_client
+        response = _client.chat.completions.create(
+            model=_model,
+            messages=[{"role": "user", "content": prompt}],
         )
         summary = response.choices[0].message.content.strip()
 
@@ -409,127 +464,145 @@ def generate_sermon_summary():
         logger.error(f"❌ Failed to generate summary: {e}")
         return f"Error generating summary: {e}"
 
+
 def clear_sermon_buffer():
     global full_sermon_transcript, verses_cited
     full_sermon_transcript = ""
-    verses_cited = []
+    verses_cited           = []
     logger.info("🗑️ Sermon memory has been manually cleared.")
 
-# ── CONFIGURE ──
+
+# ── CONFIGURE ────────────────────────────────────────────────────────────────
 def configure(
     language="en", mic_index=1, rate=16000, chunk=4096,
     remote_url="http://localhost:50010/control.html",
     dedup_window=60, cooldown=3.0, llm_enabled=True,
     bible_translation="kjv", deepgram_api_key="",
-    groq_api_key="", gemini_api_key="", cerebras_api_key="", sarvam_api_key="",
+    groq_api_key="", gemini_api_key="", cerebras_api_key="",
+    mistral_api_key="", sarvam_api_key="",
     discord_webhook_url="", discord_log_webhook_url="", discord_notes_webhook_url="",
     confidence=0.75, manual_confirm=True,
     confirm_callback=None, verify=True, panic_key="esc", smart_amen=True,
-    live_points_prompt="", live_points_callback=None, live_points_get_current_cb=None
+    live_points_prompt="", live_points_callback=None, live_points_get_current_cb=None,
 ):
-    global DEEPGRAM_API_KEY, GROQ_API_KEY, GEMINI_API_KEY, CEREBRAS_API_KEY, SARVAM_API_KEY
+    global DEEPGRAM_API_KEY, GROQ_API_KEY, GEMINI_API_KEY, CEREBRAS_API_KEY, MISTRAL_API_KEY, SARVAM_API_KEY
     global DISCORD_WEBHOOK_URL, DISCORD_LOG_WEBHOOK_URL, DISCORD_NOTES_WEBHOOK_URL
     global USE_SARVAM, DEEPGRAM_LANGUAGE, DEEPGRAM_MODEL, SARVAM_LANGUAGE
     global PRIMARY_PARSER, MIC_INDEX, RATE, CHUNK, REMOTE_URL
-    global DEDUP_WINDOW, COOLDOWN, LLM_ENABLED, BIBLE_TRANSLATION, USE_XPATH, llm_client
+    global DEDUP_WINDOW, COOLDOWN, LLM_ENABLED, BIBLE_TRANSLATION, USE_XPATH
+    global groq_client, cerebras_client, mistral_client
     global CONFIDENCE_THRESHOLD, REQUIRE_MANUAL_CONFIRM, CONFIRM_CALLBACK, REQUIRE_VERIFY, PANIC_KEY, SMART_AMEN_ENABLED
     global full_sermon_transcript, verses_cited
     global LIVE_POINTS_PROMPT, LIVE_POINTS_CALLBACK, LIVE_POINTS_GET_CURRENT_CB
+    global normalize_numbers_only
 
-    # NOTE: Sermon buffer is intentionally NOT reset here so memory persists across stops/starts!
+    # NOTE: Sermon buffer intentionally NOT reset here — memory persists across stops/starts.
 
     DEEPGRAM_API_KEY = deepgram_api_key
-    GROQ_API_KEY = groq_api_key
-    GEMINI_API_KEY = gemini_api_key
+    GROQ_API_KEY     = groq_api_key
+    GEMINI_API_KEY   = gemini_api_key
     CEREBRAS_API_KEY = cerebras_api_key
-    SARVAM_API_KEY = sarvam_api_key
+    MISTRAL_API_KEY  = mistral_api_key
+    SARVAM_API_KEY   = sarvam_api_key
 
-    global llm_client
-    if CEREBRAS_API_KEY:
-        llm_client = _CerebrasClient(api_key=CEREBRAS_API_KEY)
-        logger.info("🤖 LLM: Cerebras (gpt-oss-120b / llama3.1-8b) — no rate limit")
-    elif GEMINI_API_KEY:
-        llm_client = _GeminiClient(api_key=GEMINI_API_KEY)
-        logger.info("🤖 LLM: Google Gemini 2.0 Flash (secondary)")
-    elif GROQ_API_KEY:
-        llm_client = _GroqClient(api_key=GROQ_API_KEY)
-        logger.info("🤖 LLM: Groq llama-3.3-70b (fallback)")
+    # ── Groq: verse extraction only ──
+    groq_client = _GroqClient(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
+    if groq_client:
+        logger.info("🔍 Verse LLM          : Groq  llama-3.1-8b-instant")
     else:
-        llm_client = None
-        logger.warning("⚠️  No LLM key provided — LLM features disabled")
+        logger.warning("⚠️  No Groq key — LLM verse extraction disabled")
 
-    DISCORD_WEBHOOK_URL = discord_webhook_url
-    DISCORD_LOG_WEBHOOK_URL = discord_log_webhook_url
+    # ── Cerebras: live outline + summary fallback ──
+    cerebras_client = _CerebrasClient(api_key=CEREBRAS_API_KEY) if CEREBRAS_API_KEY else None
+    if cerebras_client:
+        logger.info("📋 Live Outline LLM   : Cerebras  gpt-oss-120b")
+
+    # ── Mistral: sermon summary primary ──
+    mistral_client = _MistralClient(api_key=MISTRAL_API_KEY) if MISTRAL_API_KEY else None
+    if mistral_client:
+        logger.info("✍️  Sermon Summary LLM : Mistral  mistral-large-latest")
+    elif cerebras_client:
+        logger.info("✍️  Sermon Summary LLM : Cerebras  gpt-oss-120b  (no Mistral key)")
+    elif groq_client:
+        logger.info("✍️  Sermon Summary LLM : Groq  llama-3.3-70b-versatile  (no Mistral/Cerebras key)")
+    else:
+        logger.warning("⚠️  No LLM keys at all — all LLM features disabled")
+
+    DISCORD_WEBHOOK_URL       = discord_webhook_url
+    DISCORD_LOG_WEBHOOK_URL   = discord_log_webhook_url
     DISCORD_NOTES_WEBHOOK_URL = discord_notes_webhook_url
 
-    USE_XPATH = sys.platform == "darwin"
-    MIC_INDEX = mic_index
-    RATE = rate
-    CHUNK = chunk
-    REMOTE_URL = remote_url
-    DEDUP_WINDOW = dedup_window
-    COOLDOWN = cooldown
-    LLM_ENABLED = llm_enabled
+    USE_XPATH         = sys.platform == "darwin"
+    MIC_INDEX         = mic_index
+    RATE              = rate
+    CHUNK             = chunk
+    REMOTE_URL        = remote_url
+    DEDUP_WINDOW      = dedup_window
+    COOLDOWN          = cooldown
+    LLM_ENABLED       = llm_enabled
     BIBLE_TRANSLATION = bible_translation
 
-    CONFIDENCE_THRESHOLD = confidence
+    CONFIDENCE_THRESHOLD   = confidence
     REQUIRE_MANUAL_CONFIRM = manual_confirm
-    CONFIRM_CALLBACK = confirm_callback
-    REQUIRE_VERIFY = verify
-    PANIC_KEY = panic_key
-    SMART_AMEN_ENABLED = smart_amen
-    LIVE_POINTS_PROMPT = live_points_prompt
-    LIVE_POINTS_CALLBACK = live_points_callback
+    CONFIRM_CALLBACK       = confirm_callback
+    REQUIRE_VERIFY         = verify
+    PANIC_KEY              = panic_key
+    SMART_AMEN_ENABLED     = smart_amen
+    LIVE_POINTS_PROMPT         = live_points_prompt
+    LIVE_POINTS_CALLBACK       = live_points_callback
     LIVE_POINTS_GET_CURRENT_CB = live_points_get_current_cb
 
-    global normalize_numbers_only
     if language == "en":
-        USE_SARVAM = False
-        DEEPGRAM_LANGUAGE = "en"
-        DEEPGRAM_MODEL = "nova-2"
-        PRIMARY_PARSER = parse_eng
+        USE_SARVAM             = False
+        DEEPGRAM_LANGUAGE      = "en"
+        DEEPGRAM_MODEL         = "nova-2"
+        PRIMARY_PARSER         = parse_eng
         normalize_numbers_only = norm_eng
-
     elif language == "hi":
-        USE_SARVAM = False
-        DEEPGRAM_LANGUAGE = "hi"
-        DEEPGRAM_MODEL = "nova-3"
-        PRIMARY_PARSER = parse_hindi
+        USE_SARVAM             = False
+        DEEPGRAM_LANGUAGE      = "hi"
+        DEEPGRAM_MODEL         = "nova-3"
+        PRIMARY_PARSER         = parse_hindi
         normalize_numbers_only = norm_hindi
-
     elif language == "ml":
-        USE_SARVAM = True
-        SARVAM_LANGUAGE = "ml-IN"
-        PRIMARY_PARSER = parse_ml
+        USE_SARVAM             = True
+        SARVAM_LANGUAGE        = "ml-IN"
+        PRIMARY_PARSER         = parse_ml
         normalize_numbers_only = norm_ml
-
     else:
-        USE_SARVAM = False
-        DEEPGRAM_LANGUAGE = "multi"
-        DEEPGRAM_MODEL = "nova-2"
-        PRIMARY_PARSER = parse_eng
+        USE_SARVAM             = False
+        DEEPGRAM_LANGUAGE      = "multi"
+        DEEPGRAM_MODEL         = "nova-2"
+        PRIMARY_PARSER         = parse_eng
         normalize_numbers_only = norm_eng
 
-# ── CONTEXT TRACKING ──
-current_book = None
+
+# ── CONTEXT TRACKING ─────────────────────────────────────────────────────────
+current_book    = None
 current_chapter = None
-current_verse = None
+current_verse   = None
+
 
 def get_context() -> dict:
     return {"book": current_book or "", "chapter": current_chapter or "", "verse": current_verse or ""}
 
+
 def set_context(book: str, chapter: str, verse: str):
     global current_book, current_chapter, current_verse
-    current_book = book.strip() or None
+    current_book    = book.strip()    or None
     current_chapter = chapter.strip() or None
-    current_verse = verse.strip() or None
+    current_verse   = verse.strip()   or None
     logger.info(f"Context manually set: {current_book} {current_chapter}:{current_verse}")
 
-# ── VERSE RANGE QUEUE ──
-verse_queue = []
+
+# ── VERSE RANGE QUEUE ─────────────────────────────────────────────────────────
+verse_queue      = []
 verse_queue_lock = threading.Lock()
 
-RANGE_RE = re.compile(r'(?P<start>\d+)\s*(?:through|thru|to|and|ending\s+at|-|–)\s*(?P<end>\d+)', re.IGNORECASE | re.VERBOSE)
+RANGE_RE = re.compile(
+    r'(?P<start>\d+)\s*(?:through|thru|to|and|ending\s+at|-|–)\s*(?P<end>\d+)',
+    re.IGNORECASE | re.VERBOSE,
+)
 
 BOOK_KEYWORDS = (
     "genesis,exodus,leviticus,numbers,deuteronomy,"
@@ -552,7 +625,8 @@ NUMBER_WORDS = (
     "forty,fifty,sixty,seventy,eighty,ninety,hundred"
 ).split(",")
 
-# ── BIBLE FETCH ──
+
+# ── BIBLE FETCH ───────────────────────────────────────────────────────────────
 def fetch_verse_text(ref: str) -> str | None:
     text = multi_fetch(ref, BIBLE_TRANSLATION)
     if text:
@@ -560,85 +634,85 @@ def fetch_verse_text(ref: str) -> str | None:
     logger.warning(f"All APIs failed for {ref}")
     return None
 
-# ── ONWARDS MODE ──
-onwards_active = False
-onwards_book = None
-onwards_chapter = None
-onwards_verse = None
-onwards_timer = None
+
+# ── ONWARDS MODE ──────────────────────────────────────────────────────────────
+onwards_active     = False
+onwards_book       = None
+onwards_chapter    = None
+onwards_verse      = None
+onwards_timer      = None
 onwards_target_ref = None
-onwards_trigger = None
+onwards_trigger    = None
+
 
 def _stop_onwards():
     global onwards_active, onwards_timer, onwards_target_ref, onwards_trigger
-    onwards_active = False
+    onwards_active     = False
     if onwards_timer:
         onwards_timer.cancel()
-    onwards_timer = None
+    onwards_timer      = None
     onwards_target_ref = None
-    onwards_trigger = None
+    onwards_trigger    = None
     logger.info("⏹️ ONWARDS mode stopped")
+
 
 def _reset_onwards_timer():
     global onwards_timer
     if onwards_timer:
         onwards_timer.cancel()
-    onwards_timer = threading.Timer(60.0, _stop_onwards)
+    onwards_timer        = threading.Timer(60.0, _stop_onwards)
     onwards_timer.daemon = True
     onwards_timer.start()
+
 
 def _fetch_next_onwards():
     global onwards_target_ref, onwards_trigger
     if not onwards_active:
         return
     next_v = onwards_verse + 1
-    ref = f"{onwards_book} {onwards_chapter}:{next_v}"
-    text = fetch_verse_text(ref)
-
+    ref    = f"{onwards_book} {onwards_chapter}:{next_v}"
+    text   = fetch_verse_text(ref)
     if text:
-        words = re.findall(r'[a-z]+', text.lower())[:6]
-        onwards_trigger = " ".join(words)
+        words           = re.findall(r'[a-z]+', text.lower())[:6]
+        onwards_trigger    = " ".join(words)
         onwards_target_ref = ref
         logger.info(f"⏭️ ONWARDS LISTENING FOR: {ref} | Trigger: '{onwards_trigger}'")
     else:
-        logger.warning(f"⚠️ ONWARDS couldn't fetch {ref} - stopping onwards mode.")
+        logger.warning(f"⚠️ ONWARDS couldn't fetch {ref} — stopping.")
         _stop_onwards()
+
 
 def _start_onwards(book, chapter, verse):
     global onwards_active, onwards_book, onwards_chapter, onwards_verse
     _stop_onwards()
-    onwards_active = True
-    onwards_book = book
+    onwards_active  = True
+    onwards_book    = book
     onwards_chapter = chapter
-    onwards_verse = int(verse)
+    onwards_verse   = int(verse)
     _reset_onwards_timer()
     logger.info(f"▶️ ONWARDS mode started from {book} {chapter}:{verse}")
     threading.Thread(target=_fetch_next_onwards, daemon=True).start()
+
 
 def _check_onwards_advance(text, controller) -> bool:
     global onwards_verse
     if not onwards_active or not onwards_target_ref or not onwards_trigger:
         return False
-
     transcript_words = set(re.findall(r'[a-z]+', text.lower()))
-    check_words = onwards_trigger.split()[:4]
-
+    check_words      = onwards_trigger.split()[:4]
     if not check_words:
         return False
-
-    matches = sum(1 for w in check_words if w in transcript_words)
+    matches   = sum(1 for w in check_words if w in transcript_words)
     threshold = min(2, len(check_words))
-
     if matches >= threshold:
         logger.info(f"🎯 ONWARDS ADVANCE: {onwards_target_ref} (heard '{onwards_trigger[:30]}')")
         controller.send_verse(onwards_target_ref, bypass_cooldown=True)
-
         onwards_verse += 1
         _reset_onwards_timer()
         threading.Thread(target=_fetch_next_onwards, daemon=True).start()
         return True
-
     return False
+
 
 def queue_verse_range(book, chapter, start_verse, end_verse, controller):
     with verse_queue_lock:
@@ -646,10 +720,10 @@ def queue_verse_range(book, chapter, start_verse, end_verse, controller):
 
     def fetch_all():
         for v in range(start_verse + 1, end_verse + 1):
-            ref = f"{book} {chapter}:{v}"
+            ref  = f"{book} {chapter}:{v}"
             text = fetch_verse_text(ref)
             if text:
-                words = re.findall(r'[a-z]+', text.lower())[:6]
+                words   = re.findall(r'[a-z]+', text.lower())[:6]
                 trigger = " ".join(words)
                 with verse_queue_lock:
                     verse_queue.append((ref, trigger))
@@ -658,46 +732,45 @@ def queue_verse_range(book, chapter, start_verse, end_verse, controller):
     threading.Thread(target=fetch_all, daemon=True).start()
     logger.info(f"📖 Range queued: {book} {chapter}:{start_verse} → {end_verse}")
 
+
 def check_verse_queue(transcript, controller) -> bool:
     with verse_queue_lock:
         if not verse_queue:
             return False
         next_ref, trigger = verse_queue[0]
-        transcript_words = set(re.findall(r'[a-z]+', transcript.lower()))
-        check_words = trigger.split()[:4]
-        matches = sum(1 for w in check_words if w in transcript_words)
-        threshold = min(2, len(check_words))
+        transcript_words  = set(re.findall(r'[a-z]+', transcript.lower()))
+        check_words       = trigger.split()[:4]
+        matches           = sum(1 for w in check_words if w in transcript_words)
+        threshold         = min(2, len(check_words))
         if matches >= threshold:
             verse_queue.pop(0)
         else:
             return False
-
     logger.info(f"🎯 AUTO-ADVANCE: {next_ref} (heard '{trigger[:30]}')")
     controller.send_verse(next_ref, bypass_cooldown=True)
     return True
 
+
 def check_and_queue_range(text, base_ref, controller):
     if ":" not in base_ref:
         return
-
     num_norm = normalize_numbers_only(text)
-    range_m = RANGE_RE.search(num_norm)
+    range_m  = RANGE_RE.search(num_norm)
     if not range_m:
         return
-
     try:
-        end_v = int(range_m.group("end"))
-        parts = base_ref.split()
-        book = " ".join(parts[:-1])
-        chap_str, startv_str = parts[-1].split(":")
-        start_v = int(startv_str)
-
+        end_v                     = int(range_m.group("end"))
+        parts                     = base_ref.split()
+        book                      = " ".join(parts[:-1])
+        chap_str, startv_str      = parts[-1].split(":")
+        start_v                   = int(startv_str)
         if end_v > start_v and end_v <= start_v + 30:
             queue_verse_range(book, chap_str, start_v, end_v, controller)
     except Exception:
         return
 
-# ── DISCORD ──
+
+# ── DISCORD VERSE NOTIFICATION ────────────────────────────────────────────────
 def send_to_discord(verse: str):
     def do_send(payload):
         try:
@@ -713,26 +786,33 @@ def send_to_discord(verse: str):
 
     threading.Thread(target=do_send, args=({"content": f"✝️ Verse Detected: {verse}"},), daemon=True).start()
 
-# ── LLM FALLBACK ──
+
+# ── LLM VERSE EXTRACTION  (Groq only — llama-3.1-8b-instant) ─────────────────
 def extract_verse_with_llm(text):
     global LLM_CALL_COUNT
 
+    if not groq_client:
+        return None
+
     context_hint = ""
     if current_book and current_chapter:
-        context_hint = f"\nContext: The speaker is currently reading from {current_book} chapter {current_chapter}."
+        context_hint = (
+            f"\nContext: The speaker is currently reading from "
+            f"{current_book} chapter {current_chapter}."
+        )
 
     try:
         LLM_CALL_COUNT += 1
-        response = llm_client.chat.completions.create(
-            model=("llama3.1-8b" if CEREBRAS_API_KEY else "gemini-2.0-flash" if GEMINI_API_KEY else "llama-3.1-8b-instant"),
+        response = groq_client.chat.completions.create(
+            model="llama-3.1-8b-instant",
             messages=[{
                 "role": "user",
                 "content": (
                     f"Extract the Bible verse reference from this text. "
                     f"Return ONLY in format Book Chapter:Verse (e.g., John 3:16). "
                     f"If no verse found, return exactly NONE.{context_hint}\nText: {text}"
-                )
-            }]
+                ),
+            }],
         )
         verse = response.choices[0].message.content.strip()
         if verse == "NONE":
@@ -745,17 +825,18 @@ def extract_verse_with_llm(text):
         logger.error(f"❌ LLM error: {e}")
         return None
 
-# ── VERSE CONTROLLER ──
+
+# ── VERSE CONTROLLER ──────────────────────────────────────────────────────────
 class VerseController:
     def __init__(self):
-        self.driver = None
-        self.box = None
-        self.btn = None
-        self.last_sent = None
-        self.last_time = 0
-        self.history = {}
+        self.driver        = None
+        self.box           = None
+        self.btn           = None
+        self.last_sent     = None
+        self.last_time     = 0
+        self.history       = {}
         self.pending_verse = None
-        self.match_count = 0
+        self.match_count   = 0
 
     def connect(self):
         try:
@@ -765,6 +846,7 @@ class VerseController:
             from selenium.webdriver.support.ui import WebDriverWait
             from selenium.webdriver.support import expected_conditions as EC
             from webdriver_manager.chrome import ChromeDriverManager
+
             logger.info(f"Connecting to VerseView at {REMOTE_URL}...")
             options = webdriver.ChromeOptions()
             options.add_argument("--headless=new")
@@ -783,15 +865,15 @@ class VerseController:
 
             self.driver = webdriver.Chrome(
                 service=Service(ChromeDriverManager().install()),
-                options=options
+                options=options,
             )
             self.driver.get(REMOTE_URL)
-            wait = WebDriverWait(self.driver, 15)
+            wait     = WebDriverWait(self.driver, 15)
             self.box = wait.until(EC.presence_of_element_located((By.ID, "remote_bibleRefID")))
 
             btn = None
             selectors = [
-                (By.ID, "remote_bible_present"),
+                (By.ID,    "remote_bible_present"),
                 (By.XPATH, "//button[contains(normalize-space(text()),'PRESENT')]"),
                 (By.XPATH, "//button[contains(normalize-space(text()),'Present')]"),
                 (By.XPATH, "//button[contains(@onclick,'present')]"),
@@ -802,7 +884,7 @@ class VerseController:
                     btn = self.driver.find_element(by, selector)
                     logger.info(f"Found PRESENT button: {selector}")
                     break
-                except:
+                except Exception:
                     continue
 
             if not btn:
@@ -820,25 +902,28 @@ class VerseController:
             return False
 
     def close_presentation(self):
-        if not self.driver: return
+        if not self.driver:
+            return
         try:
-            from selenium.webdriver.common.by import By  # noqa: lazy import
+            from selenium.webdriver.common.by import By
             close_btn = self.driver.find_element(By.ID, "iconClose")
             close_btn.click()
             logger.info("🚫 Presentation cleared off the screen!")
         except Exception as e:
             logger.debug(f"Could not click close button (maybe already closed): {e}")
 
-
     def send_verse(self, ref, bypass_cooldown=False, confidence=1.0):
         global current_book, current_chapter, current_verse, verses_cited
         now = time.time()
 
-        # ── MANUAL CONFIRMATION LOGIC ──
+        # ── MANUAL CONFIRMATION ──
         if confidence < CONFIDENCE_THRESHOLD and not bypass_cooldown:
             if REQUIRE_MANUAL_CONFIRM and CONFIRM_CALLBACK:
                 def _ask_thread():
-                    logger.info(f"🤔 Holding for manual confirmation: {ref} (Confidence: {int(confidence*100)}%)")
+                    logger.info(
+                        f"🤔 Holding for manual confirmation: {ref} "
+                        f"(Confidence: {int(confidence*100)}%)"
+                    )
                     if CONFIRM_CALLBACK(ref, confidence):
                         logger.info(f"✅ User manually approved: {ref}")
                         self.send_verse(ref, bypass_cooldown=True, confidence=1.0)
@@ -847,35 +932,35 @@ class VerseController:
                 threading.Thread(target=_ask_thread, daemon=True).start()
                 return False
             else:
-                logger.warning(f"⚠️ Blocked: {ref} (Confidence {int(confidence*100)}% < Threshold {int(CONFIDENCE_THRESHOLD*100)}%)")
+                logger.warning(
+                    f"⚠️ Blocked: {ref} (Confidence {int(confidence*100)}% "
+                    f"< Threshold {int(CONFIDENCE_THRESHOLD*100)}%)"
+                )
                 return False
 
-        # ── VERIFICATION LOGIC (Hear Twice) ──
+        # ── VERIFICATION (hear twice) ──
         if REQUIRE_VERIFY and not bypass_cooldown:
             if self.pending_verse == ref:
                 self.match_count += 1
             else:
                 self.pending_verse = ref
-                self.match_count = 1
+                self.match_count   = 1
                 logger.info(f"⏳ Verification pending for: {ref} (Heard once...)")
                 return False
-
             if self.match_count < 2:
                 return False
-
             self.pending_verse = None
-            self.match_count = 0
+            self.match_count   = 0
 
-        # ── STANDARD COOLDOWNS ──
+        # ── COOLDOWNS ──
         if ref in self.history and (now - self.history[ref]) < DEDUP_WINDOW:
             logger.debug(f"Skipped duplicate: {ref}")
             return False
-
         if not bypass_cooldown and self.last_sent and (now - self.last_time) < COOLDOWN:
             logger.debug(f"Cooldown active: {ref}")
             return False
 
-        # ── SEND TO VERSEVIEW ──
+        # ── SEND ──
         try:
             if not self.driver:
                 if not self.connect():
@@ -893,16 +978,16 @@ class VerseController:
             parts = ref.split()
             if len(parts) >= 2:
                 if ":" in parts[-1]:
-                    current_book = " ".join(parts[:-1])
+                    current_book    = " ".join(parts[:-1])
                     current_chapter, current_verse = parts[-1].split(":")
                 else:
-                    current_book = " ".join(parts[:-1])
+                    current_book    = " ".join(parts[:-1])
                     current_chapter = parts[-1]
-                    current_verse = None
+                    current_verse   = None
 
             self.history[ref] = now
-            self.last_sent = ref
-            self.last_time = now
+            self.last_sent    = ref
+            self.last_time    = now
 
             if len(self.history) > 20:
                 oldest = min(self.history.items(), key=lambda x: x[1])
@@ -913,7 +998,7 @@ class VerseController:
             logger.error(f"Failed to send {ref}: {e}")
             try:
                 self.driver.quit()
-            except:
+            except Exception:
                 pass
             self.driver = None
             return False
@@ -923,11 +1008,13 @@ class VerseController:
             try:
                 self.driver.quit()
                 logger.info("VerseView connection closed")
-            except:
+            except Exception:
                 pass
 
-# ── HYBRID VERSE DETECTOR ──
+
+# ── HYBRID VERSE DETECTOR ─────────────────────────────────────────────────────
 ONWARDS_KEYWORDS = ["onwards", "onward", "and following", "and beyond", "and after"]
+
 
 def detect_verse_hybrid(text, controller, confidence=1.0) -> bool:
     global current_book, current_chapter, current_verse
@@ -935,10 +1022,9 @@ def detect_verse_hybrid(text, controller, confidence=1.0) -> bool:
     if not text or len(text.strip()) < 3:
         return False
 
-    # ── PHONETIC FIXES ──
     fixes = {
         r"\b(?:sam's|sams|sam)\b": "psalms",
-        r"\bnayan\b": "nine"
+        r"\bnayan\b":              "nine",
     }
     for pattern, replacement in fixes.items():
         text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
@@ -948,13 +1034,12 @@ def detect_verse_hybrid(text, controller, confidence=1.0) -> bool:
             parts = ref_string.split()
             if ":" in parts[-1]:
                 ch, vs = parts[-1].split(":")
-                bk = " ".join(parts[:-1])
+                bk     = " ".join(parts[:-1])
                 _start_onwards(bk, ch, vs)
 
     try:
         if check_verse_queue(text, controller):
             return True
-
         if _check_onwards_advance(text, controller):
             return True
 
@@ -962,22 +1047,23 @@ def detect_verse_hybrid(text, controller, confidence=1.0) -> bool:
         num_norm = re.sub(
             r'\b(20|30|40|50|60|70|80|90)\s+([1-9])\b',
             lambda m: str(int(m.group(1)) + int(m.group(2))),
-            num_norm
+            num_norm,
         )
 
         # Layer 1 — parser
         refs = PRIMARY_PARSER(text)
         if refs:
-            verse = refs[0]
-
+            verse      = refs[0]
             is_blocked = False
             if ":" not in verse:
                 chap_num = verse.split()[-1]
-                blockers = ["days", "weeks", "months", "years", "minutes", "hours", "people", "men", "women", "points", "dollars"]
+                blockers = [
+                    "days", "weeks", "months", "years", "minutes", "hours",
+                    "people", "men", "women", "points", "dollars",
+                ]
                 if any(re.search(rf'\b{chap_num}\s+{b}\b', num_norm) for b in blockers):
                     logger.info(f"🚫 BLOCKED Layer 1 False Positive: {verse} (Time/People phrase)")
                     is_blocked = True
-
             if not is_blocked:
                 logger.info(f"🔍 PARSER: {verse} ({int(confidence*100)}% Acc)")
                 controller.send_verse(verse, confidence=confidence)
@@ -989,24 +1075,19 @@ def detect_verse_hybrid(text, controller, confidence=1.0) -> bool:
         # Layer 2 — contextual (number only, same book/chapter)
         m = re.search(r'\b(\d+)\b', num_norm)
         if m and current_book and current_chapter:
-            candidate = m.group(1)
+            candidate  = m.group(1)
             text_lower = num_norm.lower()
-
-            is_valid = False
-
+            is_valid   = False
             if len(text.split()) <= 2:
                 is_valid = True
             elif re.search(r'\b(?:verse|verses|v|vs)\s+' + candidate + r'\b', text_lower):
                 is_valid = True
-            # ── FIX: ordinal format "first verse" → "1 verse", "3rd verse" ──
             elif re.search(r'\b' + re.escape(candidate) + r'\s*(?:st|nd|rd|th)?\s+verse\b', text_lower):
                 is_valid = True
-            # ── FIX: navigation phrases "go back to verse N", "going back to the verse" ──
             elif re.search(r'\b(?:back|return|going)\b', text_lower) and re.search(r'\bverse\b', text_lower):
                 is_valid = True
             elif any(kw in text_lower for kw in ["വാക്യം", "വചനം", "വചന", "वचन", "पद"]):
                 is_valid = True
-
             if is_valid:
                 ref = f"{current_book} {current_chapter}:{candidate}"
                 logger.info(f"🔍 CONTEXTUAL: {ref} ({int(confidence*100)}% Acc)")
@@ -1015,7 +1096,7 @@ def detect_verse_hybrid(text, controller, confidence=1.0) -> bool:
                 check_and_queue_range(num_norm, ref, controller)
                 return True
 
-        # Layer 3 — Hindi contextual
+        # Layer 3 — Hindi devanagari digits
         m_hi = re.search(r'([\u0966-\u096F]+)', text)
         if m_hi and current_book and current_chapter:
             ref = f"{current_book} {current_chapter}:{m_hi.group(1)}"
@@ -1024,7 +1105,7 @@ def detect_verse_hybrid(text, controller, confidence=1.0) -> bool:
             trigger_onwards_if_needed(ref, text)
             return True
 
-        # Layer 4 — Malayalam contextual
+        # Layer 4 — Malayalam digits
         m_ml = re.search(r'([\u0D66-\u0D6F]+)', text)
         if m_ml and current_book and current_chapter:
             ref = f"{current_book} {current_chapter}:{m_ml.group(1)}"
@@ -1052,18 +1133,21 @@ def detect_verse_hybrid(text, controller, confidence=1.0) -> bool:
         if current_book and current_chapter:
             range_m = RANGE_RE.search(num_norm)
             if range_m:
-                start_v = int(range_m.group("start"))
-                end_v = int(range_m.group("end"))
+                start_v    = int(range_m.group("start"))
+                end_v      = int(range_m.group("end"))
                 text_after = num_norm[range_m.end():].strip()
-                blockers = [
-                    "bibles","dollars","days","weeks","months","years",
-                    "minutes","hours","times","people","men","women",
-                    "students","countries","churches","teams"
+                blockers   = [
+                    "bibles", "dollars", "days", "weeks", "months", "years",
+                    "minutes", "hours", "times", "people", "men", "women",
+                    "students", "countries", "churches", "teams",
                 ]
                 if not any(text_after.startswith(b) for b in blockers):
                     if 1 <= start_v < end_v <= start_v + 30:
                         ref_start = f"{current_book} {current_chapter}:{start_v}"
-                        logger.info(f"🔍 RANGE: {current_book} {current_chapter}:{start_v} → {end_v} ({int(confidence*100)}% Acc)")
+                        logger.info(
+                            f"🔍 RANGE: {current_book} {current_chapter}:{start_v}→{end_v} "
+                            f"({int(confidence*100)}% Acc)"
+                        )
                         controller.send_verse(ref_start, confidence=confidence)
                         queue_verse_range(current_book, current_chapter, start_v, end_v, controller)
                         trigger_onwards_if_needed(ref_start, text)
@@ -1072,7 +1156,7 @@ def detect_verse_hybrid(text, controller, confidence=1.0) -> bool:
         # Layer 8 — simple "Book chapter" pattern
         m_simple = re.search(
             r'\b((?:[1-3]\s*)?(?:' + '|'.join(BOOK_KEYWORDS[:40]) + r'))\s+(\d{1,3})\b',
-            text, re.IGNORECASE
+            text, re.IGNORECASE,
         )
         if m_simple:
             ref = f"{m_simple.group(1).strip().title()} {m_simple.group(2)}"
@@ -1081,17 +1165,16 @@ def detect_verse_hybrid(text, controller, confidence=1.0) -> bool:
             trigger_onwards_if_needed(ref, text)
             return True
 
-        # Layer 9 — LLM fallback
+        # Layer 9 — LLM fallback (Groq only)
         if not LLM_ENABLED:
             return False
 
         text_lower = text.lower()
-        has_book = any(kw in text_lower for kw in BOOK_KEYWORDS)
+        has_book   = any(kw in text_lower for kw in BOOK_KEYWORDS)
         has_number = bool(re.search(r'\d+', text)) or any(w in text_lower for w in NUMBER_WORDS)
 
         if not has_book and not has_number:
             return False
-
         if len(text.split()) < 4 and not has_number:
             return False
 
@@ -1111,17 +1194,12 @@ def detect_verse_hybrid(text, controller, confidence=1.0) -> bool:
         logger.error(f"Parse error: {e}")
         return False
 
-# ── SENTENCE SPLITTER (shared by both streaming engines) ──
-# Splits on English punctuation and Malayalam/Hindi sentence-enders so each
-# clause is processed individually without waiting for a full VAD endpoint.
+
+# ── SENTENCE SPLITTER ─────────────────────────────────────────────────────────
 _CLAUSE_SPLIT_RE = re.compile(r'(?<=[.!?,।])\s+')
 
+
 def _process_transcript_blob(sentence: str, partial_context_ref: list, controller):
-    """
-    Splits a transcript blob into clauses and runs detect_verse_hybrid on each.
-    partial_context_ref is a one-element list used as a mutable reference so
-    the caller can read back the updated context window.
-    """
     partial_context = partial_context_ref[0]
     parts = _CLAUSE_SPLIT_RE.split(sentence.strip())
     for part in parts:
@@ -1137,14 +1215,14 @@ def _process_transcript_blob(sentence: str, partial_context_ref: list, controlle
         if found:
             partial_context = ""
             break
-    # Rolling window trim
     if partial_context:
         words = partial_context.split()
         if len(words) > 30:
             partial_context = " ".join(words[-15:])
     partial_context_ref[0] = partial_context
 
-# ── DEEPGRAM STREAMING ──
+
+# ── DEEPGRAM STREAMING ────────────────────────────────────────────────────────
 async def stream_audio(controller):
     global full_sermon_transcript
     import websockets
@@ -1153,7 +1231,7 @@ async def stream_audio(controller):
     partial_context = [""]
 
     import pyaudio
-    audio = pyaudio.PyAudio()
+    audio  = pyaudio.PyAudio()
     stream = None
 
     try:
@@ -1162,7 +1240,7 @@ async def stream_audio(controller):
         stream = audio.open(
             format=pyaudio.paInt16, channels=1, rate=RATE,
             input=True, input_device_index=MIC_INDEX,
-            frames_per_buffer=CHUNK
+            frames_per_buffer=CHUNK,
         )
         logger.info("Microphone opened")
     except Exception as e:
@@ -1182,7 +1260,7 @@ async def stream_audio(controller):
         f"&sample_rate={RATE}"
     )
     headers = {"Authorization": f"Token {DEEPGRAM_API_KEY}"}
-    loop = asyncio.get_event_loop()
+    loop    = asyncio.get_event_loop()
 
     def read_audio():
         return stream.read(CHUNK, exception_on_overflow=False)
@@ -1208,7 +1286,7 @@ async def stream_audio(controller):
                 try:
                     async for msg in ws:
                         try:
-                            data = json.loads(msg)
+                            data     = json.loads(msg)
                             msg_type = data.get("type", "Results")
                             if msg_type != "Results":
                                 continue
@@ -1218,21 +1296,14 @@ async def stream_audio(controller):
                             alts = channel.get("alternatives", [])
                             if not alts or not isinstance(alts[0], dict):
                                 continue
-
-                            confidence = alts[0].get("confidence", 1.0)
                             sentence = alts[0].get("transcript", "")
-
                             if not sentence.strip():
                                 continue
-
                             check_verse_queue(sentence, controller)
-
                             if data.get("is_final"):
                                 logger.info(f"📝 {sentence}")
                                 full_sermon_transcript += " " + sentence.strip()
-                                # ── sentence-split so each clause is processed independently ──
                                 _process_transcript_blob(sentence, partial_context, controller)
-
                         except Exception as e:
                             logger.error(f"Recv error: {e}")
                 except asyncio.CancelledError:
@@ -1240,7 +1311,7 @@ async def stream_audio(controller):
                 except Exception as e:
                     logger.warning(f"WebSocket closed: {e}")
 
-            sender = asyncio.create_task(send_audio())
+            sender   = asyncio.create_task(send_audio())
             receiver = asyncio.create_task(recv_transcripts())
             await stop_event.wait()
             sender.cancel()
@@ -1248,7 +1319,7 @@ async def stream_audio(controller):
             await asyncio.gather(sender, receiver, return_exceptions=True)
             try:
                 await ws.send(json.dumps({"type": "CloseStream"}))
-            except:
+            except Exception:
                 pass
     except Exception as e:
         logger.error(f"Deepgram WebSocket error: {e}")
@@ -1258,14 +1329,15 @@ async def stream_audio(controller):
             stream.close()
         audio.terminate()
 
-# ── SARVAM STREAMING ──
+
+# ── SARVAM STREAMING ──────────────────────────────────────────────────────────
 async def stream_audio_sarvam(controller):
     global full_sermon_transcript
     import base64
     from sarvamai import AsyncSarvamAI
     import pyaudio
 
-    audio = pyaudio.PyAudio()
+    audio  = pyaudio.PyAudio()
     stream = None
 
     try:
@@ -1273,11 +1345,12 @@ async def stream_audio_sarvam(controller):
         logger.info(f"Using: [{MIC_INDEX}] {mic_info['name']}")
         stream = audio.open(
             format=pyaudio.paInt16, channels=1, rate=RATE,
-            input=True, input_device_index=MIC_INDEX, frames_per_buffer=CHUNK
+            input=True, input_device_index=MIC_INDEX, frames_per_buffer=CHUNK,
         )
         logger.info("Microphone opened")
     except Exception as e:
-        logger.error(f"Microphone error: {e}"); return
+        logger.error(f"Microphone error: {e}")
+        return
 
     def read_chunk_blocking():
         frames = []
@@ -1286,9 +1359,8 @@ async def stream_audio_sarvam(controller):
         return b"".join(frames)
 
     client = AsyncSarvamAI(api_subscription_key=SARVAM_API_KEY)
-    loop = asyncio.get_event_loop()
+    loop   = asyncio.get_event_loop()
 
-    # ── AUTO-RECONNECT LOOP ── Sarvam times out after ~3-4 min; reconnect automatically
     try:
         while not stop_event.is_set():
             logger.info("Connecting to Sarvam AI...")
@@ -1296,10 +1368,8 @@ async def stream_audio_sarvam(controller):
                 async with client.speech_to_text_streaming.connect(
                     model="saaras:v3", mode="transcribe",
                     language_code=SARVAM_LANGUAGE, sample_rate=RATE,
-                    # ── high_vad_sensitivity=True cuts utterances on shorter silences
-                    #    so blobs arrive more frequently instead of one 40s chunk ──
                     high_vad_sensitivity=True, vad_signals=False,
-                    input_audio_codec="pcm_s16le"
+                    input_audio_codec="pcm_s16le",
                 ) as ws:
                     logger.info(f"Sarvam AI connected — {SARVAM_LANGUAGE} saaras:v3")
 
@@ -1310,8 +1380,10 @@ async def stream_audio_sarvam(controller):
                             while not stop_event.is_set():
                                 pcm_data = await loop.run_in_executor(None, read_chunk_blocking)
                                 await ws.transcribe(audio=base64.b64encode(pcm_data).decode("utf-8"))
-                        except asyncio.CancelledError: pass
-                        except Exception as e: logger.error(f"Sarvam send error: {e}")
+                        except asyncio.CancelledError:
+                            pass
+                        except Exception as e:
+                            logger.error(f"Sarvam send error: {e}")
 
                     async def recv_transcripts():
                         global full_sermon_transcript
@@ -1321,53 +1393,70 @@ async def stream_audio_sarvam(controller):
                                     if isinstance(message, dict):
                                         sentence = message.get("transcript", message.get("text", ""))
                                     else:
-                                        sentence = (getattr(message.data, "transcript", "") if hasattr(message, "data")
-                                                    else getattr(message, "transcript", getattr(message, "text", "")))
+                                        sentence = (
+                                            getattr(message.data, "transcript", "")
+                                            if hasattr(message, "data")
+                                            else getattr(message, "transcript",
+                                                         getattr(message, "text", ""))
+                                        )
                                     sentence = str(sentence).strip()
                                     if sentence and sentence != "None":
                                         logger.info(f"📝 {sentence}")
                                         full_sermon_transcript += " " + sentence.strip()
-                                        # ── sentence-split: fire detection on each clause
-                                        #    so a 40s blob doesn't wait until the very end ──
                                         _process_transcript_blob(sentence, partial_context, controller)
-                                except Exception as e: logger.error(f"Sarvam parse error: {e}")
-                        except asyncio.CancelledError: pass
+                                except Exception as e:
+                                    logger.error(f"Sarvam parse error: {e}")
+                        except asyncio.CancelledError:
+                            pass
                         except Exception as e:
                             if not stop_event.is_set():
                                 logger.warning(f"Sarvam session ended (will reconnect): {e}")
 
-                    sender = asyncio.create_task(send_audio())
+                    sender   = asyncio.create_task(send_audio())
                     receiver = asyncio.create_task(recv_transcripts())
                     await asyncio.wait(
                         [asyncio.ensure_future(stop_event.wait()), receiver],
-                        return_when=asyncio.FIRST_COMPLETED
+                        return_when=asyncio.FIRST_COMPLETED,
                     )
-                    sender.cancel(); receiver.cancel()
+                    sender.cancel()
+                    receiver.cancel()
                     await asyncio.gather(sender, receiver, return_exceptions=True)
-                    if stop_event.is_set(): break
+                    if stop_event.is_set():
+                        break
                     logger.info("🔄 Sarvam session ended. Reconnecting in 2s...")
                     await asyncio.sleep(2)
             except Exception as e:
-                if stop_event.is_set(): break
+                if stop_event.is_set():
+                    break
                 logger.error(f"Sarvam error: {e} — retrying in 5s...")
                 await asyncio.sleep(5)
     finally:
-        if stream: stream.stop_stream(); stream.close()
+        if stream:
+            stream.stop_stream()
+            stream.close()
         audio.terminate()
 
+
+# ── MAIN ──────────────────────────────────────────────────────────────────────
 async def main():
     global stop_event, engine_loop, _controller
-    stop_event = asyncio.Event()
+    stop_event  = asyncio.Event()
     engine_loop = asyncio.get_event_loop()
 
-    # ── PANIC BUTTON BINDING (Windows only) ──
+    panic_listener = None
+
     if IS_WINDOWS and PANIC_KEY:
         try:
             from pynput import keyboard as pynput_kb
+
             def on_press(key):
-                try: k = key.char
-                except AttributeError: k = key.name
-                if k == PANIC_KEY: trigger_panic()
+                try:
+                    k = key.char
+                except AttributeError:
+                    k = key.name
+                if k == PANIC_KEY:
+                    trigger_panic()
+
             panic_listener = pynput_kb.Listener(on_press=on_press)
             panic_listener.daemon = True
             panic_listener.start()
@@ -1378,7 +1467,7 @@ async def main():
         logger.info("🚨 macOS: use Shift+Escape in the app window")
 
     _controller = VerseController()
-    connected = False
+    connected   = False
 
     for attempt in range(1, 6):
         logger.info(f"Connection attempt {attempt}/5...")
@@ -1409,13 +1498,14 @@ async def main():
             await stream_audio(_controller)
     finally:
         points_task.cancel()
-        if 'panic_listener' in locals():
+        if panic_listener:
             panic_listener.stop()
         _controller.cleanup()
         _controller = None
         logger.info(f"📊 LLM calls: {LLM_CALL_COUNT}")
         logger.info("Shutdown complete")
         _discord_live_log.stop()
+
 
 if __name__ == "__main__":
     asyncio.run(main())

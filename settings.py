@@ -6,21 +6,33 @@ import tkinter.filedialog as fd
 import tkinter.messagebox as mb
 
 DEFAULTS = {
-    "deepgram_api_key":    "",
-    "groq_api_key":  "",
-    "cerebras_api_key":           "",   # Primary LLM — no rate limit, blazing fast
-    "gemini_api_key":             "",   # Secondary LLM — Gemini 2.0 Flash (15 RPM)
-    "discord_webhook_url": "",
-    "sarvam_api_key":      "",
-    "language":            "English (Nova-2)",
-    "mic_index":           0,
-    "remote_url":          "http://localhost:50010/control.html",
-    "bible_translation":   "KJV",
-    "rate":                16000,
-    "chunk":               4096,
-    "cooldown":            3.0,
-    "dedup_window":        60,
-    "llm_enabled":         True,
+    "deepgram_api_key":           "",
+    "groq_api_key":               "",
+    "cerebras_api_key":           "",
+    "mistral_api_key":            "",
+    "sarvam_api_key":             "",
+    "discord_webhook_url":        "",
+    "discord_log_webhook_url":    "",
+    "discord_notes_webhook_url":  "",
+    "language":                   "English (Nova-2)",
+    "mic_index":                  0,
+    "remote_url":                 "http://localhost:50010/control.html",
+    "bible_translation":          "KJV",
+    "rate":                       16000,
+    "chunk":                      4096,
+    "cooldown":                   3.0,
+    "dedup_window":               60,
+    "llm_enabled":                True,
+    "confidence":                 0.75,
+    "manual_confirm":             True,
+    "verify":                     True,
+    "smart_amen":                 True,
+    "auto_save_notes":            True,
+    "auto_start":                 False,
+    "smart_schedule":             False,
+    "panic_key":                  "esc",
+    "live_points_prompt":         "",
+    "live_points_llm_enabled":    False,
 }
 
 
@@ -59,7 +71,7 @@ def export_settings(data: dict):
         title="Export VerseView Settings",
         defaultextension=".json",
         filetypes=[("JSON file", "*.json")],
-        initialfile="verseview_settings.json"
+        initialfile="verseview_settings.json",
     )
     if not path:
         return False
@@ -75,7 +87,7 @@ def export_settings(data: dict):
 def import_settings() -> dict | None:
     path = fd.askopenfilename(
         title="Import VerseView Settings",
-        filetypes=[("JSON file", "*.json")]
+        filetypes=[("JSON file", "*.json")],
     )
     if not path:
         return None
