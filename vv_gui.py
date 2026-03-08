@@ -50,8 +50,6 @@ class VerseViewApp(ctk.CTk):
         self._load_into_ui()
         # Shift+Escape panic binding — no pynput, no permissions needed
         self.bind("<Shift-Escape>", lambda e: self._panic_shortcut())
-        # Shift+Escape panic binding — no pynput, no permissions needed
-        self.bind("<Shift-Escape>", lambda e: self._panic_shortcut())
 
     # ─────────────────────────────────────────────────
     # UI BUILD
@@ -251,13 +249,23 @@ class VerseViewApp(ctk.CTk):
         # ── PANIC KEYBIND RECORDER ──
         sep_label("Panic Keybind")
         self.panic_var = ctk.StringVar(value="esc")
-        
-        self.panic_btn = ctk.CTkButton(
-            right, text="Panic Key: Shift + Esc",
-            fg_color="#4a4a4a", hover_color="#333333",
-            command=self._record_panic_key
-        )
-        self.panic_btn.grid(row=row, column=0, sticky="ew", padx=14, pady=(0, 4))
+        if sys.platform.startswith("win"):
+            # Windows: user can customize the global hotkey
+            self.panic_btn = ctk.CTkButton(
+                right, text="Panic Key: esc",
+                fg_color="#4a4a4a", hover_color="#333333",
+                command=self._record_panic_key
+            )
+            self.panic_btn.grid(row=row, column=0, sticky="ew", padx=14, pady=(0, 4))
+        else:
+            # macOS: fixed Shift+Escape window shortcut (no pynput, no permissions)
+            self.panic_btn = None
+            ctk.CTkLabel(
+                right,
+                text="⌨️  Panic Key: Shift + Escape (fixed on macOS)",
+                text_color=["#666666", "#888888"],
+                font=ctk.CTkFont(size=12)
+            ).grid(row=row, column=0, sticky="ew", padx=14, pady=(0, 4))
         row += 1
 
         self.verify_var = ctk.BooleanVar(value=True)
@@ -385,8 +393,11 @@ class VerseViewApp(ctk.CTk):
     # PANIC RECORDING LOGIC
     # ─────────────────────────────────────────────────
     def _record_panic_key(self):
+        if not sys.platform.startswith("win"):
+            return  # no-op on macOS
         """ Allows the user to press a key combo to record it safely without typing """
-        self.panic_btn.configure(text="Listening... Press a key now!", fg_color="#a07020", state="disabled")
+        if self.panic_btn:
+                self.panic_btn.configure(text="Listening... Press a key now!", fg_color="#a07020", state="disabled")
 
         def on_press(key):
             try:
@@ -419,10 +430,12 @@ class VerseViewApp(ctk.CTk):
     def _on_panic_recorded(self, combo):
         if combo:
             self.panic_var.set(combo)
-            self.panic_btn.configure(text=f"Panic Key: {combo}", fg_color=["#3B8ED0", "#1F6AA5"], state="normal")
+            if self.panic_btn:
+                self.panic_btn.configure(text=f"Panic Key: {combo}", fg_color=["#3B8ED0", "#1F6AA5"], state="normal")
             self._append_log(f"⌨️ Panic key updated to: {combo}")
         else:
-            self.panic_btn.configure(text=f"Panic Key: {self.panic_var.get()}", fg_color=["#3B8ED0", "#1F6AA5"], state="normal")
+            if self.panic_btn:
+                self.panic_btn.configure(text=f"Panic Key: {self.panic_var.get()}", fg_color=["#3B8ED0", "#1F6AA5"], state="normal")
 
 
     # ─────────────────────────────────────────────────
@@ -448,7 +461,8 @@ class VerseViewApp(ctk.CTk):
         
         saved_panic = s.get("panic_key", "esc")
         self.panic_var.set(saved_panic)
-        self.panic_btn.configure(text=f"Panic Key: {saved_panic}")
+        if self.panic_btn:
+                self.panic_btn.configure(text=f"Panic Key: {saved_panic}")
 
         # Set the prompt inside the live app module
         default_prompt = (
