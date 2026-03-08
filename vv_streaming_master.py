@@ -75,7 +75,8 @@ class _GeminiClient:
     def __init__(self, api_key): self.chat = _GeminiChat(api_key)
 
 
-# ── CEREBRAS CLIENT (primary — unlimited RPM, blazing fast on dedicated silicon) ──
+# ── CEREBRAS CLIENT (primary — free, blazing fast on dedicated silicon) ──
+# Production models (March 2026): llama3.1-8b (~2200 tok/s), gpt-oss-120b (~3000 tok/s)
 class _CerebrasCompletions:
     def __init__(self, api_key): self._key = api_key
     def create(self, model, messages, temperature=0.2, max_tokens=None, **kw):
@@ -94,8 +95,8 @@ class _CerebrasChat:
     def __init__(self, api_key): self.completions = _CerebrasCompletions(api_key)
 
 class _CerebrasClient:
-    """Cerebras Inference — llama3.3-70b / llama3.1-8b.
-    No published rate limit, ~2 000 tok/s throughput, works on all platforms."""
+    """Cerebras Inference — gpt-oss-120b (large) / llama3.1-8b (fast).
+    No published rate limit. Works on all platforms via pure HTTP."""
     def __init__(self, api_key): self.chat = _CerebrasChat(api_key)
 
 # ── LOGGING ──
@@ -335,7 +336,7 @@ async def live_points_loop():
         try:
             def fetch_points():
                 response = llm_client.chat.completions.create(
-                    model=("llama3.3-70b" if CEREBRAS_API_KEY else "gemini-2.0-flash" if GEMINI_API_KEY else "llama-3.3-70b-versatile"),
+                    model=("gpt-oss-120b" if CEREBRAS_API_KEY else "gemini-2.0-flash" if GEMINI_API_KEY else "llama-3.3-70b-versatile"),
                     messages=[{"role": "user", "content": prompt}]
                 )
                 return response.choices[0].message.content.strip()
@@ -392,7 +393,7 @@ def generate_sermon_summary():
     try:
         logger.info("⏳ Generating Sermon Cliff Notes via AI... (This may take a moment)")
         response = llm_client.chat.completions.create(
-            model=("llama3.3-70b" if CEREBRAS_API_KEY else "gemini-2.0-flash" if GEMINI_API_KEY else "llama-3.3-70b-versatile"),
+            model=("gpt-oss-120b" if CEREBRAS_API_KEY else "gemini-2.0-flash" if GEMINI_API_KEY else "llama-3.3-70b-versatile"),
             messages=[{"role": "user", "content": prompt}]
         )
         summary = response.choices[0].message.content.strip()
@@ -446,7 +447,7 @@ def configure(
     global llm_client
     if CEREBRAS_API_KEY:
         llm_client = _CerebrasClient(api_key=CEREBRAS_API_KEY)
-        logger.info("🤖 LLM: Cerebras llama3.3-70b (primary — no rate limit)")
+        logger.info("🤖 LLM: Cerebras (gpt-oss-120b / llama3.1-8b) — no rate limit")
     elif GEMINI_API_KEY:
         llm_client = _GeminiClient(api_key=GEMINI_API_KEY)
         logger.info("🤖 LLM: Google Gemini 2.0 Flash (secondary)")
