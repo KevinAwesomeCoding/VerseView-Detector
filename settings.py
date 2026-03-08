@@ -6,38 +6,21 @@ import tkinter.filedialog as fd
 import tkinter.messagebox as mb
 
 DEFAULTS = {
-    # ── API Keys ──
-    "deepgram_api_key":           "",
-    "groq_api_key":               "",
-    "gemini_api_key":             "",   # Google Gemini 2.0 Flash — preferred LLM (no rate limits)
-    "sarvam_api_key":             "",
-    # ── Discord webhooks ──
-    "discord_webhook_url":        "",
-    "discord_log_webhook_url":    "",
-    "discord_notes_webhook_url":  "",
-    # ── Audio / engine ──
-    "language":                   "English (Nova-2)",
-    "mic_index":                  0,
-    "remote_url":                 "http://localhost:50010/control.html",
-    "bible_translation":          "KJV",
-    "rate":                       16000,
-    "chunk":                      4096,
-    "cooldown":                   3.0,
-    "dedup_window":               60,
-    "llm_enabled":                True,
-    # ── Behaviour ──
-    "confidence":                 0.75,
-    "manual_confirm":             True,
-    "verify":                     True,
-    "smart_amen":                 True,
-    "auto_save_notes":            True,
-    "auto_start":                 False,
-    "smart_schedule":             False,
-    "panic_key":                  "esc",
-    # ── Live Points ──
-    "live_points_prompt":         "",
-    "live_points_llm_enabled":    False,
-    "display_screen":             "Display 2 (Right/Extended)",
+    "deepgram_api_key":    "",
+    "groq_api_key":  "",
+    "cerebras_api_key":           "",   # Primary LLM — no rate limit, blazing fast
+    "gemini_api_key":             "",   # Secondary LLM — Gemini 2.0 Flash (15 RPM)
+    "discord_webhook_url": "",
+    "sarvam_api_key":      "",
+    "language":            "English (Nova-2)",
+    "mic_index":           0,
+    "remote_url":          "http://localhost:50010/control.html",
+    "bible_translation":   "KJV",
+    "rate":                16000,
+    "chunk":               4096,
+    "cooldown":            3.0,
+    "dedup_window":        60,
+    "llm_enabled":         True,
 }
 
 
@@ -51,7 +34,6 @@ def _settings_path() -> Path:
 
 
 def load() -> dict:
-    """Load saved settings, filling any missing keys from DEFAULTS."""
     path = _settings_path()
     if path.exists():
         try:
@@ -64,7 +46,6 @@ def load() -> dict:
 
 
 def save(data: dict):
-    """Persist settings to disk."""
     path = _settings_path()
     try:
         with open(path, "w", encoding="utf-8") as f:
@@ -73,8 +54,7 @@ def save(data: dict):
         print(f"Could not save settings: {e}")
 
 
-def export_settings(data: dict) -> bool:
-    """Ask user for a file path and export settings as JSON."""
+def export_settings(data: dict):
     path = fd.asksaveasfilename(
         title="Export VerseView Settings",
         defaultextension=".json",
@@ -93,7 +73,6 @@ def export_settings(data: dict) -> bool:
 
 
 def import_settings() -> dict | None:
-    """Let user pick a JSON file and merge it over DEFAULTS."""
     path = fd.askopenfilename(
         title="Import VerseView Settings",
         filetypes=[("JSON file", "*.json")]
