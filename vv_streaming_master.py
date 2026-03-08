@@ -48,11 +48,10 @@ class _GroqClient:
     """Drop-in replacement for openai.OpenAI() — uses requests only, no native extensions."""
     def __init__(self, api_key): self.chat = _GroqChat(api_key)
 
-# ── GEMINI CLIENT (pure-requests, mirrors _GroqClient interface) ──
+# ── GEMINI CLIENT (secondary — free but 15 RPM cap) ──
 class _GeminiCompletions:
     def __init__(self, api_key): self._key = api_key
     def create(self, model, messages, temperature=0.2, max_tokens=None, **kw):
-        # Flatten OpenAI-style messages into one user prompt for Gemini
         combined = "\n".join(m["content"] for m in messages)
         body = {
             "contents": [{"role": "user", "parts": [{"text": combined}]}],
@@ -72,9 +71,32 @@ class _GeminiChat:
     def __init__(self, api_key): self.completions = _GeminiCompletions(api_key)
 
 class _GeminiClient:
-    """Drop-in replacement for _GroqClient using Google Gemini 2.0 Flash.
-    Free tier: 1 500 req/min, 1 M token context — no 429s for live use."""
+    """Gemini 2.0 Flash — free tier (15 RPM / 200 RPD). Use as secondary only."""
     def __init__(self, api_key): self.chat = _GeminiChat(api_key)
+
+
+# ── CEREBRAS CLIENT (primary — unlimited RPM, blazing fast on dedicated silicon) ──
+class _CerebrasCompletions:
+    def __init__(self, api_key): self._key = api_key
+    def create(self, model, messages, temperature=0.2, max_tokens=None, **kw):
+        headers = {"Authorization": f"Bearer {self._key}", "Content-Type": "application/json"}
+        body = {"model": model, "messages": messages, "temperature": temperature}
+        if max_tokens is not None:
+            body["max_completion_tokens"] = max_tokens
+        r = requests.post(
+            "https://api.cerebras.ai/v1/chat/completions",
+            headers=headers, json=body, timeout=30, verify=certifi.where()
+        )
+        r.raise_for_status()
+        return _GroqResponse(r.json()["choices"][0]["message"]["content"])
+
+class _CerebrasChat:
+    def __init__(self, api_key): self.completions = _CerebrasCompletions(api_key)
+
+class _CerebrasClient:
+    """Cerebras Inference — llama3.3-70b / llama3.1-8b.
+    No published rate limit, ~2 000 tok/s throughput, works on all platforms."""
+    def __init__(self, api_key): self.chat = _CerebrasChat(api_key)
 
 # ── LOGGING ──
 logging.basicConfig(
@@ -216,6 +238,7 @@ BIBLE_TRANSLATION = "web"
 DEEPGRAM_API_KEY = ""
 GROQ_API_KEY = ""
 GEMINI_API_KEY = ""
+CEREBRAS_API_KEY = ""
 DISCORD_WEBHOOK_URL = ""
 DISCORD_LOG_WEBHOOK_URL = ""
 DISCORD_NOTES_WEBHOOK_URL = ""
@@ -287,9 +310,9 @@ async def live_points_loop():
     last_processed_length = 0
 
     while not stop_event.is_set():
-        await asyncio.sleep(15)
+        await asyncio.sleep(45)
 
-        if not LLM_ENABLED or (not GROQ_API_KEY and not GEMINI_API_KEY) or not LIVE_POINTS_CALLBACK:
+        if not LLM_ENABLED or (not GROQ_API_KEY and not GEMINI_API_KEY and not CEREBRAS_API_KEY) or not LIVE_POINTS_CALLBACK:
             continue
 
         current_transcript = full_sermon_transcript.strip()
@@ -312,7 +335,7 @@ async def live_points_loop():
         try:
             def fetch_points():
                 response = llm_client.chat.completions.create(
-                    model="gemini-2.0-flash" if GEMINI_API_KEY else "llama-3.3-70b-versatile",
+                    model=("llama3.3-70b" if CEREBRAS_API_KEY else "gemini-2.0-flash" if GEMINI_API_KEY else "llama-3.3-70b-versatile"),
                     messages=[{"role": "user", "content": prompt}]
                 )
                 return response.choices[0].message.content.strip()
@@ -326,8 +349,8 @@ async def live_points_loop():
 def generate_sermon_summary():
     global full_sermon_transcript, verses_cited, LLM_ENABLED, llm_client
 
-    if not LLM_ENABLED or (not GROQ_API_KEY and not GEMINI_API_KEY):
-        return "⚠️ LLM Fallback is disabled — add a Groq or Gemini API Key. Required to generate summaries."
+    if not LLM_ENABLED or (not GROQ_API_KEY and not GEMINI_API_KEY and not CEREBRAS_API_KEY):
+        return "⚠️ LLM Fallback is disabled — add a Cerebras, Gemini, or Groq API Key. Required to generate summaries."
 
     if len(full_sermon_transcript.strip()) < 100:
         return "⚠️ Transcript is too short to generate a meaningful summary."
@@ -369,7 +392,7 @@ def generate_sermon_summary():
     try:
         logger.info("⏳ Generating Sermon Cliff Notes via AI... (This may take a moment)")
         response = llm_client.chat.completions.create(
-            model="gemini-2.0-flash" if GEMINI_API_KEY else "llama-3.3-70b-versatile",
+            model=("llama3.3-70b" if CEREBRAS_API_KEY else "gemini-2.0-flash" if GEMINI_API_KEY else "llama-3.3-70b-versatile"),
             messages=[{"role": "user", "content": prompt}]
         )
         summary = response.choices[0].message.content.strip()
@@ -397,13 +420,13 @@ def configure(
     remote_url="http://localhost:50010/control.html",
     dedup_window=60, cooldown=3.0, llm_enabled=True,
     bible_translation="kjv", deepgram_api_key="",
-    groq_api_key="", gemini_api_key="", sarvam_api_key="",
+    groq_api_key="", gemini_api_key="", cerebras_api_key="", sarvam_api_key="",
     discord_webhook_url="", discord_log_webhook_url="", discord_notes_webhook_url="",
     confidence=0.75, manual_confirm=True,
     confirm_callback=None, verify=True, panic_key="esc", smart_amen=True,
     live_points_prompt="", live_points_callback=None, live_points_get_current_cb=None
 ):
-    global DEEPGRAM_API_KEY, GROQ_API_KEY, GEMINI_API_KEY, SARVAM_API_KEY
+    global DEEPGRAM_API_KEY, GROQ_API_KEY, GEMINI_API_KEY, CEREBRAS_API_KEY, SARVAM_API_KEY
     global DISCORD_WEBHOOK_URL, DISCORD_LOG_WEBHOOK_URL, DISCORD_NOTES_WEBHOOK_URL
     global USE_SARVAM, DEEPGRAM_LANGUAGE, DEEPGRAM_MODEL, SARVAM_LANGUAGE
     global PRIMARY_PARSER, MIC_INDEX, RATE, CHUNK, REMOTE_URL
@@ -417,12 +440,16 @@ def configure(
     DEEPGRAM_API_KEY = deepgram_api_key
     GROQ_API_KEY = groq_api_key
     GEMINI_API_KEY = gemini_api_key
+    CEREBRAS_API_KEY = cerebras_api_key
     SARVAM_API_KEY = sarvam_api_key
 
     global llm_client
-    if GEMINI_API_KEY:
+    if CEREBRAS_API_KEY:
+        llm_client = _CerebrasClient(api_key=CEREBRAS_API_KEY)
+        logger.info("🤖 LLM: Cerebras llama3.3-70b (primary — no rate limit)")
+    elif GEMINI_API_KEY:
         llm_client = _GeminiClient(api_key=GEMINI_API_KEY)
-        logger.info("🤖 LLM: Google Gemini 2.0 Flash (primary)")
+        logger.info("🤖 LLM: Google Gemini 2.0 Flash (secondary)")
     elif GROQ_API_KEY:
         llm_client = _GroqClient(api_key=GROQ_API_KEY)
         logger.info("🤖 LLM: Groq llama-3.3-70b (fallback)")
@@ -696,7 +723,7 @@ def extract_verse_with_llm(text):
     try:
         LLM_CALL_COUNT += 1
         response = llm_client.chat.completions.create(
-            model="gemini-2.0-flash" if GEMINI_API_KEY else "llama-3.1-8b-instant",
+            model=("llama3.1-8b" if CEREBRAS_API_KEY else "gemini-2.0-flash" if GEMINI_API_KEY else "llama-3.1-8b-instant"),
             messages=[{
                 "role": "user",
                 "content": (
