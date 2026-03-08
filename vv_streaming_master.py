@@ -1,8 +1,6 @@
 # -*- coding: utf-8 -*-
 import sys, os
 
-IS_WINDOWS = sys.platform.startswith("win") 
-
 import asyncio
 import time
 import re
@@ -636,11 +634,15 @@ class VerseController:
             return False
 
     def close_presentation(self):
-    if not self.driver: return
-    try:
-        from selenium.webdriver.common.by import By  # lazy — selenium only used when connected
-        close_btn = self.driver.find_element(By.ID, "iconClose")
-        
+        """ Clears the screen via the VerseView X button """
+        if not self.driver: return
+        try:
+            from selenium.webdriver.common.by import By  # noqa: lazy import
+            close_btn = self.driver.find_element(By.ID, "iconClose")
+            close_btn.click()
+            logger.info("🚫 Presentation cleared off the screen!")
+        except Exception as e:
+            logger.debug(f"Could not click close button (maybe already closed): {e}")
 
     def send_verse(self, ref, bypass_cooldown=False, confidence=1.0):
         global current_book, current_chapter, current_verse, verses_cited
@@ -1163,28 +1165,28 @@ async def main():
     stop_event  = asyncio.Event()
     engine_loop = asyncio.get_event_loop()
 
-    # ── PANIC BUTTON BINDING (Windows only) ──
-    # macOS uses the Shift+Escape window binding in vv_gui.py — no pynput needed there
-    if IS_WINDOWS and PANIC_KEY:
-        try:
-            from pynput import keyboard as pynput_kb
-
+    # ── PANIC BUTTON BINDING ──
+    try:
+        if PANIC_KEY:
             def on_press(key):
                 try:
                     k = key.char
                 except AttributeError:
                     k = key.name
+                
+                # If the key they pressed matches their saved setting, clear the screen!
                 if k == PANIC_KEY:
                     trigger_panic()
 
+            # Start a background thread to listen for the panic key
+            from pynput import keyboard as pynput_kb
             panic_listener = pynput_kb.Listener(on_press=on_press)
             panic_listener.daemon = True
             panic_listener.start()
-            logger.info(f"🚨 Panic key active (global hotkey): '{PANIC_KEY}'")
-        except Exception as e:
-            logger.warning(f"⚠️ Could not bind panic key: {e}")
-    elif not IS_WINDOWS:
-        logger.info("🚨 Panic: press Shift+Escape in the app window to clear the screen")
+            
+            logger.info(f"🚨 Panic Button active on: '{PANIC_KEY}'")
+    except Exception as e:
+        logger.warning(f"⚠️ Could not bind panic key: {e}")
 
     _controller = VerseController()
     connected  = False
