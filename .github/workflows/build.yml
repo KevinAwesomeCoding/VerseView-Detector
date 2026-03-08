@@ -3,7 +3,7 @@ name: Build VerseView Detector
 on:
   push:
     branches: [main]
-  workflow_dispatch: # This is the magic button to run it manually!
+  workflow_dispatch: # Manual trigger
 
 permissions:
   contents: write
@@ -24,8 +24,21 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
+          # Audio & core libs
           pip install pyaudio
-          pip install pyinstaller customtkinter selenium webdriver-manager certifi requests websockets openai pynput
+          # App dependencies
+          pip install \
+            pyinstaller \
+            customtkinter \
+            selenium \
+            webdriver-manager \
+            certifi \
+            requests \
+            websockets \
+            charset-normalizer \
+            sarvamai \
+            pynput \
+            deepgram-sdk
 
       - name: Build EXE
         run: pyinstaller --clean verseview.spec
@@ -34,12 +47,12 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: VerseView-Detector-Windows
-          path: "dist/VerseView_Detector.exe"
+          path: dist/VerseView_Detector.exe
 
   build-mac-intel:
-    runs-on: macos-15-intel # <--- Back to the supported Intel runner
+    runs-on: macos-15-intel
     env:
-      MACOSX_DEPLOYMENT_TARGET: "10.15" # <--- Forces maximum compatibility for OLDER Intel Macs across the entire build!
+      MACOSX_DEPLOYMENT_TARGET: "10.15" # max compatibility for older Intel Macs
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -55,7 +68,21 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pyinstaller customtkinter selenium webdriver-manager certifi pyaudio requests websockets openai pynput
+          # Audio & core libs
+          pip install pyaudio
+          # App dependencies
+          pip install \
+            pyinstaller \
+            customtkinter \
+            selenium \
+            webdriver-manager \
+            certifi \
+            requests \
+            websockets \
+            charset-normalizer \
+            sarvamai \
+            pynput \
+            deepgram-sdk
 
       - name: Build App
         run: pyinstaller --clean verseview.spec
@@ -63,18 +90,17 @@ jobs:
       - name: Ad-hoc sign App
         run: codesign --force --deep --sign - "dist/VerseView Detector.app"
 
-      # Safely stage and zip both the .app AND the raw UNIX folder!
       - name: Zip the Intel App and Raw UNIX Folder
         run: |
           cd dist
           mkdir "VerseView-Mac-Intel-Release"
-          
+
           # Move the compiled .app into the folder
           mv "VerseView Detector.app" "VerseView-Mac-Intel-Release/"
-          
+
           # Move the raw UNIX executable folder into the same folder
           mv "VerseView Detector" "VerseView-Mac-Intel-Release/VerseView Detector (Raw Executable)"
-          
+
           # Zip the parent folder
           zip -r "VerseView-Detector-Mac-Intel.zip" "VerseView-Mac-Intel-Release"
 
@@ -82,7 +108,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: VerseView-Detector-Mac-Intel
-          path: "dist/VerseView-Detector-Mac-Intel.zip"
+          path: dist/VerseView-Detector-Mac-Intel.zip
 
   build-mac-silicon:
     runs-on: macos-latest
@@ -101,7 +127,21 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pyinstaller customtkinter selenium webdriver-manager certifi pyaudio requests websockets openai pynput
+          # Audio & core libs
+          pip install pyaudio
+          # App dependencies
+          pip install \
+            pyinstaller \
+            customtkinter \
+            selenium \
+            webdriver-manager \
+            certifi \
+            requests \
+            websockets \
+            charset-normalizer \
+            sarvamai \
+            pynput \
+            deepgram-sdk
 
       - name: Build App
         run: pyinstaller --clean verseview.spec
@@ -119,13 +159,13 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: VerseView-Detector-Mac-Silicon-App
-          path: "dist/VerseView-Detector-Mac-Silicon-App.zip"
-          
+          path: dist/VerseView-Detector-Mac-Silicon-App.zip
+
       - name: Upload Mac Silicon Crash File
         uses: actions/upload-artifact@v4
         with:
           name: VerseView-Detector-Mac-Silicon-CrashDebug
-          path: "dist/VerseView-Detector-Mac-Silicon-CrashDebug.zip"
+          path: dist/VerseView-Detector-Mac-Silicon-CrashDebug.zip
 
   release:
     needs: [build-windows, build-mac-intel, build-mac-silicon]
