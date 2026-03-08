@@ -41,7 +41,14 @@ BOOKS_ENG = {
     "jude": "Jude", "revelation": "Revelation", "revelations": "Revelation",
 }
 
-ORDINAL_WORDS_ENG = {"first": "1", "second": "2", "third": "3"}
+# ── EXPANDED: fourth–twentieth for verse-jump phrases ──
+ORDINAL_WORDS_ENG = {
+    "first": "1", "second": "2", "third": "3", "fourth": "4", "fifth": "5",
+    "sixth": "6", "seventh": "7", "eighth": "8", "ninth": "9", "tenth": "10",
+    "eleventh": "11", "twelfth": "12", "thirteenth": "13", "fourteenth": "14",
+    "fifteenth": "15", "sixteenth": "16", "seventeenth": "17", "eighteenth": "18",
+    "nineteenth": "19", "twentieth": "20",
+}
 
 NUMBER_MAP_ENG = {
     "zero": 0, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
@@ -56,7 +63,7 @@ NOISE_ENG = (r"\b(let s|let us|read|the|a|an|chapter|chap|ch"
              r"|verse|verses|versus|vs|forward|attention|to|now|our"
              r"|turn|open|look|see|go|pay|pages|bible|book|books"
              r"|words|word|says|said|saying|it|in|and|at|from"
-             r"|today|we|will|are|is|was)\b")
+             r"|today|we|will|are|is|was|back|going|return|again|of)\b")
 
 REF_RE_ENG = re.compile(
     r"(?P<book>(?:[123] )?[a-z]+(?:[a-z ]+)?)"
@@ -68,7 +75,6 @@ REF_RE_ENG = re.compile(
 )
 
 # ------------------- Hindi → English book mapping -------------------
-
 BOOKS_HI = {
     "उत्पत्ति": "Genesis", "निर्गमन": "Exodus", "लैव्यव्यवस्था": "Leviticus", "लैव्य": "Leviticus",
     "गिनती": "Numbers", "व्यवस्थाविवरण": "Deuteronomy", "व्यवस्था": "Deuteronomy",
@@ -121,7 +127,7 @@ NUMBER_MAP_HI = {
 
 BOOK_FILLERS_HI = ["अध्याय", "वचन", "पद"]
 
-# ------------------- English Math & Resolver (From parse_eng) -------------------
+# ------------------- English Math & Resolver -------------------
 def convert_word_numbers_eng(text):
     text = text.replace("-", " ")
     words = text.split()
@@ -138,7 +144,6 @@ def convert_word_numbers_eng(text):
                 result.append(str(base))
                 i += 2
             continue
-            
         if i + 1 < len(words) and w in NUMBER_MAP_ENG and words[i + 1] in NUMBER_MAP_ENG:
             fv = int(NUMBER_MAP_ENG[w])
             sv = int(NUMBER_MAP_ENG[words[i + 1]])
@@ -146,7 +151,6 @@ def convert_word_numbers_eng(text):
                 result.append(str(fv + sv))
                 i += 2
                 continue
-                
         result.append(str(NUMBER_MAP_ENG[w]) if w in NUMBER_MAP_ENG else w)
         i += 1
     return " ".join(result)
@@ -169,23 +173,20 @@ def normalize_number_words_hi(s: str) -> str:
     for k in sorted(NUMBER_MAP_HI.keys(), key=len, reverse=True):
         s = s.replace(k, NUMBER_MAP_HI[k])
     s = re.sub(
-        r'\b(20|30|40|50|60|70|80|90)\s+([1-9])\b', 
-        lambda m: str(int(m.group(1)) + int(m.group(2))), 
+        r'\b(20|30|40|50|60|70|80|90)\s+([1-9])\b',
+        lambda m: str(int(m.group(1)) + int(m.group(2))),
         s
     )
     return s
 
 def normalize_numbers_only(s: str) -> str:
-    """
-    Combined Normalizer: Processes English numbers FIRST, then Hindi numbers.
-    """
+    """Combined Normalizer: English numbers first, then Hindi numbers."""
     s = s.lower()
     for word, num in ORDINAL_WORDS_ENG.items():
         s = re.sub(rf"\b{word}\b", num, s)
-        
     s = convert_word_numbers_eng(s)
     s = normalize_digits_hi(s)
-    s = re.sub(r"[।\.,!?;:\-–]", " ", s) 
+    s = re.sub(r"[।\.,!?;:\-–]", " ", s)
     s = normalize_number_words_hi(s)
     return " ".join(s.split())
 
@@ -193,27 +194,22 @@ def normalize_numbers_only(s: str) -> str:
 def parse_references(text: str):
     if not text:
         return []
-
     results = []
-    
-    # Pre-process text to convert English & Hindi number words to digits
     t = text.lower()
     for word, num in ORDINAL_WORDS_ENG.items():
         t = re.sub(rf"\b{word}\b", num, t)
     t = convert_word_numbers_eng(t)
     t = normalize_digits_hi(t)
     t = normalize_number_words_hi(t)
-    
-    # 1. English Parser Pipeline (Regex based)
-    t_eng = re.sub(r"[^a-z0-9 ]", " ", t) 
+
+    # 1. English Parser Pipeline
+    t_eng = re.sub(r"[^a-z0-9 ]", " ", t)
     t_eng = re.sub(NOISE_ENG, " ", t_eng)
     t_eng = " ".join(t_eng.split())
-    
     for m in REF_RE_ENG.finditer(t_eng):
         eng = resolve_book_eng(m.group("book"))
         if eng:
             results.append(f"{eng} {m.group('chap')}{(':' + m.group('verses')) if m.group('verses') else ''}")
-            
     if results:
         return results
 
@@ -223,29 +219,66 @@ def parse_references(text: str):
             eng_book = BOOKS_HI[hi_book]
             idx = t.index(hi_book)
             after = t[idx + len(hi_book):].strip()
-
-            # Strip Hindi fillers AND English noise words
             for filler in BOOK_FILLERS_HI:
                 after = after.replace(filler, "").strip()
             after = re.sub(NOISE_ENG, " ", after).strip()
-
             m = re.search(r'(\d{1,3})\s*[:\-।]\s*(\d{1,3})', after)
             if m:
                 results.append(f"{eng_book} {m.group(1)}:{m.group(2)}")
                 continue
-
             m2 = re.search(r'(\d{1,3})\D+(\d{1,3})', after)
             if m2:
                 results.append(f"{eng_book} {m2.group(1)}:{m2.group(2)}")
                 continue
-
             m3 = re.search(r'(\d{1,3})', after)
             if m3:
                 results.append(f"{eng_book} {m3.group(1)}")
                 continue
-
     return results
 
 def parse_reference(text: str) -> str | None:
     refs = parse_references(text)
     return refs[0] if refs else None
+
+# ── Verse-Jump Parser ──────────────────────────────────────────────────────────
+# Hindi verse-jump keywords (वचन = verse/word, पद = verse/step)
+_VERSE_JUMP_RE = re.compile(
+    r'\b(\d{1,3})\s*(?:st|nd|rd|th)?\s+verse\b'
+    r'|\bverse\s+(\d{1,3})\b',
+    re.IGNORECASE
+)
+_VERSE_JUMP_RE_HI = re.compile(
+    r'(\d{1,3})\s*(?:वें|वाँ|वां|वा)?\s*(?:वचन|पद)'  # "3 वचन", "3वें पद"
+    r'|(?:वचन|पद)\s+(\d{1,3})',                         # "वचन 3"
+)
+
+def parse_verse_jump(text: str) -> int | None:
+    """
+    Detects verse navigation like "go back to the first verse", "third verse",
+    "3 वचन", "पद 5". Returns verse int or None.
+    The caller (master.py) applies current_book + current_chapter context.
+    """
+    if not text:
+        return None
+    t = text.lower()
+    for word, num in ORDINAL_WORDS_ENG.items():
+        t = re.sub(rf"\b{word}\b", num, t)
+    t = convert_word_numbers_eng(t)
+    t = normalize_digits_hi(t)
+    t = normalize_number_words_hi(t)
+
+    # English: "verse 3", "3rd verse"
+    m = _VERSE_JUMP_RE.search(t)
+    if m:
+        val = m.group(1) or m.group(2)
+        if val:
+            return int(val)
+
+    # Hindi: "3 वचन", "वचन 5", "पद 3"
+    m = _VERSE_JUMP_RE_HI.search(t)
+    if m:
+        val = m.group(1) or m.group(2)
+        if val:
+            return int(val)
+
+    return None

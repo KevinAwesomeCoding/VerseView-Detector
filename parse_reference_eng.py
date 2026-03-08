@@ -38,7 +38,14 @@ BOOKS_ENG = {
     "jude": "Jude", "revelation": "Revelation", "revelations": "Revelation",
 }
 
-ORDINAL_WORDS = {"first": "1", "second": "2", "third": "3"}
+# ── EXPANDED: fourth–twentieth for verse-jump phrases ──
+ORDINAL_WORDS = {
+    "first": "1", "second": "2", "third": "3", "fourth": "4", "fifth": "5",
+    "sixth": "6", "seventh": "7", "eighth": "8", "ninth": "9", "tenth": "10",
+    "eleventh": "11", "twelfth": "12", "thirteenth": "13", "fourteenth": "14",
+    "fifteenth": "15", "sixteenth": "16", "seventeenth": "17", "eighteenth": "18",
+    "nineteenth": "19", "twentieth": "20",
+}
 
 NUMBER_MAP = {
     "zero": 0, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
@@ -49,16 +56,13 @@ NUMBER_MAP = {
     "fifty": 50, "sixty": 60, "seventy": 70, "eighty": 80, "ninety": 90,
 }
 
-
 def convert_word_numbers(text):
     text = text.replace("-", " ")
     words = text.split()
     result = []
     i = 0
-    
     while i < len(words):
         w = words[i]
-        
         if i + 1 < len(words) and w in NUMBER_MAP and words[i + 1] == "hundred":
             base = int(NUMBER_MAP[w]) * 100
             if i + 2 < len(words) and words[i + 2] in NUMBER_MAP:
@@ -68,7 +72,6 @@ def convert_word_numbers(text):
                 result.append(str(base))
                 i += 2
             continue
-            
         if i + 1 < len(words) and w in NUMBER_MAP and words[i + 1] in NUMBER_MAP:
             fv = int(NUMBER_MAP[w])
             sv = int(NUMBER_MAP[words[i + 1]])
@@ -76,12 +79,9 @@ def convert_word_numbers(text):
                 result.append(str(fv + sv))
                 i += 2
                 continue
-                
         result.append(str(NUMBER_MAP[w]) if w in NUMBER_MAP else w)
         i += 1
-        
     return " ".join(result)
-
 
 def normalize_text(s: str) -> str:
     s = s.lower()
@@ -89,14 +89,13 @@ def normalize_text(s: str) -> str:
         s = re.sub(rf"\b{word}\b", num, s)
     s = re.sub(r"[^a-z0-9 ]", " ", s)
     s = convert_word_numbers(s)
-    noise = (r"\b(let s|let s|let us|read|the|a|an|chapter|chap|ch"
+    noise = (r"\b(let s|let us|read|the|a|an|chapter|chap|ch"
              r"|verse|verses|versus|vs|forward|attention|to|now|our"
              r"|turn|open|look|see|go|pay|pages|bible|book|books"
              r"|words|word|says|said|saying|it|in|and|at|from"
-             r"|today|we|will|are|is|was)\b")
+             r"|today|we|will|are|is|was|back|going|return|again|of)\b")
     s = re.sub(noise, " ", s)
     return " ".join(s.split())
-
 
 def normalize_numbers_only(s: str) -> str:
     s = s.lower()
@@ -106,20 +105,15 @@ def normalize_numbers_only(s: str) -> str:
     s = convert_word_numbers(s)
     return " ".join(s.split())
 
-
 def resolve_book(bookraw: str):
     b = bookraw.strip().lower()
-    # Exact match first
     if b in BOOKS_ENG:
         return BOOKS_ENG[b]
-    # ✅ FIX: Only do substring match if candidate is at least 4 characters
-    # This prevents short noise words like "re", "an", "in" from matching book names
     if len(b) >= 4:
         for key in BOOKS_ENG:
             if key in b or b in key:
                 return BOOKS_ENG[key]
     return None
-
 
 REF_RE = re.compile(
     r"(?P<book>(?:[123] )?[a-z]+(?:[a-z ]+)?)"
@@ -129,7 +123,6 @@ REF_RE = re.compile(
     r"(?P<verses>\d{1,3}))?",
     re.IGNORECASE
 )
-
 
 def parse_references(text: str):
     if not text:
@@ -142,33 +135,70 @@ def parse_references(text: str):
             results.append(f"{eng} {m.group('chap')}{(':' + m.group('verses')) if m.group('verses') else ''}")
     return results
 
-
 def parse_reference(text: str):
     refs = parse_references(text)
     return refs[0] if refs else None
 
+# ── Verse-Jump Parser ──────────────────────────────────────────────────────────
+# Detects standalone verse navigation: "go back to the first verse", "verse five",
+# "third verse", etc. Returns just the verse int. Use alongside parse_references()
+# to handle mid-sermon redirections. The CALLER (master) applies the current context.
+
+_VERSE_JUMP_RE = re.compile(
+    r'\b(\d{1,3})\s*(?:st|nd|rd|th)?\s+verse\b'   # "3rd verse", "3 verse"
+    r'|\bverse\s+(\d{1,3})\b',                      # "verse 3"
+    re.IGNORECASE
+)
+
+def parse_verse_jump(text: str) -> int | None:
+    """
+    Detects verse navigation phrases like:
+      "go back to the first verse"  → 1
+      "when we go to the third verse" → 3
+      "let's read verse five"        → 5
+      "back to verse twelve"         → 12
+
+    Returns verse number as int, or None if not found.
+    Requires context (book + chapter) from the caller (master.py) to build full ref.
+    """
+    if not text:
+        return None
+    t = text.lower()
+    for word, num in ORDINAL_WORDS.items():
+        t = re.sub(rf"\b{word}\b", num, t)
+    t = re.sub(r"[^a-z0-9 ]", " ", t)
+    t = convert_word_numbers(t)
+    m = _VERSE_JUMP_RE.search(t)
+    if m:
+        val = m.group(1) or m.group(2)
+        if val:
+            return int(val)
+    return None
+
 
 if __name__ == "__main__":
     tests = [
-        "We're seventeen to nineteen",
-        "Turn with me to the book of Daniel chapter two",
-        "Let us read Romans chapter one verses five",
-        "Forward our attention to John three seventeen",
-        "Now let's forward our attention to one Corinthians five one",
-        "Romans eight twenty-eight",
-        "First Corinthians thirteen four",
-        "Isaiah fifty four six",
-        "Mark five versus six",
-        "Turn your Bible to Job twenty two",
-        "Matthew five verses four",
+        ("We're seventeen to nineteen", None),
+        ("Turn with me to the book of Daniel chapter two", "Daniel 2"),
+        ("Let us read Romans chapter one verses five", "Romans 1:5"),
+        ("John three seventeen", "John 3:17"),
+        ("First Corinthians thirteen four", "1 Corinthians 13:4"),
+        ("Isaiah fifty four six", "Isaiah 54:6"),
     ]
-    print("-" * 70)
-    print("PARSER TEST")
-    print("-" * 70)
-    for s in tests:
+    jump_tests = [
+        ("let's go back to the first verse", 1),
+        ("when we go to the third verse", 3),
+        ("verse five", 5),
+        ("back to verse twelve", 12),
+        ("going back to the seventh verse", 7),
+    ]
+    print("─" * 60)
+    for s, expected in tests:
         result = parse_reference(s)
-        norm_full = normalize_text(s)
-        status = "✅" if result else "❌"
-        print(f"{status} {s}")
-        print(f"   normalize_text: {norm_full}")
-        print(f"   Result: {result}")
+        ok = "✅" if result == expected else "❌"
+        print(f"{ok} '{s}' → {result}")
+    print("─" * 60)
+    for s, expected in jump_tests:
+        result = parse_verse_jump(s)
+        ok = "✅" if result == expected else "❌"
+        print(f"{ok} '{s}' → {result}")

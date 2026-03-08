@@ -23,13 +23,16 @@ ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
 
 
+
 class GUILogHandler(logging.Handler):
     def __init__(self, callback):
         super().__init__()
         self.callback = callback
 
+
     def emit(self, record):
         self.callback(self.format(record))
+
 
 
 class VerseViewApp(ctk.CTk):
@@ -39,10 +42,12 @@ class VerseViewApp(ctk.CTk):
         self.geometry("1060x700")
         self.minsize(800, 500)
 
+
         self._s             = cfg.load()
         self._running       = False
         self._engine_thread = None
         self._notes_saved   = False
+
 
         self._build_ui()
         self._populate_mics()
@@ -53,6 +58,7 @@ class VerseViewApp(ctk.CTk):
         # Trigger auto-start / smart schedule after window is ready
         self.after(500, self._check_auto_start)
 
+
     # ─────────────────────────────────────────────────
     # UI BUILD
     # ─────────────────────────────────────────────────
@@ -60,13 +66,16 @@ class VerseViewApp(ctk.CTk):
         self.tabview = ctk.CTkTabview(self)
         self.tabview.pack(fill="both", expand=True, padx=10, pady=(0, 10))
 
+
         # Add the two tabs
-        self.tab_vv = self.tabview.add("VerseView Detector")
-        self.tab_live = self.tabview.add("Live Points") # Renamed from New App
+        self.tab_vv   = self.tabview.add("VerseView Detector")
+        self.tab_live = self.tabview.add("Live Points")
+
 
         self.tab_vv.grid_columnconfigure(0, weight=3)
         self.tab_vv.grid_columnconfigure(1, weight=2)
         self.tab_vv.grid_rowconfigure(0, weight=1)
+
 
         # ── LEFT PANEL ──
         left = ctk.CTkFrame(self.tab_vv)
@@ -74,8 +83,10 @@ class VerseViewApp(ctk.CTk):
         left.grid_rowconfigure(1, weight=1)
         left.grid_columnconfigure(0, weight=1)
 
+
         top = ctk.CTkFrame(left, fg_color="transparent")
         top.grid(row=0, column=0, padx=10, pady=(10, 6), sticky="ew")
+
 
         self.btn_start = ctk.CTkButton(
             top, text="▶  START", width=130,
@@ -85,6 +96,7 @@ class VerseViewApp(ctk.CTk):
         )
         self.btn_start.pack(side="left", padx=(0, 8))
 
+
         self.btn_stop = ctk.CTkButton(
             top, text="⏹  STOP", width=130,
             fg_color="#7a2a2a", hover_color="#5c1f1f",
@@ -93,6 +105,7 @@ class VerseViewApp(ctk.CTk):
         )
         self.btn_stop.pack(side="left", padx=(0, 16))
 
+
         self.lbl_status = ctk.CTkLabel(
             top, text="● Stopped",
             text_color="#666666",
@@ -100,16 +113,19 @@ class VerseViewApp(ctk.CTk):
         )
         self.lbl_status.pack(side="left")
 
+
         self.log_box = ctk.CTkTextbox(
             left, state="disabled",
             font=("Segoe UI", 12), wrap="word"
         )
         self.log_box.grid(row=1, column=0, padx=10, pady=(0, 10), sticky="nsew")
 
+
         # ── ACTION BUTTONS ROW ──
         action_frame = ctk.CTkFrame(left, fg_color="transparent")
         action_frame.grid(row=2, column=0, padx=10, pady=(0, 10), sticky="ew")
         action_frame.grid_columnconfigure(1, weight=1)
+
 
         ctk.CTkButton(
             action_frame, text="Clear Log", height=28, width=70,
@@ -117,6 +133,7 @@ class VerseViewApp(ctk.CTk):
             text_color=("gray40", "gray60"),
             command=self._clear_log
         ).grid(row=0, column=0, padx=(0, 5), sticky="w")
+
 
         self.btn_summary = ctk.CTkButton(
             action_frame, text="📝 Generate Sermon Notes", height=32,
@@ -126,13 +143,15 @@ class VerseViewApp(ctk.CTk):
         )
         self.btn_summary.grid(row=0, column=1, padx=5, sticky="ew")
 
+
         self.btn_clear_sermon = ctk.CTkButton(
             action_frame, text="🗑️ Clear Memory", height=28, width=70,
             fg_color="transparent", border_width=1,
-            text_color=("#b53b3b", "#e05a5a"), 
+            text_color=("#b53b3b", "#e05a5a"),
             command=self._clear_sermon_memory
         )
         self.btn_clear_sermon.grid(row=0, column=2, padx=(5, 0), sticky="e")
+
 
         # ── RIGHT PANEL ──
         right = ctk.CTkScrollableFrame(
@@ -142,7 +161,9 @@ class VerseViewApp(ctk.CTk):
         right.grid(row=0, column=1, padx=(6, 12), pady=12, sticky="nsew")
         right.grid_columnconfigure(0, weight=1)
 
+
         row = 0
+
 
         def sep_label(text):
             nonlocal row
@@ -155,12 +176,14 @@ class VerseViewApp(ctk.CTk):
             row += 1
             return lbl
 
+
         def add_entry(placeholder="", show=""):
             nonlocal row
             e = ctk.CTkEntry(right, placeholder_text=placeholder, show=show)
             e.grid(row=row, column=0, sticky="ew", padx=14, pady=(0, 4))
             row += 1
             return e
+
 
         def add_option(values):
             nonlocal row
@@ -169,6 +192,7 @@ class VerseViewApp(ctk.CTk):
             m.grid(row=row, column=0, sticky="ew", padx=14, pady=(0, 4))
             row += 1
             return var, m
+
 
         # Language
         sep_label("Language")
@@ -179,6 +203,7 @@ class VerseViewApp(ctk.CTk):
             "Multi (Nova-2)",
         ])
 
+
         # Bible Translation
         sep_label("Bible Translation")
         self.bible_var, self.bible_menu = add_option([
@@ -186,6 +211,7 @@ class VerseViewApp(ctk.CTk):
             "NIV", "ESV", "NASB", "NKJV", "AMP",
             "CSB", "MSG", "OEB", "WEBBE",
         ])
+
 
         # Microphone
         sep_label("Microphone")
@@ -201,29 +227,36 @@ class VerseViewApp(ctk.CTk):
         ).grid(row=row, column=0, sticky="ew", padx=14, pady=(0, 8))
         row += 1
 
+
         # VerseView URL
         sep_label("VerseView URL")
         self.url_entry = add_entry("http://localhost:50010/control.html")
 
+
         # ── Current Context ──
         sep_label("📌  Current Context")
+
 
         ctx_frame = ctk.CTkFrame(right, fg_color="transparent")
         ctx_frame.grid(row=row, column=0, sticky="ew", padx=14, pady=(0, 4))
         ctx_frame.grid_columnconfigure((0, 1, 2), weight=1)
         row += 1
 
+
         ctk.CTkLabel(ctx_frame, text="Book",    anchor="center", font=ctk.CTkFont(size=11)).grid(row=0, column=0, padx=2)
         ctk.CTkLabel(ctx_frame, text="Chapter", anchor="center", font=ctk.CTkFont(size=11)).grid(row=0, column=1, padx=2)
         ctk.CTkLabel(ctx_frame, text="Verse",   anchor="center", font=ctk.CTkFont(size=11)).grid(row=0, column=2, padx=2)
+
 
         self.ctx_book    = ctk.CTkEntry(ctx_frame, placeholder_text="e.g. John", width=80)
         self.ctx_chapter = ctk.CTkEntry(ctx_frame, placeholder_text="e.g. 3",    width=50)
         self.ctx_verse   = ctk.CTkEntry(ctx_frame, placeholder_text="e.g. 16",   width=50)
 
+
         self.ctx_book.grid(row=1,    column=0, padx=2, pady=2)
         self.ctx_chapter.grid(row=1, column=1, padx=2, pady=2)
         self.ctx_verse.grid(row=1,   column=2, padx=2, pady=2)
+
 
         ctk.CTkButton(
             right, text="📌  Set Context", height=28,
@@ -232,21 +265,25 @@ class VerseViewApp(ctk.CTk):
         ).grid(row=row, column=0, sticky="ew", padx=14, pady=(0, 8))
         row += 1
 
+
         # ── Verification & Confidence ──
         self.conf_val_label = sep_label("Confidence Threshold: 75%")
-        
+
         self.conf_var = ctk.DoubleVar(value=0.75)
-        
+
         def update_conf_label(val):
             self.conf_val_label.configure(text=f"Confidence Threshold: {int(float(val)*100)}%")
+
 
         self.conf_slider = ctk.CTkSlider(right, from_=0.5, to=1.0, variable=self.conf_var, command=update_conf_label)
         self.conf_slider.grid(row=row, column=0, sticky="ew", padx=14, pady=(0, 4))
         row += 1
 
+
         self.manual_var = ctk.BooleanVar(value=True)
         ctk.CTkCheckBox(right, text="Require Manual Confirmation (Ask Y/N if low)", variable=self.manual_var).grid(row=row, column=0, sticky="w", padx=14, pady=(10, 4))
         row += 1
+
 
         # ── PANIC KEYBIND RECORDER ──
         sep_label("Panic Keybind")
@@ -270,34 +307,39 @@ class VerseViewApp(ctk.CTk):
             ).grid(row=row, column=0, sticky="ew", padx=14, pady=(0, 4))
         row += 1
 
+
         self.verify_var = ctk.BooleanVar(value=True)
         ctk.CTkCheckBox(right, text="Require Verification (Hear verse twice)", variable=self.verify_var).grid(row=row, column=0, sticky="w", padx=14, pady=(10, 4))
         row += 1
+
 
         # ── SMART AMEN TOGGLE ──
         self.smart_amen_var = ctk.BooleanVar(value=True)
         ctk.CTkCheckBox(right, text="Smart Amen (Auto-Clear on 'Let us pray')", variable=self.smart_amen_var).grid(row=row, column=0, sticky="w", padx=14, pady=(10, 4))
         row += 1
 
+
         # ── AUTO-SAVE TOGGLE ──
         self.auto_save_var = ctk.BooleanVar(value=True)
         ctk.CTkCheckBox(right, text="Auto-Save Sermon Notes on App Close", variable=self.auto_save_var).grid(row=row, column=0, sticky="w", padx=14, pady=(10, 4))
         row += 1
+
 
         # ── AUTO-START TOGGLE ──
         self.auto_start_var = ctk.BooleanVar(value=False)
         ctk.CTkCheckBox(right, text="Auto-Start on Launch (starts engine automatically)", variable=self.auto_start_var).grid(row=row, column=0, sticky="w", padx=14, pady=(10, 4))
         row += 1
 
+
         # ── SMART SCHEDULE TOGGLE ──
         self.smart_schedule_var = ctk.BooleanVar(value=False)
         ctk.CTkCheckBox(right, text="Smart Schedule (auto-set language by day & time)", variable=self.smart_schedule_var).grid(row=row, column=0, sticky="w", padx=14, pady=(4, 4))
         row += 1
-        # Schedule info label
         ctk.CTkLabel(right, text="  Sat→Malayalam  |  Sun 9:10AM→English  |  10:40AM→English  |  4:40PM→Hindi",
                      text_color=["#666666","#888888"], font=ctk.CTkFont(size=11)
         ).grid(row=row, column=0, sticky="w", padx=14, pady=(0, 4))
         row += 1
+
 
         # ── Advanced toggle ──
         self._adv_open = False
@@ -312,9 +354,11 @@ class VerseViewApp(ctk.CTk):
         self._adv_row = row
         row += 1
 
+
         self.adv_frame = ctk.CTkFrame(right)
         self.adv_frame.grid_columnconfigure(1, weight=1)
         self._build_advanced()
+
 
         ctk.CTkButton(
             right, text="💾  Save Settings",
@@ -322,11 +366,13 @@ class VerseViewApp(ctk.CTk):
             command=self._save_settings
         ).grid(row=row + 10, column=0, sticky="ew", padx=14, pady=(16, 4))
 
+
         ctk.CTkButton(
             right, text="📤  Export Settings",
             fg_color="#4a4a4a", hover_color="#333333",
             command=self._export_settings
         ).grid(row=row + 11, column=0, sticky="ew", padx=14, pady=(0, 4))
+
 
         ctk.CTkButton(
             right, text="📥  Import Settings",
@@ -334,17 +380,21 @@ class VerseViewApp(ctk.CTk):
             command=self._import_settings
         ).grid(row=row + 12, column=0, sticky="ew", padx=14, pady=(0, 8))
 
-        # Version label 
+
+        # Version label
         ctk.CTkLabel(
             self.tab_vv, text=f"v{APP_VERSION}",
             text_color=("gray50", "gray50"),
             font=ctk.CTkFont(size=10)
         ).grid(row=1, column=0, columnspan=2, pady=(0, 4), sticky="e", padx=12)
 
+
         # ── Initialize the Live Points Controller ──
         self.live_app = LivePointsController(self.tab_live)
 
+
         self.after(2000, self._refresh_context)
+
 
     def _build_advanced(self):
         fields = [
@@ -362,7 +412,9 @@ class VerseViewApp(ctk.CTk):
             e.grid(row=i, column=1, padx=10, pady=4, sticky="ew")
             setattr(self, attr, e)
 
+
         n = len(fields)
+
 
         ctk.CTkLabel(self.adv_frame, text="LLM Fallback", anchor="w").grid(
             row=n, column=0, padx=10, pady=4, sticky="w"
@@ -373,17 +425,21 @@ class VerseViewApp(ctk.CTk):
             values=["Enabled", "Disabled"], width=100
         ).grid(row=n, column=1, padx=10, pady=4, sticky="ew")
 
+
         ctk.CTkLabel(
             self.adv_frame, text="─── API Keys ───", anchor="w",
             font=ctk.CTkFont(size=12, weight="bold"),
             text_color=("gray30", "gray70")
         ).grid(row=n+1, column=0, columnspan=2, padx=10, pady=(14, 2), sticky="ew")
 
+
         key_fields = [
-            ("Deepgram Key",        "dg_key_entry"),
-            ("Groq API Key",      "or_key_entry"),
-            ("Sarvam Key",          "sv_key_entry"),
-            ("Discord Webhook URL", "dc_key_entry"),
+            ("Deepgram Key",              "dg_key_entry"),
+            ("Groq API Key",              "or_key_entry"),
+            ("Sarvam Key",                "sv_key_entry"),
+            ("Discord Webhook URL",       "dc_key_entry"),
+            ("Discord Log Webhook URL",   "dc_log_key_entry"),
+            ("Discord Notes Webhook URL", "dc_notes_key_entry"),
         ]
         for j, (lbl, attr) in enumerate(key_fields):
             ctk.CTkLabel(self.adv_frame, text=lbl, anchor="w").grid(
@@ -393,6 +449,7 @@ class VerseViewApp(ctk.CTk):
                              placeholder_text="Paste key here")
             e.grid(row=n+2+j, column=1, padx=10, pady=4, sticky="ew")
             setattr(self, attr, e)
+
 
     def _toggle_advanced(self):
         self._adv_open = not self._adv_open
@@ -406,6 +463,7 @@ class VerseViewApp(ctk.CTk):
             self.adv_frame.grid_forget()
             self.btn_adv.configure(text="▶   Advanced Settings")
 
+
     # ─────────────────────────────────────────────────
     # PANIC RECORDING LOGIC
     # ─────────────────────────────────────────────────
@@ -414,18 +472,20 @@ class VerseViewApp(ctk.CTk):
             return  # no-op on macOS
         """ Allows the user to press a key combo to record it safely without typing """
         if self.panic_btn:
-                self.panic_btn.configure(text="Listening... Press a key now!", fg_color="#a07020", state="disabled")
+            self.panic_btn.configure(text="Listening... Press a key now!", fg_color="#a07020", state="disabled")
+
 
         def on_press(key):
             try:
                 key_name = key.char
             except AttributeError:
                 key_name = key.name
-            
+
             if key_name:
                 self.after(0, lambda: self._on_panic_recorded(key_name))
-            
-            return False 
+
+            return False
+
 
         def recorder():
             try:
@@ -436,13 +496,16 @@ class VerseViewApp(ctk.CTk):
                 self._append_log(f"⚠️ Key recording error: {e}")
                 self.after(0, lambda: self._on_panic_recorded(self.panic_var.get()))
 
+
         threading.Thread(target=recorder, daemon=True).start()
+
 
     def _panic_shortcut(self):
         """Shift+Escape clears the screen — uses tkinter binding, no pynput."""
         if self._running:
             engine.trigger_panic()
             self._append_log("\U0001f6a8 Panic! Screen cleared via Shift+Escape")
+
 
     def _on_panic_recorded(self, combo):
         if combo:
@@ -465,25 +528,24 @@ class VerseViewApp(ctk.CTk):
         self.live_app.set_screen(s.get("display_screen", "Display 2 (Right/Extended)"))
         self.url_entry.delete(0, "end")
         self.url_entry.insert(0, s.get("remote_url", "http://localhost:50010/control.html"))
-        
-        # Load Verification / Confidence settings
+
         saved_conf = s.get("confidence", 0.75)
         self.conf_var.set(saved_conf)
         self.conf_val_label.configure(text=f"Confidence Threshold: {int(saved_conf * 100)}%")
-        
+
         self.manual_var.set(s.get("manual_confirm", True))
         self.verify_var.set(s.get("verify", True))
         self.smart_amen_var.set(s.get("smart_amen", True))
         self.auto_save_var.set(s.get("auto_save_notes", True))
         self.auto_start_var.set(s.get("auto_start", False))
         self.smart_schedule_var.set(s.get("smart_schedule", False))
-        
+
         saved_panic = s.get("panic_key", "esc")
         self.panic_var.set(saved_panic)
         if self.panic_btn:
-                self.panic_btn.configure(text=f"Panic Key: {saved_panic}")
+            self.panic_btn.configure(text=f"Panic Key: {saved_panic}")
 
-        # Set the prompt inside the live app module
+
         default_prompt = (
             "You are a real-time sermon outliner.\n\n"
             "STRICT RULES:\n"
@@ -497,9 +559,10 @@ class VerseViewApp(ctk.CTk):
             "• Point 1\n"
             "• Point 2"
         )
-        
+
         self.live_app.set_prompt(s.get("live_points_prompt", default_prompt))
         self.live_app.set_live_llm_enabled(s.get("live_points_llm_enabled", False))
+
 
         self.rate_entry.delete(0, "end");     self.rate_entry.insert(0,     str(s.get("rate",        16000)))
         self.chunk_entry.delete(0, "end");    self.chunk_entry.insert(0,    str(s.get("chunk",        4096)))
@@ -507,47 +570,57 @@ class VerseViewApp(ctk.CTk):
         self.dedup_entry.delete(0, "end");    self.dedup_entry.insert(0,    str(s.get("dedup_window", 60)))
         self.llm_var.set("Enabled" if s.get("llm_enabled", True) else "Disabled")
 
+        # ── load all 3 Discord webhook URLs ──
         for attr, key in [
-            ("dg_key_entry", "deepgram_api_key"),
-            ("or_key_entry", "groq_api_key"),
-            ("sv_key_entry", "sarvam_api_key"),
-            ("dc_key_entry", "discord_webhook_url"),
+            ("dg_key_entry",       "deepgram_api_key"),
+            ("or_key_entry",       "groq_api_key"),
+            ("sv_key_entry",       "sarvam_api_key"),
+            ("dc_key_entry",       "discord_webhook_url"),
+            ("dc_log_key_entry",   "discord_log_webhook_url"),
+            ("dc_notes_key_entry", "discord_notes_webhook_url"),
         ]:
             e = getattr(self, attr)
             e.delete(0, "end")
             e.insert(0, s.get(key, ""))
 
+
     def _collect_settings(self) -> dict:
         return {
-            "language":            self.lang_var.get(),
-            "bible_translation":   self.bible_var.get().lower(),
-            "display_screen":      self.live_app.get_screen(),
-            "remote_url":          self.url_entry.get(),
-            "confidence":          self.conf_var.get(),
-            "manual_confirm":      self.manual_var.get(),
-            "verify":              self.verify_var.get(),
-            "smart_amen":          self.smart_amen_var.get(),
-            "auto_save_notes":     self.auto_save_var.get(),
-            "auto_start":          self.auto_start_var.get(),
-            "smart_schedule":      self.smart_schedule_var.get(),
-            "panic_key":           self.panic_var.get(),
-            "live_points_prompt":  self.live_app.get_prompt(),
-            "rate":                self._safe_int(self.rate_entry,       16000),
-            "chunk":               self._safe_int(self.chunk_entry,      4096),
-            "cooldown":            self._safe_float(self.cooldown_entry,  3.0),
-            "dedup_window":        self._safe_int(self.dedup_entry,      60),
-            "llm_enabled":         self.llm_var.get() == "Enabled",
-            "deepgram_api_key":    self.dg_key_entry.get(),
-            "groq_api_key":        self.or_key_entry.get(),
-            "sarvam_api_key":      self.sv_key_entry.get(),
-            "discord_webhook_url": self.dc_key_entry.get(),
-            "mic_index":           self._mic_index(),
+            "language":                   self.lang_var.get(),
+            "bible_translation":          self.bible_var.get().lower(),
+            "display_screen":             self.live_app.get_screen(),
+            "remote_url":                 self.url_entry.get(),
+            "confidence":                 self.conf_var.get(),
+            "manual_confirm":             self.manual_var.get(),
+            "verify":                     self.verify_var.get(),
+            "smart_amen":                 self.smart_amen_var.get(),
+            "auto_save_notes":            self.auto_save_var.get(),
+            "auto_start":                 self.auto_start_var.get(),
+            "smart_schedule":             self.smart_schedule_var.get(),
+            "panic_key":                  self.panic_var.get(),
+            "live_points_prompt":         self.live_app.get_prompt(),
+            "live_points_llm_enabled":    self.live_app.get_live_llm_enabled() if hasattr(self.live_app, "get_live_llm_enabled") else False,
+            "rate":                       self._safe_int(self.rate_entry,      16000),
+            "chunk":                      self._safe_int(self.chunk_entry,     4096),
+            "cooldown":                   self._safe_float(self.cooldown_entry, 3.0),
+            "dedup_window":               self._safe_int(self.dedup_entry,     60),
+            "llm_enabled":                self.llm_var.get() == "Enabled",
+            "deepgram_api_key":           self.dg_key_entry.get(),
+            "groq_api_key":               self.or_key_entry.get(),
+            "sarvam_api_key":             self.sv_key_entry.get(),
+            # ── all 3 Discord webhook URLs ──
+            "discord_webhook_url":        self.dc_key_entry.get(),
+            "discord_log_webhook_url":    self.dc_log_key_entry.get(),
+            "discord_notes_webhook_url":  self.dc_notes_key_entry.get(),
+            "mic_index":                  self._mic_index(),
         }
+
 
     def _save_settings(self):
         self._s = self._collect_settings()
         cfg.save(self._s)
         self._append_log("✅ Settings saved.")
+
 
     def _export_settings(self):
         data = self._collect_settings()
@@ -555,6 +628,7 @@ class VerseViewApp(ctk.CTk):
             self._append_log("📤 Settings exported successfully.")
         else:
             self._append_log("⚠️ Export cancelled.")
+
 
     def _import_settings(self):
         data = cfg.import_settings()
@@ -566,32 +640,40 @@ class VerseViewApp(ctk.CTk):
         else:
             self._append_log("⚠️ Import cancelled.")
 
+
     # ─────────────────────────────────────────────────
     # CONTEXT & LOGGING
     # ─────────────────────────────────────────────────
     def _set_context(self):
-        typed_book = self.ctx_book.get().strip()
+        typed_book    = self.ctx_book.get().strip()
         typed_chapter = self.ctx_chapter.get().strip()
-        typed_verse = self.ctx_verse.get().strip()
+        typed_verse   = self.ctx_verse.get().strip()
 
-        final_book = typed_book if typed_book else engine.current_book
+
+        final_book    = typed_book    if typed_book    else engine.current_book
         final_chapter = typed_chapter if typed_chapter else engine.current_chapter
-        final_verse = typed_verse if typed_verse else engine.current_verse
+        final_verse   = typed_verse   if typed_verse   else engine.current_verse
 
-        final_book = final_book or ""
+
+        final_book    = final_book    or ""
         final_chapter = final_chapter or ""
-        final_verse = final_verse or ""
+        final_verse   = final_verse   or ""
+
 
         engine.set_context(final_book, final_chapter, final_verse)
+
 
         self.ctx_book.delete(0, "end")
         self.ctx_chapter.delete(0, "end")
         self.ctx_verse.delete(0, "end")
 
+
         self._append_log(f"📌 Context updated: {final_book} {final_chapter}:{final_verse}")
+
 
     def _refresh_context(self):
         focused = self.focus_get()
+
 
         def is_inside(widget):
             try:
@@ -600,12 +682,15 @@ class VerseViewApp(ctk.CTk):
             except:
                 return False
 
+
         if not (is_inside(self.ctx_book) or is_inside(self.ctx_chapter) or is_inside(self.ctx_verse)):
             self.ctx_book.configure(placeholder_text=engine.current_book or "e.g. John")
             self.ctx_chapter.configure(placeholder_text=engine.current_chapter or "e.g. 3")
             self.ctx_verse.configure(placeholder_text=engine.current_verse or "e.g. 16")
 
+
         self.after(2000, self._refresh_context)
+
 
     def _populate_mics(self):
         import pyaudio
@@ -616,6 +701,7 @@ class VerseViewApp(ctk.CTk):
             if info.get("maxInputChannels", 0) > 0:
                 mics[i] = f"[{i}]  {info['name']}"
         p.terminate()
+
 
         if mics:
             values       = list(mics.values())
@@ -628,10 +714,12 @@ class VerseViewApp(ctk.CTk):
             self.mic_map = {}
             self.mic_menu.configure(values=["No input devices found"])
 
+
     def _attach_log_handler(self):
         handler = GUILogHandler(self._append_log)
         handler.setFormatter(logging.Formatter('%(asctime)s %(levelname)s  %(message)s'))
         logging.getLogger().addHandler(handler)
+
 
     def _append_log(self, msg: str):
         def _do():
@@ -641,10 +729,12 @@ class VerseViewApp(ctk.CTk):
             self.log_box.configure(state="disabled")
         self.after(0, _do)
 
+
     def _clear_log(self):
         self.log_box.configure(state="normal")
         self.log_box.delete("1.0", "end")
         self.log_box.configure(state="disabled")
+
 
     def _lang_code(self) -> str:
         return {
@@ -654,16 +744,20 @@ class VerseViewApp(ctk.CTk):
             "Multi (Nova-2)":        "multi",
         }.get(self.lang_var.get(), "en")
 
+
     def _mic_index(self) -> int:
         return self.mic_map.get(self.mic_var.get(), 0)
+
 
     def _safe_int(self, e, d):
         try:    return int(e.get())
         except: return d
 
+
     def _safe_float(self, e, d):
         try:    return float(e.get())
         except: return d
+
 
     # ─────────────────────────────────────────────────
     # ENGINE CONTROL & CALLBACKS
@@ -672,46 +766,49 @@ class VerseViewApp(ctk.CTk):
         """ Thread-safe popup to ask the user if they want to send a low-confidence verse. """
         result = [False]
         ev = threading.Event()
-        
+
         def _ask():
             ans = mb.askyesno(
-                title="Low Confidence Verse", 
+                title="Low Confidence Verse",
                 message=f"The AI is only {int(confidence * 100)}% sure.\n\nDetected: {ref}\n\nDo you want to send this to VerseView?"
             )
             result[0] = ans
             ev.set()
 
+
         self.after(0, _ask)
-        ev.wait() 
+        ev.wait()
         return result[0]
 
 
     # ──────────────────────────────────────────────────────────
     # SMART SCHEDULE + AUTO-START
     # ──────────────────────────────────────────────────────────
-
     def _get_scheduled_language(self):
         """Return the language string that matches the current day/time, or None."""
         now = datetime.datetime.now()
         wd  = now.weekday()  # 0=Mon … 5=Sat, 6=Sun
         t   = now.time()
 
+
         if wd == 5:  # Saturday → Malayalam
             return "Malayalam (Sarvam AI)"
 
+
         if wd == 6:  # Sunday — pick the LATEST threshold that has passed
-            if t >= datetime.time(16, 40):   # 4:40 PM leniency → 5 PM Hindi service
+            if t >= datetime.time(16, 40):
                 return "Hindi (Nova-3)"
-            if t >= datetime.time(10, 40):   # 10:40 AM leniency → 11 AM English service
+            if t >= datetime.time(10, 40):
                 return "English (Nova-2)"
-            if t >= datetime.time(9, 10):    # 9:10 AM leniency → 9:30 AM English service
+            if t >= datetime.time(9, 10):
                 return "English (Nova-2)"
+
 
         return None  # weekday or too early — no auto-language
 
+
     def _check_auto_start(self):
         """Called once after the window opens. Applies smart schedule then auto-starts if enabled."""
-        # Apply smart schedule first (sets language before starting)
         if self.smart_schedule_var.get():
             lang = self._get_scheduled_language()
             if lang:
@@ -720,18 +817,21 @@ class VerseViewApp(ctk.CTk):
             else:
                 self._append_log("📅 Smart Schedule: no service detected for current day/time")
 
-        # Auto-start
+
         if self.auto_start_var.get():
             self._append_log("⚡ Auto-Start: starting engine in 3 seconds...")
             self.after(3000, self._start)
+
 
     def _start(self):
         try:
             if self._running:
                 return
 
+
             s = self._collect_settings()
             cfg.save(s)
+
 
             missing = []
             if not s["deepgram_api_key"] and self._lang_code() != "ml":
@@ -743,31 +843,35 @@ class VerseViewApp(ctk.CTk):
                 self._append_log(f"⚠️ Missing keys: {', '.join(missing)}")
                 return
 
-            # Pass new args down to engine, including Live Points configurations
+
+            # ── pass all 3 Discord webhook URLs to the engine ──
             engine.configure(
-                language            = self._lang_code(),
-                mic_index           = self._mic_index(),
-                rate                = s["rate"],
-                chunk               = s["chunk"],
-                remote_url          = s["remote_url"],
-                dedup_window        = s["dedup_window"],
-                cooldown            = s["cooldown"],
-                llm_enabled         = s["llm_enabled"],
-                bible_translation   = s["bible_translation"],
-                deepgram_api_key    = s["deepgram_api_key"],
-                groq_api_key        = s["groq_api_key"],
-                sarvam_api_key      = s["sarvam_api_key"],
-                discord_webhook_url = s["discord_webhook_url"],
-                confidence          = s["confidence"],
-                manual_confirm      = s["manual_confirm"],
-                confirm_callback    = self._user_confirm_callback,
-                verify              = s["verify"],
-                smart_amen          = s["smart_amen"],
-                panic_key           = s["panic_key"],
-                live_points_prompt  = s["live_points_prompt"],
-                live_points_callback       = self.live_app.update_live_points,
-            live_points_get_current_cb = self.live_app.get_current_display
+                language                  = self._lang_code(),
+                mic_index                 = self._mic_index(),
+                rate                      = s["rate"],
+                chunk                     = s["chunk"],
+                remote_url                = s["remote_url"],
+                dedup_window              = s["dedup_window"],
+                cooldown                  = s["cooldown"],
+                llm_enabled               = s["llm_enabled"],
+                bible_translation         = s["bible_translation"],
+                deepgram_api_key          = s["deepgram_api_key"],
+                groq_api_key              = s["groq_api_key"],
+                sarvam_api_key            = s["sarvam_api_key"],
+                discord_webhook_url       = s["discord_webhook_url"],
+                discord_log_webhook_url   = s["discord_log_webhook_url"],
+                discord_notes_webhook_url = s["discord_notes_webhook_url"],
+                confidence                = s["confidence"],
+                manual_confirm            = s["manual_confirm"],
+                confirm_callback          = self._user_confirm_callback,
+                verify                    = s["verify"],
+                smart_amen                = s["smart_amen"],
+                panic_key                 = s["panic_key"],
+                live_points_prompt        = s["live_points_prompt"],
+                live_points_callback      = self.live_app.update_live_points,
+                live_points_get_current_cb = self.live_app.get_current_display
             )
+
 
             self._running = True
             self.btn_start.configure(state="disabled")
@@ -776,13 +880,16 @@ class VerseViewApp(ctk.CTk):
             self.lang_menu.configure(state="disabled")
             self.mic_menu.configure(state="disabled")
 
+
             self._engine_thread = threading.Thread(target=self._run_engine, daemon=True)
             self._engine_thread.start()
             self.after(2000, self._refresh_context)
 
+
         except Exception as e:
             mb.showerror("Start Error", f"Failed to start:\n\n{e}")
             self._append_log(f"❌ Start failed: {e}")
+
 
     def _run_engine(self):
         loop = asyncio.new_event_loop()
@@ -796,10 +903,12 @@ class VerseViewApp(ctk.CTk):
             loop.close()
             self.after(0, self._on_stopped)
 
+
     def _stop(self):
         self.btn_stop.configure(state="disabled")
         self.lbl_status.configure(text="● Stopping...", text_color="#a07020")
         engine.request_stop()
+
 
     def _on_stopped(self):
         self._running = False
@@ -809,19 +918,21 @@ class VerseViewApp(ctk.CTk):
         self.lang_menu.configure(state="normal")
         self.mic_menu.configure(state="normal")
 
+
     # ── FOLDER MANAGER ──
     def _get_sermon_notes_dir(self):
         if getattr(sys, 'frozen', False):
             app_dir = os.path.dirname(sys.executable)
         else:
             app_dir = os.path.dirname(os.path.abspath(__file__))
-            
+
         parent_dir = os.path.dirname(app_dir)
-        
+
         notes_dir = os.path.join(parent_dir, "Sermon Notes")
         os.makedirs(notes_dir, exist_ok=True)
-        
+
         return notes_dir
+
 
     # ── SERMON CLIFF NOTES ──
     def _generate_summary(self):
@@ -829,30 +940,30 @@ class VerseViewApp(ctk.CTk):
             self._append_log("⏳ Asking AI to summarize the sermon... (Please wait)")
             summary = engine.generate_sermon_summary()
             self.after(0, lambda: self._show_summary_window(summary))
-            
+
         threading.Thread(target=_task, daemon=True).start()
+
 
     def _show_summary_window(self, content):
         win = ctk.CTkToplevel(self)
         win.title("Sermon Cliff Notes")
         win.geometry("600x700")
-        
-        # Bring window to front
+
         win.attributes("-topmost", True)
         self.after(100, lambda: win.attributes("-topmost", False))
-        
+
         textbox = ctk.CTkTextbox(win, font=("Segoe UI", 14), wrap="word")
         textbox.pack(fill="both", expand=True, padx=15, pady=15)
         textbox.insert("1.0", content)
         textbox.configure(state="disabled")
-        
+
         def _save():
             default_title = "Sermon_Notes"
             first_line = content.split('\n')[0]
             if first_line.startswith("TITLE:"):
                 raw_title = first_line.replace("TITLE:", "").strip()
                 default_title = re.sub(r'[\\/*?:"<>|]', "", raw_title)
-            
+
             date_str = datetime.date.today().strftime("%B %d %Y")
             suggested_filename = f"{default_title} {date_str}.txt"
 
@@ -860,8 +971,8 @@ class VerseViewApp(ctk.CTk):
 
             import tkinter.filedialog as fd
             path = fd.asksaveasfilename(
-                initialdir=notes_folder, 
-                defaultextension=".txt", 
+                initialdir=notes_folder,
+                defaultextension=".txt",
                 filetypes=[("Text Files", "*.txt")],
                 initialfile=suggested_filename
             )
@@ -869,21 +980,23 @@ class VerseViewApp(ctk.CTk):
                 with open(path, "w", encoding="utf-8") as f:
                     f.write(content)
                 self._append_log(f"💾 Saved Sermon Notes to {path}")
-                self._notes_saved = True # <--- Note is safely saved!
+                self._notes_saved = True
                 win.destroy()
-                
+
         btn_save = ctk.CTkButton(
-            win, text="💾 Save to File", 
-            font=ctk.CTkFont(size=14, weight="bold"), 
+            win, text="💾 Save to File",
+            font=ctk.CTkFont(size=14, weight="bold"),
             command=_save
         )
         btn_save.pack(pady=(0, 15))
 
+
     def _clear_sermon_memory(self):
         if mb.askyesno("Clear Memory", "Are you sure you want to delete the current recorded sermon?\n\nThis cannot be undone!"):
             engine.clear_sermon_buffer()
-            self._notes_saved = False 
+            self._notes_saved = False
             self._append_log("🗑️ Sermon memory wiped clean for the next service.")
+
 
     def on_closing(self):
         if self.auto_save_var.get() and not self._notes_saved and engine.full_sermon_transcript and len(engine.full_sermon_transcript.strip()) > 100:
@@ -892,26 +1005,25 @@ class VerseViewApp(ctk.CTk):
             try:
                 self._append_log("⚠️ App closed without saving! Auto-generating summary...")
                 content = engine.generate_sermon_summary()
-                
+
                 default_title = "Unsaved_Sermon"
                 first_line = content.split('\n')[0]
                 if first_line.startswith("TITLE:"):
                     raw_title = first_line.replace("TITLE:", "").strip()
                     default_title = re.sub(r'[\\/*?:"<>|]', "", raw_title)
-                
+
                 date_str = datetime.date.today().strftime("%B %d %Y")
                 filename = f"{default_title} {date_str}.txt"
-                
+
                 notes_folder = self._get_sermon_notes_dir()
                 filepath = os.path.join(notes_folder, filename)
-                
+
                 with open(filepath, "w", encoding="utf-8") as f:
                     f.write(content)
                 print(f"Emergency Auto-Save triggered: {filepath}")
             except Exception as e:
                 print(f"Emergency Auto-Save Failed: {e}")
 
-        # Shut down normally
         cfg.save(self._collect_settings())
         if self._running:
             engine.request_stop()
@@ -919,6 +1031,6 @@ class VerseViewApp(ctk.CTk):
 
 
 if __name__ == "__main__":
-        app = VerseViewApp()
-        app.protocol("WM_DELETE_WINDOW", app.on_closing)
-        app.mainloop()
+    app = VerseViewApp()
+    app.protocol("WM_DELETE_WINDOW", app.on_closing)
+    app.mainloop()

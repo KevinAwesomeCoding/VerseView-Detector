@@ -6,21 +6,22 @@ import tkinter.filedialog as fd
 import tkinter.messagebox as mb
 
 DEFAULTS = {
-    "deepgram_api_key":    "",
-    "groq_api_key":  "",
+    "deepgram_api_key": "",
+    "groq_api_key": "",
     "discord_webhook_url": "",
-    "sarvam_api_key":      "",
-    "language":            "English (Nova-2)",
-    "mic_index":           0,
-    "remote_url":          "http://localhost:50010/control.html",
-    "bible_translation":   "KJV",
-    "rate":                16000,
-    "chunk":               4096,
-    "cooldown":            3.0,
-    "dedup_window":        60,
-    "llm_enabled":         True,
+    "discord_log_webhook_url": "",
+    "discord_notes_webhook_url": "",
+    "sarvam_api_key": "",
+    "language": "English (Nova-2)",
+    "mic_index": 0,
+    "remote_url": "http://localhost:50010/control.html",
+    "bible_translation": "KJV",
+    "rate": 16000,
+    "chunk": 4096,
+    "cooldown": 3.0,
+    "dedup_window": 60,
+    "llm_enabled": True,
 }
-
 
 def _settings_path() -> Path:
     if sys.platform == "darwin":
@@ -29,7 +30,6 @@ def _settings_path() -> Path:
         base = Path(os.getenv("APPDATA", str(Path.home()))) / "VerseView"
     base.mkdir(parents=True, exist_ok=True)
     return base / "settings.json"
-
 
 def load() -> dict:
     path = _settings_path()
@@ -42,7 +42,6 @@ def load() -> dict:
             pass
     return dict(DEFAULTS)
 
-
 def save(data: dict):
     path = _settings_path()
     try:
@@ -50,7 +49,6 @@ def save(data: dict):
             json.dump(data, f, indent=2)
     except Exception as e:
         print(f"Could not save settings: {e}")
-
 
 def export_settings(data: dict):
     path = fd.asksaveasfilename(
@@ -68,7 +66,6 @@ def export_settings(data: dict):
     except Exception as e:
         mb.showerror("Export Failed", str(e))
         return False
-
 
 def import_settings() -> dict | None:
     path = fd.askopenfilename(

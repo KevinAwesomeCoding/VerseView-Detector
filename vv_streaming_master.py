@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 import sys, os
 
+IS_WINDOWS = sys.platform.startswith("win") # pynput only on Windows
+
 import asyncio
 import time
 import re
@@ -12,24 +14,24 @@ import threading
 # pynput imported lazily inside main()
 # selenium imported lazily inside connect()
 
-from parse_reference_eng   import parse_references as parse_eng, normalize_numbers_only as norm_eng
+from parse_reference_eng import parse_references as parse_eng, normalize_numbers_only as norm_eng
 from parse_reference_hindi import parse_references as parse_hindi, normalize_numbers_only as norm_hindi
-from parse_reference_ml    import parse_references as parse_ml, normalize_numbers_only as norm_ml
-from bible_fetcher         import fetch_verse as multi_fetch
+from parse_reference_ml import parse_references as parse_ml, normalize_numbers_only as norm_ml
+from bible_fetcher import fetch_verse as multi_fetch
 
 # ── GROQ CLIENT (pure-requests, no openai/pydantic-core) ──
 class _GroqResponse:
     class _Choice:
         class _Msg:
             def __init__(self, content): self.content = content
-        def __init__(self, content):    self.message = self._Msg(content)
-    def __init__(self, content):        self.choices = [self._Choice(content)]
+        def __init__(self, content): self.message = self._Msg(content)
+    def __init__(self, content): self.choices = [self._Choice(content)]
 
 class _GroqCompletions:
     def __init__(self, api_key): self._key = api_key
     def create(self, model, messages, temperature=0.2, max_tokens=None, **kw):
         headers = {"Authorization": f"Bearer {self._key}", "Content-Type": "application/json"}
-        body    = {"model": model, "messages": messages, "temperature": temperature}
+        body = {"model": model, "messages": messages, "temperature": temperature}
         if max_tokens is not None:
             body["max_tokens"] = max_tokens
         r = requests.post(
@@ -49,7 +51,7 @@ class _GroqClient:
 # ── LOGGING ──
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s %(levelname)-5s  %(message)s",
+    format="%(asctime)s %(levelname)-5s %(message)s",
     handlers=[
         logging.FileHandler("verseview.log", encoding="utf-8"),
         logging.StreamHandler()
@@ -57,41 +59,119 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# ── DISCORD LIVE LOG ──
+class _DiscordLiveLog:
+    """One Discord message per session, edited every 5s with new log lines."""
+    MAX_CHARS = 1900
+    def __init__(self):
+        self._msg_id = None; self._lines = []; self._dirty = False
+        self._lock = threading.Lock(); self._stop_evt = threading.Event()
+        threading.Thread(target=self._flush_loop, daemon=True).start()
+    def _url(self): return DISCORD_LOG_WEBHOOK_URL.strip() if DISCORD_LOG_WEBHOOK_URL else ""
+    def _build(self):
+        h = "**\U0001f3d9\ufe0f VerseView Live Log**\n```\n"
+        f = "```"
+        lines = list(self._lines)
+        while lines and len(h) + len("\n".join(lines)) + len(f) > self.MAX_CHARS: lines.pop(0)
+        return h + "\n".join(lines) + "\n" + f
+    def _create(self):
+        url = self._url()
+        if not url: return
+        try:
+            r = requests.post(url + "?wait=true", json={"content": self._build()}, timeout=10, verify=certifi.where())
+            if r.status_code in (200, 204): self._msg_id = r.json().get("id")
+        except Exception as ex: logger.debug(f"Discord log create: {ex}")
+    def _edit(self):
+        url = self._url()
+        if not url or not self._msg_id: return
+        try: requests.patch(f"{url}/messages/{self._msg_id}", json={"content": self._build()}, timeout=10, verify=certifi.where())
+        except Exception as ex: logger.debug(f"Discord log edit: {ex}")
+    def append(self, line: str):
+        with self._lock: self._lines.append(line); self._dirty = True
+    def _flush_loop(self):
+        while not self._stop_evt.is_set():
+            self._stop_evt.wait(5)
+            with self._lock:
+                if not self._dirty: continue
+                self._dirty = False
+                if self._msg_id is None: self._create()
+                else: self._edit()
+    def stop(self):
+        self._stop_evt.set()
+        with self._lock: self._dirty = True
+        if self._msg_id is None: self._create()
+        else: self._edit()
+
+class _DiscordLogHandler(logging.Handler):
+    def __init__(self, live_log):
+        super().__init__(); self._live = live_log
+    def emit(self, record):
+        if not DISCORD_LOG_WEBHOOK_URL: return
+        try:
+            import datetime as _dt
+            if record.levelno >= logging.INFO:
+                self._live.append(f"{_dt.datetime.now().strftime('%H:%M:%S')} {record.getMessage()}")
+        except Exception: pass
+
+def send_sermon_notes_to_discord(notes: str):
+    """Post sermon notes to DISCORD_NOTES_WEBHOOK_URL, chunked for Discord's 2000-char limit."""
+    url = DISCORD_NOTES_WEBHOOK_URL.strip() if DISCORD_NOTES_WEBHOOK_URL else ""
+    if not url: return
+    LIMIT = 1900
+    header = "📋 **Sermon Notes**\n"
+    chunks = []; current = header
+    for line in notes.splitlines():
+        seg = line + "\n"
+        if len(current) + len(seg) > LIMIT: chunks.append(current); current = seg
+        else: current += seg
+    if current.strip(): chunks.append(current)
+    for i, chunk in enumerate(chunks):
+        try:
+            requests.post(url, json={"content": chunk}, timeout=10, verify=certifi.where())
+            if len(chunks) > 1:
+                import time as _t; _t.sleep(0.5)
+        except Exception as ex: logger.debug(f"Discord notes: {ex}")
+
+_discord_live_log = _DiscordLiveLog()
+logger.addHandler(_DiscordLogHandler(_discord_live_log))
+
 # ── DEFAULTS ──
-USE_XPATH        = sys.platform == "darwin"
-USE_SARVAM       = False
+USE_XPATH = sys.platform == "darwin"
+USE_SARVAM = False
 DEEPGRAM_LANGUAGE = "en"
-DEEPGRAM_MODEL    = "nova-2"
-SARVAM_LANGUAGE   = "ml-IN"
-PRIMARY_PARSER    = parse_eng
-MIC_INDEX         = 1
-RATE              = 16000
-CHUNK             = 4096
-REMOTE_URL        = "http://localhost:50010/control.html"
-DEDUP_WINDOW      = 60
-COOLDOWN          = 3.0
-LLM_ENABLED       = True
-LLM_CALL_COUNT    = 0
+DEEPGRAM_MODEL = "nova-2"
+SARVAM_LANGUAGE = "ml-IN"
+PRIMARY_PARSER = parse_eng
+MIC_INDEX = 1
+RATE = 16000
+CHUNK = 4096
+REMOTE_URL = "http://localhost:50010/control.html"
+DEDUP_WINDOW = 60
+COOLDOWN = 3.0
+LLM_ENABLED = True
+LLM_CALL_COUNT = 0
 BIBLE_TRANSLATION = "web"
-DEEPGRAM_API_KEY  = ""
-GROQ_API_KEY      = ""
+DEEPGRAM_API_KEY = ""
+GROQ_API_KEY = ""
 DISCORD_WEBHOOK_URL = ""
-SARVAM_API_KEY    = ""
+DISCORD_LOG_WEBHOOK_URL = ""
+DISCORD_NOTES_WEBHOOK_URL = ""
+SARVAM_API_KEY = ""
 
 CONFIDENCE_THRESHOLD = 0.75
 REQUIRE_MANUAL_CONFIRM = True
-CONFIRM_CALLBACK       = None
-REQUIRE_VERIFY       = True
-PANIC_KEY            = "esc"
+CONFIRM_CALLBACK = None
+REQUIRE_VERIFY = True
+PANIC_KEY = "esc"
 
 # ── LIVE POINTS CONFIG ──
-LIVE_POINTS_PROMPT         = ""
-LIVE_POINTS_CALLBACK       = None
+LIVE_POINTS_PROMPT = ""
+LIVE_POINTS_CALLBACK = None
 LIVE_POINTS_GET_CURRENT_CB = None
 
 # ── SMART AMEN CONFIG ──
-SMART_AMEN_ENABLED   = True
-SMART_AMEN_KEYWORDS  = [
+SMART_AMEN_ENABLED = True
+SMART_AMEN_KEYWORDS = [
     "let us pray",
     "let's pray",
     "please be seated",
@@ -99,15 +179,15 @@ SMART_AMEN_KEYWORDS  = [
     "thank you jesus"
 ]
 
-llm_client = None  # initialized lazily inside configure()
+llm_client = None # initialized lazily inside configure()
 
 # ── GLOBALS & SERMON BUFFER ──
-stop_event   = None
-engine_loop  = None
-_controller  = None
+stop_event = None
+engine_loop = None
+_controller = None
 
 full_sermon_transcript = ""
-verses_cited           = []
+verses_cited = []
 
 # ── STOP & PANIC LOGIC ──
 def request_stop():
@@ -140,32 +220,32 @@ async def live_points_loop():
     """ Periodically asks Groq to extract main points from the growing transcript """
     global full_sermon_transcript, LLM_ENABLED, llm_client
     global LIVE_POINTS_PROMPT, LIVE_POINTS_CALLBACK, LIVE_POINTS_GET_CURRENT_CB
-    
+
     last_processed_length = 0
-    
+
     while not stop_event.is_set():
-        await asyncio.sleep(15) 
-        
+        await asyncio.sleep(15)
+
         if not LLM_ENABLED or not GROQ_API_KEY or not LIVE_POINTS_CALLBACK:
             continue
-            
+
         current_transcript = full_sermon_transcript.strip()
-        
+
         if len(current_transcript) < 150 or len(current_transcript) <= last_processed_length + 50:
-            continue 
-            
+            continue
+
         last_processed_length = len(current_transcript)
-        
+
         current_display = LIVE_POINTS_GET_CURRENT_CB().strip() if LIVE_POINTS_GET_CURRENT_CB else ""
-    if current_display:
-        prompt = (
-            f"{LIVE_POINTS_PROMPT}\n\n"
-            f"Current Outline (may include manual edits — preserve and build on this):\n{current_display}\n\n"
-            f"Full Transcript:\n{current_transcript}"
-        )
-    else:
-        prompt = f"{LIVE_POINTS_PROMPT}\n\nTranscript:\n{current_transcript}"
-        
+        if current_display:
+            prompt = (
+                f"{LIVE_POINTS_PROMPT}\n\n"
+                f"Current Outline (may include manual edits — preserve and build on this):\n{current_display}\n\n"
+                f"Full Transcript:\n{current_transcript}"
+            )
+        else:
+            prompt = f"{LIVE_POINTS_PROMPT}\n\nTranscript:\n{current_transcript}"
+
         try:
             def fetch_points():
                 response = llm_client.chat.completions.create(
@@ -173,7 +253,7 @@ async def live_points_loop():
                     messages=[{"role": "user", "content": prompt}]
                 )
                 return response.choices[0].message.content.strip()
-                
+
             points = await engine_loop.run_in_executor(None, fetch_points)
             LIVE_POINTS_CALLBACK(points)
         except Exception as e:
@@ -182,13 +262,17 @@ async def live_points_loop():
 # ── SERMON SUMMARY GENERATOR (POST-SERMON) ──
 def generate_sermon_summary():
     global full_sermon_transcript, verses_cited, LLM_ENABLED, llm_client
-    
+
     if not LLM_ENABLED or not GROQ_API_KEY:
         return "⚠️ LLM Fallback is disabled or missing Groq API Key. Required to generate summaries."
-        
+
     if len(full_sermon_transcript.strip()) < 100:
         return "⚠️ Transcript is too short to generate a meaningful summary."
+    
+    import datetime  
 
+    today_str = datetime.datetime.now().strftime("%B %d, %Y  ·  %I:%M %p")
+    
     prompt = (
         "You are an expert sermon note-taker. Read the following sermon transcript "
         "and generate structured sermon notes using the exact Markdown format below. "
@@ -196,7 +280,7 @@ def generate_sermon_summary():
         "you must translate those portions and write the final output strictly in English.\n\n"
         "Extract the information from the transcript as best as you can.\n\n"
         "---FORMAT TEMPLATE START---\n"
-        "## 📅 [Extract Date if present, or write 'Date'] | [Sermon Series Name if mentioned]\n"
+        f"## 📅 {today_str} | [Sermon Series Name if mentioned]\n"
         "**Title:** [Create a short, compelling title]\n"
         "**Speaker:** [Speaker Name if mentioned]\n\n"
         "### 📖 Primary Scripture\n"
@@ -226,13 +310,13 @@ def generate_sermon_summary():
             messages=[{"role": "user", "content": prompt}]
         )
         summary = response.choices[0].message.content.strip()
-        
-        # Append verses
+
         verse_str = "\n".join([f"- {v}" for v in verses_cited])
         if verse_str:
             summary += "\n\n### Verses Cited:\n" + verse_str
-            
+
         logger.info("✅ Sermon Summary generated!")
+        send_sermon_notes_to_discord(summary)
         return summary
     except Exception as e:
         logger.error(f"❌ Failed to generate summary: {e}")
@@ -251,11 +335,13 @@ def configure(
     dedup_window=60, cooldown=3.0, llm_enabled=True,
     bible_translation="kjv", deepgram_api_key="",
     groq_api_key="", sarvam_api_key="",
-    discord_webhook_url="", confidence=0.75, manual_confirm=True, 
+    discord_webhook_url="", discord_log_webhook_url="", discord_notes_webhook_url="",
+    confidence=0.75, manual_confirm=True,
     confirm_callback=None, verify=True, panic_key="esc", smart_amen=True,
     live_points_prompt="", live_points_callback=None, live_points_get_current_cb=None
 ):
-    global DEEPGRAM_API_KEY, GROQ_API_KEY, SARVAM_API_KEY, DISCORD_WEBHOOK_URL
+    global DEEPGRAM_API_KEY, GROQ_API_KEY, SARVAM_API_KEY
+    global DISCORD_WEBHOOK_URL, DISCORD_LOG_WEBHOOK_URL, DISCORD_NOTES_WEBHOOK_URL
     global USE_SARVAM, DEEPGRAM_LANGUAGE, DEEPGRAM_MODEL, SARVAM_LANGUAGE
     global PRIMARY_PARSER, MIC_INDEX, RATE, CHUNK, REMOTE_URL
     global DEDUP_WINDOW, COOLDOWN, LLM_ENABLED, BIBLE_TRANSLATION, USE_XPATH, llm_client
@@ -265,82 +351,82 @@ def configure(
 
     # NOTE: Sermon buffer is intentionally NOT reset here so memory persists across stops/starts!
 
-    DEEPGRAM_API_KEY    = deepgram_api_key
-    GROQ_API_KEY        = groq_api_key
-    SARVAM_API_KEY      = sarvam_api_key
+    DEEPGRAM_API_KEY = deepgram_api_key
+    GROQ_API_KEY = groq_api_key
+    SARVAM_API_KEY = sarvam_api_key
 
-    # Init lightweight Groq client (no openai/pydantic-core — avoids macOS ARM64 SIGTRAP)
     global llm_client
     llm_client = _GroqClient(api_key=GROQ_API_KEY)
 
     DISCORD_WEBHOOK_URL = discord_webhook_url
-    llm_client = None  # initialized lazily inside configure()
+    DISCORD_LOG_WEBHOOK_URL = discord_log_webhook_url
+    DISCORD_NOTES_WEBHOOK_URL = discord_notes_webhook_url
 
-    USE_XPATH     = sys.platform == "darwin"
-    MIC_INDEX     = mic_index
-    RATE          = rate
-    CHUNK         = chunk
-    REMOTE_URL    = remote_url
-    DEDUP_WINDOW  = dedup_window
-    COOLDOWN      = cooldown
-    LLM_ENABLED   = llm_enabled
+    USE_XPATH = sys.platform == "darwin"
+    MIC_INDEX = mic_index
+    RATE = rate
+    CHUNK = chunk
+    REMOTE_URL = remote_url
+    DEDUP_WINDOW = dedup_window
+    COOLDOWN = cooldown
+    LLM_ENABLED = llm_enabled
     BIBLE_TRANSLATION = bible_translation
-    
-    CONFIDENCE_THRESHOLD   = confidence
+
+    CONFIDENCE_THRESHOLD = confidence
     REQUIRE_MANUAL_CONFIRM = manual_confirm
-    CONFIRM_CALLBACK       = confirm_callback
-    REQUIRE_VERIFY         = verify
-    PANIC_KEY              = panic_key
-    SMART_AMEN_ENABLED     = smart_amen
-    LIVE_POINTS_PROMPT     = live_points_prompt
-    LIVE_POINTS_CALLBACK       = live_points_callback
+    CONFIRM_CALLBACK = confirm_callback
+    REQUIRE_VERIFY = verify
+    PANIC_KEY = panic_key
+    SMART_AMEN_ENABLED = smart_amen
+    LIVE_POINTS_PROMPT = live_points_prompt
+    LIVE_POINTS_CALLBACK = live_points_callback
     LIVE_POINTS_GET_CURRENT_CB = live_points_get_current_cb
 
     global normalize_numbers_only
     if language == "en":
-        USE_SARVAM        = False
+        USE_SARVAM = False
         DEEPGRAM_LANGUAGE = "en"
-        DEEPGRAM_MODEL    = "nova-2"
-        PRIMARY_PARSER    = parse_eng
+        DEEPGRAM_MODEL = "nova-2"
+        PRIMARY_PARSER = parse_eng
         normalize_numbers_only = norm_eng
-        
+
     elif language == "hi":
-        USE_SARVAM        = False
+        USE_SARVAM = False
         DEEPGRAM_LANGUAGE = "hi"
-        DEEPGRAM_MODEL    = "nova-3"
-        PRIMARY_PARSER    = parse_hindi
+        DEEPGRAM_MODEL = "nova-3"
+        PRIMARY_PARSER = parse_hindi
         normalize_numbers_only = norm_hindi
-        
+
     elif language == "ml":
-        USE_SARVAM        = True
-        SARVAM_LANGUAGE   = "ml-IN"
-        PRIMARY_PARSER    = parse_ml
+        USE_SARVAM = True
+        SARVAM_LANGUAGE = "ml-IN"
+        PRIMARY_PARSER = parse_ml
         normalize_numbers_only = norm_ml
-        
+
     else:
-        USE_SARVAM        = False
+        USE_SARVAM = False
         DEEPGRAM_LANGUAGE = "multi"
-        DEEPGRAM_MODEL    = "nova-2"
-        PRIMARY_PARSER    = parse_eng
+        DEEPGRAM_MODEL = "nova-2"
+        PRIMARY_PARSER = parse_eng
         normalize_numbers_only = norm_eng
 
 # ── CONTEXT TRACKING ──
-current_book    = None
+current_book = None
 current_chapter = None
-current_verse   = None
+current_verse = None
 
 def get_context() -> dict:
     return {"book": current_book or "", "chapter": current_chapter or "", "verse": current_verse or ""}
 
 def set_context(book: str, chapter: str, verse: str):
     global current_book, current_chapter, current_verse
-    current_book    = book.strip()    or None
+    current_book = book.strip() or None
     current_chapter = chapter.strip() or None
-    current_verse   = verse.strip()   or None
+    current_verse = verse.strip() or None
     logger.info(f"Context manually set: {current_book} {current_chapter}:{current_verse}")
 
 # ── VERSE RANGE QUEUE ──
-verse_queue      = []
+verse_queue = []
 verse_queue_lock = threading.Lock()
 
 RANGE_RE = re.compile(r'(?P<start>\d+)\s*(?:through|thru|to|and|ending\s+at|-|–)\s*(?P<end>\d+)', re.IGNORECASE | re.VERBOSE)
@@ -375,13 +461,13 @@ def fetch_verse_text(ref: str) -> str | None:
     return None
 
 # ── ONWARDS MODE ──
-onwards_active     = False
-onwards_book       = None
-onwards_chapter    = None
-onwards_verse      = None
-onwards_timer      = None
+onwards_active = False
+onwards_book = None
+onwards_chapter = None
+onwards_verse = None
+onwards_timer = None
 onwards_target_ref = None
-onwards_trigger    = None
+onwards_trigger = None
 
 def _stop_onwards():
     global onwards_active, onwards_timer, onwards_target_ref, onwards_trigger
@@ -391,7 +477,7 @@ def _stop_onwards():
     onwards_timer = None
     onwards_target_ref = None
     onwards_trigger = None
-    logger.info("⏹️  ONWARDS mode stopped")
+    logger.info("⏹️ ONWARDS mode stopped")
 
 def _reset_onwards_timer():
     global onwards_timer
@@ -408,50 +494,50 @@ def _fetch_next_onwards():
     next_v = onwards_verse + 1
     ref = f"{onwards_book} {onwards_chapter}:{next_v}"
     text = fetch_verse_text(ref)
-    
+
     if text:
         words = re.findall(r'[a-z]+', text.lower())[:6]
         onwards_trigger = " ".join(words)
         onwards_target_ref = ref
-        logger.info(f"⏭️  ONWARDS LISTENING FOR: {ref} | Trigger: '{onwards_trigger}'")
+        logger.info(f"⏭️ ONWARDS LISTENING FOR: {ref} | Trigger: '{onwards_trigger}'")
     else:
-        logger.warning(f"⚠️  ONWARDS couldn't fetch {ref} - stopping onwards mode.")
+        logger.warning(f"⚠️ ONWARDS couldn't fetch {ref} - stopping onwards mode.")
         _stop_onwards()
 
 def _start_onwards(book, chapter, verse):
     global onwards_active, onwards_book, onwards_chapter, onwards_verse
     _stop_onwards()
-    onwards_active  = True
-    onwards_book    = book
+    onwards_active = True
+    onwards_book = book
     onwards_chapter = chapter
-    onwards_verse   = int(verse)
+    onwards_verse = int(verse)
     _reset_onwards_timer()
-    logger.info(f"▶️  ONWARDS mode started from {book} {chapter}:{verse}")
+    logger.info(f"▶️ ONWARDS mode started from {book} {chapter}:{verse}")
     threading.Thread(target=_fetch_next_onwards, daemon=True).start()
 
 def _check_onwards_advance(text, controller) -> bool:
     global onwards_verse
     if not onwards_active or not onwards_target_ref or not onwards_trigger:
         return False
-        
+
     transcript_words = set(re.findall(r'[a-z]+', text.lower()))
-    check_words      = onwards_trigger.split()[:4]
-    
+    check_words = onwards_trigger.split()[:4]
+
     if not check_words:
         return False
-        
-    matches   = sum(1 for w in check_words if w in transcript_words)
+
+    matches = sum(1 for w in check_words if w in transcript_words)
     threshold = min(2, len(check_words))
-    
+
     if matches >= threshold:
         logger.info(f"🎯 ONWARDS ADVANCE: {onwards_target_ref} (heard '{onwards_trigger[:30]}')")
         controller.send_verse(onwards_target_ref, bypass_cooldown=True)
-        
+
         onwards_verse += 1
         _reset_onwards_timer()
         threading.Thread(target=_fetch_next_onwards, daemon=True).start()
         return True
-        
+
     return False
 
 def queue_verse_range(book, chapter, start_verse, end_verse, controller):
@@ -477,10 +563,10 @@ def check_verse_queue(transcript, controller) -> bool:
         if not verse_queue:
             return False
         next_ref, trigger = verse_queue[0]
-        transcript_words  = set(re.findall(r'[a-z]+', transcript.lower()))
-        check_words       = trigger.split()[:4]
-        matches           = sum(1 for w in check_words if w in transcript_words)
-        threshold         = min(2, len(check_words))
+        transcript_words = set(re.findall(r'[a-z]+', transcript.lower()))
+        check_words = trigger.split()[:4]
+        matches = sum(1 for w in check_words if w in transcript_words)
+        threshold = min(2, len(check_words))
         if matches >= threshold:
             verse_queue.pop(0)
         else:
@@ -493,19 +579,19 @@ def check_verse_queue(transcript, controller) -> bool:
 def check_and_queue_range(text, base_ref, controller):
     if ":" not in base_ref:
         return
-        
+
     num_norm = normalize_numbers_only(text)
     range_m = RANGE_RE.search(num_norm)
     if not range_m:
         return
-        
+
     try:
         end_v = int(range_m.group("end"))
         parts = base_ref.split()
         book = " ".join(parts[:-1])
         chap_str, startv_str = parts[-1].split(":")
         start_v = int(startv_str)
-        
+
         if end_v > start_v and end_v <= start_v + 30:
             queue_verse_range(book, chap_str, start_v, end_v, controller)
     except Exception:
@@ -530,7 +616,7 @@ def send_to_discord(verse: str):
 # ── LLM FALLBACK ──
 def extract_verse_with_llm(text):
     global LLM_CALL_COUNT
-    
+
     context_hint = ""
     if current_book and current_chapter:
         context_hint = f"\nContext: The speaker is currently reading from {current_book} chapter {current_chapter}."
@@ -562,14 +648,14 @@ def extract_verse_with_llm(text):
 # ── VERSE CONTROLLER ──
 class VerseController:
     def __init__(self):
-        self.driver        = None
-        self.box           = None
-        self.btn           = None
-        self.last_sent     = None
-        self.last_time     = 0
-        self.history       = {}
+        self.driver = None
+        self.box = None
+        self.btn = None
+        self.last_sent = None
+        self.last_time = 0
+        self.history = {}
         self.pending_verse = None
-        self.match_count   = 0
+        self.match_count = 0
 
     def connect(self):
         try:
@@ -605,7 +691,7 @@ class VerseController:
 
             btn = None
             selectors = [
-                (By.ID,    "remote_bible_present"),
+                (By.ID, "remote_bible_present"),
                 (By.XPATH, "//button[contains(normalize-space(text()),'PRESENT')]"),
                 (By.XPATH, "//button[contains(normalize-space(text()),'Present')]"),
                 (By.XPATH, "//button[contains(@onclick,'present')]"),
@@ -633,16 +719,16 @@ class VerseController:
             logger.error(f"VerseView connection failed: {e}")
             return False
 
-        def close_presentation(self):
-            """ Clears the screen via the VerseView X button """
-            if not self.driver: return
-            try:
-                from selenium.webdriver.common.by import By  # noqa: lazy import
-                close_btn = self.driver.find_element(By.ID, "iconClose")
-                close_btn.click()
-                logger.info("🚫 Presentation cleared off the screen!")
-            except Exception as e:
-                logger.debug(f"Could not click close button (maybe already closed): {e}")
+    def close_presentation(self):
+        if not self.driver: return
+        try:
+            from selenium.webdriver.common.by import By  # noqa: lazy import
+            close_btn = self.driver.find_element(By.ID, "iconClose")
+            close_btn.click()
+            logger.info("🚫 Presentation cleared off the screen!")
+        except Exception as e:
+            logger.debug(f"Could not click close button (maybe already closed): {e}")
+
 
     def send_verse(self, ref, bypass_cooldown=False, confidence=1.0):
         global current_book, current_chapter, current_verse, verses_cited
@@ -673,10 +759,10 @@ class VerseController:
                 self.match_count = 1
                 logger.info(f"⏳ Verification pending for: {ref} (Heard once...)")
                 return False
-                
+
             if self.match_count < 2:
                 return False
-                
+
             self.pending_verse = None
             self.match_count = 0
 
@@ -698,8 +784,7 @@ class VerseController:
             self.driver.execute_script("arguments[0].value = arguments[1];", self.box, ref)
             self.driver.execute_script("arguments[0].click();", self.btn)
             logger.info(f"✅ PRESENTED: {ref}")
-            
-            # --- Store presented verse for the Sermon Notes! ---
+
             if ref not in verses_cited:
                 verses_cited.append(ref)
 
@@ -708,16 +793,16 @@ class VerseController:
             parts = ref.split()
             if len(parts) >= 2:
                 if ":" in parts[-1]:
-                    current_book                   = " ".join(parts[:-1])
+                    current_book = " ".join(parts[:-1])
                     current_chapter, current_verse = parts[-1].split(":")
                 else:
-                    current_book    = " ".join(parts[:-1])
+                    current_book = " ".join(parts[:-1])
                     current_chapter = parts[-1]
-                    current_verse   = None
+                    current_verse = None
 
             self.history[ref] = now
-            self.last_sent    = ref
-            self.last_time    = now
+            self.last_sent = ref
+            self.last_time = now
 
             if len(self.history) > 20:
                 oldest = min(self.history.items(), key=lambda x: x[1])
@@ -750,14 +835,13 @@ def detect_verse_hybrid(text, controller, confidence=1.0) -> bool:
     if not text or len(text.strip()) < 3:
         return False
 
-    # --- PHONETIC FIXES (Catch common speech-to-text errors before parsing) ---
+    # ── PHONETIC FIXES ──
     fixes = {
         r"\b(?:sam's|sams|sam)\b": "psalms",
         r"\bnayan\b": "nine"
     }
     for pattern, replacement in fixes.items():
         text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
-    # --------------------------------------------------------------------------
 
     def trigger_onwards_if_needed(ref_string, original_text):
         if any(kw in original_text.lower() for kw in ONWARDS_KEYWORDS):
@@ -770,14 +854,14 @@ def detect_verse_hybrid(text, controller, confidence=1.0) -> bool:
     try:
         if check_verse_queue(text, controller):
             return True
-            
+
         if _check_onwards_advance(text, controller):
             return True
-        
+
         num_norm = normalize_numbers_only(text)
         num_norm = re.sub(
-            r'\b(20|30|40|50|60|70|80|90)\s+([1-9])\b', 
-            lambda m: str(int(m.group(1)) + int(m.group(2))), 
+            r'\b(20|30|40|50|60|70|80|90)\s+([1-9])\b',
+            lambda m: str(int(m.group(1)) + int(m.group(2))),
             num_norm
         )
 
@@ -785,7 +869,7 @@ def detect_verse_hybrid(text, controller, confidence=1.0) -> bool:
         refs = PRIMARY_PARSER(text)
         if refs:
             verse = refs[0]
-            
+
             is_blocked = False
             if ":" not in verse:
                 chap_num = verse.split()[-1]
@@ -793,13 +877,11 @@ def detect_verse_hybrid(text, controller, confidence=1.0) -> bool:
                 if any(re.search(rf'\b{chap_num}\s+{b}\b', num_norm) for b in blockers):
                     logger.info(f"🚫 BLOCKED Layer 1 False Positive: {verse} (Time/People phrase)")
                     is_blocked = True
-            
+
             if not is_blocked:
                 logger.info(f"🔍 PARSER: {verse} ({int(confidence*100)}% Acc)")
                 controller.send_verse(verse, confidence=confidence)
-                
                 trigger_onwards_if_needed(verse, text)
-                
                 if ":" in verse:
                     check_and_queue_range(text, verse, controller)
                 return True
@@ -809,26 +891,31 @@ def detect_verse_hybrid(text, controller, confidence=1.0) -> bool:
         if m and current_book and current_chapter:
             candidate = m.group(1)
             text_lower = num_norm.lower()
-            
+
             is_valid = False
-            
+
             if len(text.split()) <= 2:
                 is_valid = True
             elif re.search(r'\b(?:verse|verses|v|vs)\s+' + candidate + r'\b', text_lower):
                 is_valid = True
+            # ── FIX: ordinal format "first verse" → "1 verse", "3rd verse" ──
+            elif re.search(r'\b' + re.escape(candidate) + r'\s*(?:st|nd|rd|th)?\s+verse\b', text_lower):
+                is_valid = True
+            # ── FIX: navigation phrases "go back to verse N", "going back to the verse" ──
+            elif re.search(r'\b(?:back|return|going)\b', text_lower) and re.search(r'\bverse\b', text_lower):
+                is_valid = True
             elif any(kw in text_lower for kw in ["വാക്യം", "വചനം", "വചന", "वचन", "पद"]):
                 is_valid = True
-                
+
             if is_valid:
                 ref = f"{current_book} {current_chapter}:{candidate}"
                 logger.info(f"🔍 CONTEXTUAL: {ref} ({int(confidence*100)}% Acc)")
                 controller.send_verse(ref, confidence=confidence)
-                
                 trigger_onwards_if_needed(ref, text)
                 check_and_queue_range(num_norm, ref, controller)
                 return True
 
-       # Layer 3 — Hindi contextual
+        # Layer 3 — Hindi contextual
         m_hi = re.search(r'([\u0966-\u096F]+)', text)
         if m_hi and current_book and current_chapter:
             ref = f"{current_book} {current_chapter}:{m_hi.group(1)}"
@@ -866,7 +953,7 @@ def detect_verse_hybrid(text, controller, confidence=1.0) -> bool:
             range_m = RANGE_RE.search(num_norm)
             if range_m:
                 start_v = int(range_m.group("start"))
-                end_v   = int(range_m.group("end"))
+                end_v = int(range_m.group("end"))
                 text_after = num_norm[range_m.end():].strip()
                 blockers = [
                     "bibles","dollars","days","weeks","months","years",
@@ -898,17 +985,15 @@ def detect_verse_hybrid(text, controller, confidence=1.0) -> bool:
         if not LLM_ENABLED:
             return False
 
-        text_lower  = text.lower()
-        has_book    = any(kw in text_lower for kw in BOOK_KEYWORDS)
-        has_number  = bool(re.search(r'\d+', text)) or any(w in text_lower for w in NUMBER_WORDS)
+        text_lower = text.lower()
+        has_book = any(kw in text_lower for kw in BOOK_KEYWORDS)
+        has_number = bool(re.search(r'\d+', text)) or any(w in text_lower for w in NUMBER_WORDS)
 
         if not has_book and not has_number:
             return False
 
-        # --- LLM ANTI-SPAM (Debouncer) ---
         if len(text.split()) < 4 and not has_number:
             return False
-        # ---------------------------------
 
         logger.info(f"📞 LLM: '{text[:80]}'")
 
@@ -926,17 +1011,49 @@ def detect_verse_hybrid(text, controller, confidence=1.0) -> bool:
         logger.error(f"Parse error: {e}")
         return False
 
+# ── SENTENCE SPLITTER (shared by both streaming engines) ──
+# Splits on English punctuation and Malayalam/Hindi sentence-enders so each
+# clause is processed individually without waiting for a full VAD endpoint.
+_CLAUSE_SPLIT_RE = re.compile(r'(?<=[.!?,।])\s+')
+
+def _process_transcript_blob(sentence: str, partial_context_ref: list, controller):
+    """
+    Splits a transcript blob into clauses and runs detect_verse_hybrid on each.
+    partial_context_ref is a one-element list used as a mutable reference so
+    the caller can read back the updated context window.
+    """
+    partial_context = partial_context_ref[0]
+    parts = _CLAUSE_SPLIT_RE.split(sentence.strip())
+    for part in parts:
+        part = part.strip()
+        if not part:
+            continue
+        if check_smart_amen(part, controller):
+            partial_context = ""
+            break
+        check_verse_queue(part, controller)
+        partial_context += " " + part
+        found = detect_verse_hybrid(partial_context.strip(), controller, confidence=1.0)
+        if found:
+            partial_context = ""
+            break
+    # Rolling window trim
+    if partial_context:
+        words = partial_context.split()
+        if len(words) > 30:
+            partial_context = " ".join(words[-15:])
+    partial_context_ref[0] = partial_context
+
 # ── DEEPGRAM STREAMING ──
 async def stream_audio(controller):
     global full_sermon_transcript
     import websockets
     import json
 
-    partial_context = ""
+    partial_context = [""]
 
     import pyaudio
-    import pyaudio
-    audio  = pyaudio.PyAudio()
+    audio = pyaudio.PyAudio()
     stream = None
 
     try:
@@ -965,7 +1082,7 @@ async def stream_audio(controller):
         f"&sample_rate={RATE}"
     )
     headers = {"Authorization": f"Token {DEEPGRAM_API_KEY}"}
-    loop    = asyncio.get_event_loop()
+    loop = asyncio.get_event_loop()
 
     def read_audio():
         return stream.read(CHUNK, exception_on_overflow=False)
@@ -987,12 +1104,11 @@ async def stream_audio(controller):
                     logger.error(f"Send error: {e}")
 
             async def recv_transcripts():
-                nonlocal partial_context
                 global full_sermon_transcript
                 try:
                     async for msg in ws:
                         try:
-                            data     = json.loads(msg)
+                            data = json.loads(msg)
                             msg_type = data.get("type", "Results")
                             if msg_type != "Results":
                                 continue
@@ -1002,10 +1118,10 @@ async def stream_audio(controller):
                             alts = channel.get("alternatives", [])
                             if not alts or not isinstance(alts[0], dict):
                                 continue
-                                
+
                             confidence = alts[0].get("confidence", 1.0)
                             sentence = alts[0].get("transcript", "")
-                            
+
                             if not sentence.strip():
                                 continue
 
@@ -1013,24 +1129,10 @@ async def stream_audio(controller):
 
                             if data.get("is_final"):
                                 logger.info(f"📝 {sentence}")
-                                
-                                # --- Add to Sermon Buffer ---
                                 full_sermon_transcript += " " + sentence.strip()
+                                # ── sentence-split so each clause is processed independently ──
+                                _process_transcript_blob(sentence, partial_context, controller)
 
-                                if check_smart_amen(sentence, controller):
-                                    partial_context = "" 
-                                    continue
-
-                                partial_context += " " + sentence.strip()
-                                
-                                # Send confidence down into the detector
-                                found = detect_verse_hybrid(partial_context, controller, confidence=confidence)
-                                if found:
-                                    partial_context = ""
-                                else:
-                                    words = partial_context.split()
-                                    if len(words) > 30:
-                                        partial_context = " ".join(words[-15:])
                         except Exception as e:
                             logger.error(f"Recv error: {e}")
                 except asyncio.CancelledError:
@@ -1038,7 +1140,7 @@ async def stream_audio(controller):
                 except Exception as e:
                     logger.warning(f"WebSocket closed: {e}")
 
-            sender   = asyncio.create_task(send_audio())
+            sender = asyncio.create_task(send_audio())
             receiver = asyncio.create_task(recv_transcripts())
             await stop_event.wait()
             sender.cancel()
@@ -1061,9 +1163,9 @@ async def stream_audio_sarvam(controller):
     global full_sermon_transcript
     import base64
     from sarvamai import AsyncSarvamAI
-
     import pyaudio
-    audio  = pyaudio.PyAudio()
+
+    audio = pyaudio.PyAudio()
     stream = None
 
     try:
@@ -1071,13 +1173,11 @@ async def stream_audio_sarvam(controller):
         logger.info(f"Using: [{MIC_INDEX}] {mic_info['name']}")
         stream = audio.open(
             format=pyaudio.paInt16, channels=1, rate=RATE,
-            input=True, input_device_index=MIC_INDEX,
-            frames_per_buffer=CHUNK
+            input=True, input_device_index=MIC_INDEX, frames_per_buffer=CHUNK
         )
         logger.info("Microphone opened")
     except Exception as e:
-        logger.error(f"Microphone error: {e}")
-        return
+        logger.error(f"Microphone error: {e}"); return
 
     def read_chunk_blocking():
         frames = []
@@ -1085,37 +1185,33 @@ async def stream_audio_sarvam(controller):
             frames.append(stream.read(CHUNK, exception_on_overflow=False))
         return b"".join(frames)
 
-    # ── AUTO-RECONNECT LOOP ──
-    # Sarvam's server closes the WebSocket after a few minutes.
-    # We keep reconnecting until the user clicks STOP (stop_event is set).
     client = AsyncSarvamAI(api_subscription_key=SARVAM_API_KEY)
-    loop   = asyncio.get_event_loop()
+    loop = asyncio.get_event_loop()
 
+    # ── AUTO-RECONNECT LOOP ── Sarvam times out after ~3-4 min; reconnect automatically
     try:
         while not stop_event.is_set():
             logger.info("Connecting to Sarvam AI...")
             try:
                 async with client.speech_to_text_streaming.connect(
-                    model="saaras:v3",
-                    mode="transcribe",
-                    language_code=SARVAM_LANGUAGE,
-                    sample_rate=RATE,
-                    high_vad_sensitivity=False,
-                    vad_signals=False,
+                    model="saaras:v3", mode="transcribe",
+                    language_code=SARVAM_LANGUAGE, sample_rate=RATE,
+                    # ── high_vad_sensitivity=True cuts utterances on shorter silences
+                    #    so blobs arrive more frequently instead of one 40s chunk ──
+                    high_vad_sensitivity=True, vad_signals=False,
                     input_audio_codec="pcm_s16le"
                 ) as ws:
                     logger.info(f"Sarvam AI connected — {SARVAM_LANGUAGE} saaras:v3")
+
+                    partial_context = [""]
 
                     async def send_audio():
                         try:
                             while not stop_event.is_set():
                                 pcm_data = await loop.run_in_executor(None, read_chunk_blocking)
-                                pcm_b64  = base64.b64encode(pcm_data).decode("utf-8")
-                                await ws.transcribe(audio=pcm_b64)
-                        except asyncio.CancelledError:
-                            pass
-                        except Exception as e:
-                            logger.error(f"Sarvam send error: {e}")
+                                await ws.transcribe(audio=base64.b64encode(pcm_data).decode("utf-8"))
+                        except asyncio.CancelledError: pass
+                        except Exception as e: logger.error(f"Sarvam send error: {e}")
 
                     async def recv_transcripts():
                         global full_sermon_transcript
@@ -1125,95 +1221,64 @@ async def stream_audio_sarvam(controller):
                                     if isinstance(message, dict):
                                         sentence = message.get("transcript", message.get("text", ""))
                                     else:
-                                        if hasattr(message, "data"):
-                                            sentence = getattr(message.data, "transcript", "")
-                                        else:
-                                            sentence = getattr(message, "transcript", getattr(message, "text", ""))
-
+                                        sentence = (getattr(message.data, "transcript", "") if hasattr(message, "data")
+                                                    else getattr(message, "transcript", getattr(message, "text", "")))
                                     sentence = str(sentence).strip()
-
                                     if sentence and sentence != "None":
                                         logger.info(f"📝 {sentence}")
-
-                                        # --- Add to Sermon Buffer ---
                                         full_sermon_transcript += " " + sentence.strip()
-
-                                        if check_smart_amen(sentence, controller):
-                                            continue
-
-                                        check_verse_queue(sentence, controller)
-                                        detect_verse_hybrid(sentence, controller, confidence=1.0)
-                                except Exception as e:
-                                    logger.error(f"Sarvam message parsing error: {e}")
-                        except asyncio.CancelledError:
-                            pass
+                                        # ── sentence-split: fire detection on each clause
+                                        #    so a 40s blob doesn't wait until the very end ──
+                                        _process_transcript_blob(sentence, partial_context, controller)
+                                except Exception as e: logger.error(f"Sarvam parse error: {e}")
+                        except asyncio.CancelledError: pass
                         except Exception as e:
                             if not stop_event.is_set():
                                 logger.warning(f"Sarvam session ended (will reconnect): {e}")
 
-                    sender   = asyncio.create_task(send_audio())
+                    sender = asyncio.create_task(send_audio())
                     receiver = asyncio.create_task(recv_transcripts())
-
-                    # Wait until either stop is requested OR receiver finishes (session dropped)
-                    done, pending = await asyncio.wait(
-                        [asyncio.ensure_future(stop_event.wait()),
-                         asyncio.ensure_future(receiver)],
+                    await asyncio.wait(
+                        [asyncio.ensure_future(stop_event.wait()), receiver],
                         return_when=asyncio.FIRST_COMPLETED
                     )
-                    sender.cancel()
-                    receiver.cancel()
+                    sender.cancel(); receiver.cancel()
                     await asyncio.gather(sender, receiver, return_exceptions=True)
-
-                    # If stop was requested, exit the reconnect loop
-                    if stop_event.is_set():
-                        break
-
-                    # Otherwise Sarvam dropped us — reconnect after a short pause
-                    logger.info("🔄 Sarvam session ended. Reconnecting in 2 seconds...")
+                    if stop_event.is_set(): break
+                    logger.info("🔄 Sarvam session ended. Reconnecting in 2s...")
                     await asyncio.sleep(2)
-
             except Exception as e:
-                if stop_event.is_set():
-                    break
-                logger.error(f"Sarvam connection error: {e} — retrying in 5 seconds...")
+                if stop_event.is_set(): break
+                logger.error(f"Sarvam error: {e} — retrying in 5s...")
                 await asyncio.sleep(5)
     finally:
-        if stream:
-            stream.stop_stream()
-            stream.close()
+        if stream: stream.stop_stream(); stream.close()
         audio.terminate()
-
 
 async def main():
     global stop_event, engine_loop, _controller
-    stop_event  = asyncio.Event()
+    stop_event = asyncio.Event()
     engine_loop = asyncio.get_event_loop()
 
-    # ── PANIC BUTTON BINDING ──
-    try:
-        if PANIC_KEY:
-            def on_press(key):
-                try:
-                    k = key.char
-                except AttributeError:
-                    k = key.name
-                
-                # If the key they pressed matches their saved setting, clear the screen!
-                if k == PANIC_KEY:
-                    trigger_panic()
-
-            # Start a background thread to listen for the panic key
+    # ── PANIC BUTTON BINDING (Windows only) ──
+    if IS_WINDOWS and PANIC_KEY:
+        try:
             from pynput import keyboard as pynput_kb
+            def on_press(key):
+                try: k = key.char
+                except AttributeError: k = key.name
+                if k == PANIC_KEY: trigger_panic()
             panic_listener = pynput_kb.Listener(on_press=on_press)
             panic_listener.daemon = True
             panic_listener.start()
-            
-            logger.info(f"🚨 Panic Button active on: '{PANIC_KEY}'")
-    except Exception as e:
-        logger.warning(f"⚠️ Could not bind panic key: {e}")
+            logger.info(f"🚨 Panic key active: '{PANIC_KEY}'")
+        except Exception as e:
+            logger.warning(f"⚠️ Could not bind panic key: {e}")
+    elif not IS_WINDOWS:
+        logger.info("🚨 macOS: use Shift+Escape in the app window")
 
     _controller = VerseController()
-    connected  = False
+    connected = False
 
     for attempt in range(1, 6):
         logger.info(f"Connection attempt {attempt}/5...")
@@ -1236,7 +1301,6 @@ async def main():
     logger.info("=" * 60)
 
     try:
-        # Start the Background AI Task for the Live Points App!
         points_task = asyncio.create_task(live_points_loop())
 
         if USE_SARVAM:
@@ -1244,13 +1308,14 @@ async def main():
         else:
             await stream_audio(_controller)
     finally:
-        points_task.cancel() # Stop the background LLM calls
+        points_task.cancel()
         if 'panic_listener' in locals():
             panic_listener.stop()
         _controller.cleanup()
         _controller = None
         logger.info(f"📊 LLM calls: {LLM_CALL_COUNT}")
         logger.info("Shutdown complete")
+        _discord_live_log.stop()
 
 if __name__ == "__main__":
     asyncio.run(main())
