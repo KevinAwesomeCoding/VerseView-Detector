@@ -637,7 +637,6 @@ class VerseController:
         """ Clears the screen via the VerseView X button """
         if not self.driver: return
         try:
-            from selenium.webdriver.common.by import By  # noqa: lazy import
             close_btn = self.driver.find_element(By.ID, "iconClose")
             close_btn.click()
             logger.info("🚫 Presentation cleared off the screen!")
@@ -1085,81 +1084,105 @@ async def stream_audio_sarvam(controller):
             frames.append(stream.read(CHUNK, exception_on_overflow=False))
         return b"".join(frames)
 
-    logger.info("Connecting to Sarvam AI...")
+    # ── AUTO-RECONNECT LOOP ──
+    # Sarvam's server closes the WebSocket after a few minutes.
+    # We keep reconnecting until the user clicks STOP (stop_event is set).
+    client = AsyncSarvamAI(api_subscription_key=SARVAM_API_KEY)
+    loop   = asyncio.get_event_loop()
+
     try:
-        client = AsyncSarvamAI(api_subscription_key=SARVAM_API_KEY)
-        loop   = asyncio.get_event_loop()
+        while not stop_event.is_set():
+            logger.info("Connecting to Sarvam AI...")
+            try:
+                async with client.speech_to_text_streaming.connect(
+                    model="saaras:v3",
+                    mode="transcribe",
+                    language_code=SARVAM_LANGUAGE,
+                    sample_rate=RATE,
+                    high_vad_sensitivity=False,
+                    vad_signals=False,
+                    input_audio_codec="pcm_s16le"
+                ) as ws:
+                    logger.info(f"Sarvam AI connected — {SARVAM_LANGUAGE} saaras:v3")
 
-        async with client.speech_to_text_streaming.connect(
-            model="saaras:v3", 
-            mode="transcribe",
-            language_code=SARVAM_LANGUAGE,
-            sample_rate=RATE,
-            high_vad_sensitivity=False,
-            vad_signals=False,
-            input_audio_codec="pcm_s16le" 
-        ) as ws:
-            logger.info(f"Sarvam AI connected — {SARVAM_LANGUAGE} saaras:v3")
-
-            async def send_audio():
-                try:
-                    while not stop_event.is_set():
-                        pcm_data = await loop.run_in_executor(None, read_chunk_blocking)
-                        pcm_b64 = base64.b64encode(pcm_data).decode("utf-8")
-                        await ws.transcribe(audio=pcm_b64)
-                except asyncio.CancelledError:
-                    pass
-                except Exception as e:
-                    logger.error(f"Sarvam send error: {e}")
-
-            async def recv_transcripts():
-                global full_sermon_transcript
-                try:
-                    async for message in ws:
+                    async def send_audio():
                         try:
-                            if isinstance(message, dict):
-                                sentence = message.get("transcript", message.get("text", ""))
-                            else:
-                                if hasattr(message, "data"):
-                                    sentence = getattr(message.data, "transcript", "")
-                                else:
-                                    sentence = getattr(message, "transcript", getattr(message, "text", ""))
-                                
-                            sentence = str(sentence).strip()
-                            
-                            if sentence and sentence != "None":
-                                logger.info(f"📝 {sentence}")
-                                
-                                # --- Add to Sermon Buffer ---
-                                full_sermon_transcript += " " + sentence.strip()
-
-                                if check_smart_amen(sentence, controller):
-                                    continue
-                                
-                                check_verse_queue(sentence, controller)
-                                detect_verse_hybrid(sentence, controller, confidence=1.0)
+                            while not stop_event.is_set():
+                                pcm_data = await loop.run_in_executor(None, read_chunk_blocking)
+                                pcm_b64  = base64.b64encode(pcm_data).decode("utf-8")
+                                await ws.transcribe(audio=pcm_b64)
+                        except asyncio.CancelledError:
+                            pass
                         except Exception as e:
-                            logger.error(f"Sarvam message parsing error: {e}")
-                except asyncio.CancelledError:
-                    pass
-                except Exception as e:
-                    logger.warning(f"Sarvam closed: {e}")
+                            logger.error(f"Sarvam send error: {e}")
 
-            sender   = asyncio.create_task(send_audio())
-            receiver = asyncio.create_task(recv_transcripts())
-            await stop_event.wait()
-            sender.cancel()
-            receiver.cancel()
-            await asyncio.gather(sender, receiver, return_exceptions=True)
-    except Exception as e:
-        logger.error(f"Sarvam connection error: {e}")
+                    async def recv_transcripts():
+                        global full_sermon_transcript
+                        try:
+                            async for message in ws:
+                                try:
+                                    if isinstance(message, dict):
+                                        sentence = message.get("transcript", message.get("text", ""))
+                                    else:
+                                        if hasattr(message, "data"):
+                                            sentence = getattr(message.data, "transcript", "")
+                                        else:
+                                            sentence = getattr(message, "transcript", getattr(message, "text", ""))
+
+                                    sentence = str(sentence).strip()
+
+                                    if sentence and sentence != "None":
+                                        logger.info(f"📝 {sentence}")
+
+                                        # --- Add to Sermon Buffer ---
+                                        full_sermon_transcript += " " + sentence.strip()
+
+                                        if check_smart_amen(sentence, controller):
+                                            continue
+
+                                        check_verse_queue(sentence, controller)
+                                        detect_verse_hybrid(sentence, controller, confidence=1.0)
+                                except Exception as e:
+                                    logger.error(f"Sarvam message parsing error: {e}")
+                        except asyncio.CancelledError:
+                            pass
+                        except Exception as e:
+                            if not stop_event.is_set():
+                                logger.warning(f"Sarvam session ended (will reconnect): {e}")
+
+                    sender   = asyncio.create_task(send_audio())
+                    receiver = asyncio.create_task(recv_transcripts())
+
+                    # Wait until either stop is requested OR receiver finishes (session dropped)
+                    done, pending = await asyncio.wait(
+                        [asyncio.ensure_future(stop_event.wait()),
+                         asyncio.ensure_future(receiver)],
+                        return_when=asyncio.FIRST_COMPLETED
+                    )
+                    sender.cancel()
+                    receiver.cancel()
+                    await asyncio.gather(sender, receiver, return_exceptions=True)
+
+                    # If stop was requested, exit the reconnect loop
+                    if stop_event.is_set():
+                        break
+
+                    # Otherwise Sarvam dropped us — reconnect after a short pause
+                    logger.info("🔄 Sarvam session ended. Reconnecting in 2 seconds...")
+                    await asyncio.sleep(2)
+
+            except Exception as e:
+                if stop_event.is_set():
+                    break
+                logger.error(f"Sarvam connection error: {e} — retrying in 5 seconds...")
+                await asyncio.sleep(5)
     finally:
         if stream:
             stream.stop_stream()
             stream.close()
         audio.terminate()
 
-# ── MAIN ──
+
 async def main():
     global stop_event, engine_loop, _controller
     stop_event  = asyncio.Event()
