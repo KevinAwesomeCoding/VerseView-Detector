@@ -636,14 +636,11 @@ class VerseController:
             return False
 
     def close_presentation(self):
-        """ Clears the screen via the VerseView X button """
-        if not self.driver: return
-        try:
-            close_btn = self.driver.find_element(By.ID, "iconClose")
-            close_btn.click()
-            logger.info("🚫 Presentation cleared off the screen!")
-        except Exception as e:
-            logger.debug(f"Could not click close button (maybe already closed): {e}")
+    if not self.driver: return
+    try:
+        from selenium.webdriver.common.by import By  # lazy — selenium only used when connected
+        close_btn = self.driver.find_element(By.ID, "iconClose")
+        
 
     def send_verse(self, ref, bypass_cooldown=False, confidence=1.0):
         global current_book, current_chapter, current_verse, verses_cited
