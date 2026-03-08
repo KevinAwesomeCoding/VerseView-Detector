@@ -50,6 +50,8 @@ class VerseViewApp(ctk.CTk):
         self._load_into_ui()
         # Shift+Escape panic binding — no pynput, no permissions needed
         self.bind("<Shift-Escape>", lambda e: self._panic_shortcut())
+        # Trigger auto-start / smart schedule after window is ready
+        self.after(500, self._check_auto_start)
 
     # ─────────────────────────────────────────────────
     # UI BUILD
@@ -282,6 +284,21 @@ class VerseViewApp(ctk.CTk):
         ctk.CTkCheckBox(right, text="Auto-Save Sermon Notes on App Close", variable=self.auto_save_var).grid(row=row, column=0, sticky="w", padx=14, pady=(10, 4))
         row += 1
 
+        # ── AUTO-START TOGGLE ──
+        self.auto_start_var = ctk.BooleanVar(value=False)
+        ctk.CTkCheckBox(right, text="Auto-Start on Launch (starts engine automatically)", variable=self.auto_start_var).grid(row=row, column=0, sticky="w", padx=14, pady=(10, 4))
+        row += 1
+
+        # ── SMART SCHEDULE TOGGLE ──
+        self.smart_schedule_var = ctk.BooleanVar(value=False)
+        ctk.CTkCheckBox(right, text="Smart Schedule (auto-set language by day & time)", variable=self.smart_schedule_var).grid(row=row, column=0, sticky="w", padx=14, pady=(4, 4))
+        row += 1
+        # Schedule info label
+        ctk.CTkLabel(right, text="  Sat→Malayalam  |  Sun 9:10AM→English  |  10:40AM→English  |  4:40PM→Hindi",
+                     text_color=["#666666","#888888"], font=ctk.CTkFont(size=11)
+        ).grid(row=row, column=0, sticky="w", padx=14, pady=(0, 4))
+        row += 1
+
         # ── Advanced toggle ──
         self._adv_open = False
         self.btn_adv = ctk.CTkButton(
@@ -458,6 +475,8 @@ class VerseViewApp(ctk.CTk):
         self.verify_var.set(s.get("verify", True))
         self.smart_amen_var.set(s.get("smart_amen", True))
         self.auto_save_var.set(s.get("auto_save_notes", True))
+        self.auto_start_var.set(s.get("auto_start", False))
+        self.smart_schedule_var.set(s.get("smart_schedule", False))
         
         saved_panic = s.get("panic_key", "esc")
         self.panic_var.set(saved_panic)
@@ -509,6 +528,8 @@ class VerseViewApp(ctk.CTk):
             "verify":              self.verify_var.get(),
             "smart_amen":          self.smart_amen_var.get(),
             "auto_save_notes":     self.auto_save_var.get(),
+            "auto_start":          self.auto_start_var.get(),
+            "smart_schedule":      self.smart_schedule_var.get(),
             "panic_key":           self.panic_var.get(),
             "live_points_prompt":  self.live_app.get_prompt(),
             "rate":                self._safe_int(self.rate_entry,       16000),
@@ -663,6 +684,46 @@ class VerseViewApp(ctk.CTk):
         self.after(0, _ask)
         ev.wait() 
         return result[0]
+
+
+    # ──────────────────────────────────────────────────────────
+    # SMART SCHEDULE + AUTO-START
+    # ──────────────────────────────────────────────────────────
+
+    def _get_scheduled_language(self):
+        """Return the language string that matches the current day/time, or None."""
+        now = datetime.datetime.now()
+        wd  = now.weekday()  # 0=Mon … 5=Sat, 6=Sun
+        t   = now.time()
+
+        if wd == 5:  # Saturday → Malayalam
+            return "Malayalam (Sarvam AI)"
+
+        if wd == 6:  # Sunday — pick the LATEST threshold that has passed
+            if t >= datetime.time(16, 40):   # 4:40 PM leniency → 5 PM Hindi service
+                return "Hindi (Nova-3)"
+            if t >= datetime.time(10, 40):   # 10:40 AM leniency → 11 AM English service
+                return "English (Nova-2)"
+            if t >= datetime.time(9, 10):    # 9:10 AM leniency → 9:30 AM English service
+                return "English (Nova-2)"
+
+        return None  # weekday or too early — no auto-language
+
+    def _check_auto_start(self):
+        """Called once after the window opens. Applies smart schedule then auto-starts if enabled."""
+        # Apply smart schedule first (sets language before starting)
+        if self.smart_schedule_var.get():
+            lang = self._get_scheduled_language()
+            if lang:
+                self.lang_var.set(lang)
+                self._append_log(f"📅 Smart Schedule: language set to {lang}")
+            else:
+                self._append_log("📅 Smart Schedule: no service detected for current day/time")
+
+        # Auto-start
+        if self.auto_start_var.get():
+            self._append_log("⚡ Auto-Start: starting engine in 3 seconds...")
+            self.after(3000, self._start)
 
     def _start(self):
         try:
