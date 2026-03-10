@@ -59,18 +59,19 @@ NUMBER_MAP_ENG = {
     "fifty": 50, "sixty": 60, "seventy": 70, "eighty": 80, "ninety": 90,
 }
 
+# verse|verses|versus NOT stripped — required for chapter:verse (e.g. Psalm 1 verse 50 vs Psalm 150)
 NOISE_ENG = (r"\b(let s|let us|read|the|a|an|chapter|chap|ch"
-             r"|verse|verses|versus|vs|forward|attention|to|now|our"
+             r"|vs|forward|attention|to|now|our"
              r"|turn|open|look|see|go|pay|pages|bible|book|books"
              r"|words|word|says|said|saying|it|in|and|at|from"
              r"|today|we|will|are|is|was|back|going|return|again|of)\b")
 
+# Verse number only when preceded by ":" or "verse"/"verses"/"versus"
 REF_RE_ENG = re.compile(
     r"(?P<book>(?:[123] )?[a-z]+(?:[a-z ]+)?)"
     r"\s+"
     r"(?P<chap>\d{1,3})"
-    r"(?:[:\s]+"
-    r"(?P<verses>\d{1,3}))?",
+    r"(?:(?:\s*:\s*|\s+(?:verse|verses|versus)\s+)(?P<verses>\d{1,3}))?",
     re.IGNORECASE
 )
 
@@ -125,6 +126,14 @@ NUMBER_MAP_HI = {
     "चालीस": "40", "पचास": "50", "साठ": "60", "सत्तर": "70", "अस्सी": "80", "नब्बे": "90", "सौ": "100"
 }
 
+# Hindi "one fifty" → 150 (same idea as English): ones 1–9 + tens 20–90 → one number
+HI_ONES_TENS = (
+    (("एक", 1), ("दो", 2), ("तीन", 3), ("चार", 4), ("पाँच", 5), ("पांच", 5),
+     ("छः", 6), ("छह", 6), ("सात", 7), ("आठ", 8), ("नौ", 9)),
+    (("बीस", 20), ("तीस", 30), ("चालीस", 40), ("पचास", 50), ("साठ", 60),
+     ("सत्तर", 70), ("अस्सी", 80), ("नब्बे", 90)),
+)
+
 BOOK_FILLERS_HI = ["अध्याय", "वचन", "पद"]
 
 # ------------------- English Math & Resolver -------------------
@@ -144,6 +153,22 @@ def convert_word_numbers_eng(text):
                 result.append(str(base))
                 i += 2
             continue
+        # "one fifty" → 150 (same as English parser)
+        if i + 1 < len(words) and w in NUMBER_MAP_ENG and words[i + 1] in NUMBER_MAP_ENG:
+            fv = int(NUMBER_MAP_ENG[w])
+            sv = int(NUMBER_MAP_ENG[words[i + 1]])
+            if 1 <= fv <= 9 and sv >= 20 and sv % 10 == 0:
+                combined = fv * 100 + sv
+                if i + 2 < len(words) and words[i + 2] in NUMBER_MAP_ENG:
+                    third = int(NUMBER_MAP_ENG[words[i + 2]])
+                    if 1 <= third <= 9:
+                        combined += third
+                        i += 3
+                        result.append(str(combined))
+                        continue
+                i += 2
+                result.append(str(combined))
+                continue
         if i + 1 < len(words) and w in NUMBER_MAP_ENG and words[i + 1] in NUMBER_MAP_ENG:
             fv = int(NUMBER_MAP_ENG[w])
             sv = int(NUMBER_MAP_ENG[words[i + 1]])
@@ -170,6 +195,11 @@ def normalize_digits_hi(s: str) -> str:
     return s.translate(HI_DIGITS)
 
 def normalize_number_words_hi(s: str) -> str:
+    # First: "एक पचास" → 150, "दो साठ" → 260, etc. (same as English "one fifty" → 150)
+    for (one_word, one_val), (ten_word, ten_val) in (
+        (o, t) for o in HI_ONES_TENS[0] for t in HI_ONES_TENS[1]
+    ):
+        s = s.replace(one_word + " " + ten_word, str(one_val * 100 + ten_val))
     for k in sorted(NUMBER_MAP_HI.keys(), key=len, reverse=True):
         s = s.replace(k, NUMBER_MAP_HI[k])
     s = re.sub(
@@ -213,23 +243,26 @@ def parse_references(text: str):
     if results:
         return results
 
-    # 2. Hindi Parser Pipeline
+    # 2. Hindi Parser Pipeline (verse only when : or वचन/पद before verse number, same as English)
     for hi_book in sorted(BOOKS_HI.keys(), key=len, reverse=True):
         if hi_book in t:
             eng_book = BOOKS_HI[hi_book]
             idx = t.index(hi_book)
-            after = t[idx + len(hi_book):].strip()
+            after_raw = t[idx + len(hi_book):].strip()
+            after = after_raw
             for filler in BOOK_FILLERS_HI:
                 after = after.replace(filler, "").strip()
             after = re.sub(NOISE_ENG, " ", after).strip()
+            # chapter:verse only when explicit : - । or वचन/पद between numbers
             m = re.search(r'(\d{1,3})\s*[:\-।]\s*(\d{1,3})', after)
             if m:
                 results.append(f"{eng_book} {m.group(1)}:{m.group(2)}")
                 continue
-            m2 = re.search(r'(\d{1,3})\D+(\d{1,3})', after)
+            m2 = re.search(r'(\d{1,3})\s*(?:वचन|पद)\s*(\d{1,3})', after_raw)
             if m2:
                 results.append(f"{eng_book} {m2.group(1)}:{m2.group(2)}")
                 continue
+            # single number → chapter only (e.g. भजन 150)
             m3 = re.search(r'(\d{1,3})', after)
             if m3:
                 results.append(f"{eng_book} {m3.group(1)}")

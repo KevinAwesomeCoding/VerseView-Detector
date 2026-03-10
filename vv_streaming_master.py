@@ -11,7 +11,7 @@ import requests
 import certifi
 import threading
 
-from parse_reference_eng   import parse_references as parse_eng,   normalize_numbers_only as norm_eng
+from parse_reference_eng   import parse_references as parse_eng,   normalize_numbers_only as norm_eng, resolve_book as resolve_book_eng
 from parse_reference_hindi import parse_references as parse_hindi, normalize_numbers_only as norm_hindi
 from parse_reference_ml    import parse_references as parse_ml,    normalize_numbers_only as norm_ml
 from bible_fetcher         import fetch_verse as multi_fetch
@@ -276,6 +276,9 @@ DEDUP_WINDOW          = 60
 COOLDOWN              = 3.0
 LLM_ENABLED           = True
 LLM_CALL_COUNT        = 0
+_llm_in_flight = False
+_llm_last_key = None
+_llm_last_time = 0.0
 BIBLE_TRANSLATION     = "web"
 DEEPGRAM_API_KEY      = ""
 GROQ_API_KEY          = ""
@@ -291,6 +294,9 @@ CONFIDENCE_THRESHOLD   = 0.75
 REQUIRE_MANUAL_CONFIRM = True
 CONFIRM_CALLBACK       = None
 REQUIRE_VERIFY         = True
+_vtc_pending_ref     = None
+_vtc_trigger_words   = [] 
+_vtc_timer          = None
 PANIC_KEY              = "esc"
 
 LIVE_POINTS_PROMPT         = ""
@@ -305,6 +311,8 @@ SMART_AMEN_KEYWORDS = [
     "bow our heads",
     "thank you jesus",
 ]
+
+VERSE_INTERRUPT_ENABLED = False
 
 # ── LLM CLIENTS (initialised in configure()) ─────────────────────────────────
 groq_client     = None   # verse extraction only            (Groq llama-3.1-8b-instant)
@@ -482,7 +490,8 @@ def configure(
     mistral_api_key="", sarvam_api_key="",
     discord_webhook_url="", discord_log_webhook_url="", discord_notes_webhook_url="",
     confidence=0.75, manual_confirm=True,
-    confirm_callback=None, verify=True, panic_key="esc", smart_amen=True,
+    confirm_callback=None, verify=True, verse_interrupt=False,
+    panic_key="esc", smart_amen=True,
     live_points_prompt="", live_points_callback=None, live_points_get_current_cb=None,
 ):
     global DEEPGRAM_API_KEY, GROQ_API_KEY, GEMINI_API_KEY, CEREBRAS_API_KEY, MISTRAL_API_KEY, SARVAM_API_KEY
@@ -495,8 +504,11 @@ def configure(
     global full_sermon_transcript, verses_cited
     global LIVE_POINTS_PROMPT, LIVE_POINTS_CALLBACK, LIVE_POINTS_GET_CURRENT_CB
     global normalize_numbers_only
+    _cancel_vtc()
 
-    # NOTE: Sermon buffer intentionally NOT reset here — memory persists across stops/starts.
+    # NOTE: Sermon buffer is intentionally NOT reset here so memory persists across stops/starts!
+    global _llm_in_flight
+    _llm_in_flight = False
 
     DEEPGRAM_API_KEY = deepgram_api_key
     GROQ_API_KEY     = groq_api_key
@@ -548,6 +560,7 @@ def configure(
     REQUIRE_VERIFY         = verify
     PANIC_KEY              = panic_key
     SMART_AMEN_ENABLED     = smart_amen
+    VERSE_INTERRUPT_ENABLED = verse_interrupt
     LIVE_POINTS_PROMPT         = live_points_prompt
     LIVE_POINTS_CALLBACK       = live_points_callback
     LIVE_POINTS_GET_CURRENT_CB = live_points_get_current_cb
@@ -635,6 +648,19 @@ def fetch_verse_text(ref: str) -> str | None:
     return None
 
 
+# ── VERSE INTERRUPT (wait for speaker to say verse, then display; 60s timeout; cancel on new ref) ─
+def deliver_verse(ref: str, controller, bypass_cooldown=False, confidence=1.0):
+    """
+    Deliver a detected verse: if Verse Interrupt is on, wait for the speaker to say the verse
+    (fetch text via Bible API, listen for trigger words, 60s timeout; new ref cancels current).
+    Otherwise send directly to controller.
+    """
+    if VERSE_INTERRUPT_ENABLED:
+        _start_vtc(ref, controller)
+    else:
+        controller.send_verse(ref, bypass_cooldown=bypass_cooldown, confidence=confidence)
+
+
 # ── ONWARDS MODE ──────────────────────────────────────────────────────────────
 onwards_active     = False
 onwards_book       = None
@@ -643,6 +669,7 @@ onwards_verse      = None
 onwards_timer      = None
 onwards_target_ref = None
 onwards_trigger    = None
+onwards_target_text = None
 
 
 def _stop_onwards():
@@ -655,6 +682,82 @@ def _stop_onwards():
     onwards_trigger    = None
     logger.info("⏹️ ONWARDS mode stopped")
 
+def _cancel_vtc():
+    global _vtc_pending_ref, _vtc_trigger_words, _vtc_timer
+    if _vtc_timer:
+        _vtc_timer.cancel()
+    _vtc_pending_ref   = None
+    _vtc_trigger_words = []
+    _vtc_timer         = None
+
+def _start_vtc(ref, controller):
+    """Fetch verse text via Bible API, then use LLM semantic check to confirm it was spoken. New ref cancels previous."""
+    global _vtc_pending_ref, _vtc_trigger_words, _vtc_timer
+    
+    if _vtc_pending_ref == ref:
+        return # Ignore duplicate detections of the same verse we are already waiting for
+        
+    _cancel_vtc()  # void any previous pending ref (cancel-on-new-ref)
+
+    text = fetch_verse_text(ref)
+    if not text:
+        logger.warning(f"⚠️ VTC: Could not fetch text for {ref}. Sending instantly.")
+        controller.send_verse(ref, bypass_cooldown=True)
+        return
+
+    _vtc_pending_ref   = ref
+    _vtc_trigger_words = [text]  # store full verse text in trigger_words[0] for LLM check
+    logger.info(f"🎯 VTC: Waiting to hear {ref} (semantic match)")
+
+    # 60s expiry
+    _vtc_timer = threading.Timer(60.0, lambda: _vtc_expire(ref))
+    _vtc_timer.daemon = True
+    _vtc_timer.start()
+
+def _vtc_expire(ref):
+    global _vtc_pending_ref
+    if _vtc_pending_ref == ref:
+        logger.info(f"⏰ VTC expired: {ref} was never spoken — cleared")
+        _cancel_vtc()
+
+_vtc_semantic_in_flight = False
+_vtc_last_excerpt = ""
+
+def check_vtc(text, controller) -> bool:
+    """Call this on every transcript blob. Returns True if VTC matched and sent."""
+    global _vtc_pending_ref, _vtc_semantic_in_flight, _vtc_last_excerpt
+    if not _vtc_pending_ref or not _vtc_trigger_words:
+        return False
+    verse_text = _vtc_trigger_words[0]
+    excerpt    = _excerpt_since_last_advance(40)
+    
+    if cerebras_client and excerpt:
+        if _vtc_semantic_in_flight:
+            return False  # already checking; result will come
+        if excerpt == _vtc_last_excerpt:
+            return False  # transcript hasn't changed since last check
+            
+        current_ref = _vtc_pending_ref
+        _vtc_semantic_in_flight = True
+        _vtc_last_excerpt = excerpt
+        
+        def task():
+            global _vtc_semantic_in_flight, _vtc_last_excerpt
+            try:
+                if _llm_semantic_match(verse_text, excerpt, label=current_ref):
+                    if _vtc_pending_ref == current_ref:
+                        logger.info(f"✅ VTC confirmed: {current_ref} (Cerebras)")
+                        _cancel_vtc()
+                        _mark_advance_offset()
+                        controller.send_verse(current_ref, bypass_cooldown=True)
+            finally:
+                _vtc_semantic_in_flight = False
+                _vtc_last_excerpt = ""  # clear so the next new excerpt triggers a fresh check
+                
+        threading.Thread(target=task, daemon=True).start()
+        return False
+    return False
+
 
 def _reset_onwards_timer():
     global onwards_timer
@@ -666,17 +769,18 @@ def _reset_onwards_timer():
 
 
 def _fetch_next_onwards():
-    global onwards_target_ref, onwards_trigger
+    global onwards_target_ref, onwards_trigger, onwards_target_text
     if not onwards_active:
         return
     next_v = onwards_verse + 1
     ref    = f"{onwards_book} {onwards_chapter}:{next_v}"
     text   = fetch_verse_text(ref)
     if text:
+        onwards_target_text = text
         words           = re.findall(r'[a-z]+', text.lower())[:6]
         onwards_trigger    = " ".join(words)
         onwards_target_ref = ref
-        logger.info(f"⏭️ ONWARDS LISTENING FOR: {ref} | Trigger: '{onwards_trigger}'")
+        logger.info(f"⏭️ ONWARDS READY: {ref}")
     else:
         logger.warning(f"⚠️ ONWARDS couldn't fetch {ref} — stopping.")
         _stop_onwards()
@@ -694,23 +798,60 @@ def _start_onwards(book, chapter, verse):
     threading.Thread(target=_fetch_next_onwards, daemon=True).start()
 
 
+_onwards_semantic_in_flight = False
+_onwards_last_excerpt = ""
+
 def _check_onwards_advance(text, controller) -> bool:
-    global onwards_verse
-    if not onwards_active or not onwards_target_ref or not onwards_trigger:
+    global onwards_verse, _onwards_semantic_in_flight, _onwards_last_excerpt
+    if not onwards_active or not onwards_target_ref or not onwards_target_text:
         return False
-    transcript_words = set(re.findall(r'[a-z]+', text.lower()))
-    check_words      = onwards_trigger.split()[:4]
-    if not check_words:
+        
+    excerpt = _excerpt_since_last_advance(40)
+    
+    if excerpt and cerebras_client:
+        if _onwards_semantic_in_flight:
+            return False  # already checking; result will come
+        if excerpt == _onwards_last_excerpt:
+            return False  # transcript unchanged since last check
+            
+        current_ref = onwards_target_ref
+        current_text = onwards_target_text
+        _onwards_semantic_in_flight = True
+        _onwards_last_excerpt = excerpt
+        
+        def task():
+            global onwards_verse, _onwards_semantic_in_flight, _onwards_last_excerpt
+            try:
+                if _llm_semantic_match(current_text, excerpt, label=f"ONWARDS {current_ref}"):
+                    if onwards_target_ref == current_ref:
+                        logger.info(f"🎯 ONWARDS ADVANCE: {current_ref} (Cerebras)")
+                        _mark_advance_offset()
+                        controller.send_verse(current_ref, bypass_cooldown=True)
+                        onwards_verse += 1
+                        _reset_onwards_timer()
+                        threading.Thread(target=_fetch_next_onwards, daemon=True).start()
+            finally:
+                _onwards_semantic_in_flight = False
+                _onwards_last_excerpt = ""  # clear so next new excerpt triggers a fresh check
+                
+        threading.Thread(target=task, daemon=True).start()
         return False
-    matches   = sum(1 for w in check_words if w in transcript_words)
-    threshold = min(2, len(check_words))
-    if matches >= threshold:
-        logger.info(f"🎯 ONWARDS ADVANCE: {onwards_target_ref} (heard '{onwards_trigger[:30]}')")
-        controller.send_verse(onwards_target_ref, bypass_cooldown=True)
-        onwards_verse += 1
-        _reset_onwards_timer()
-        threading.Thread(target=_fetch_next_onwards, daemon=True).start()
-        return True
+
+    # Fallback: legacy keyword trigger when no Cerebras client
+    if not cerebras_client and onwards_trigger:
+        transcript_words = set(re.findall(r'[a-z]+', text.lower()))
+        check_words      = onwards_trigger.split()[:4]
+        if not check_words:
+            return False
+        matches   = sum(1 for w in check_words if w in transcript_words)
+        threshold = min(2, len(check_words))
+        if matches >= threshold:
+            logger.info(f"🎯 ONWARDS ADVANCE: {onwards_target_ref} (heard '{onwards_trigger[:30]}')")
+            controller.send_verse(onwards_target_ref, bypass_cooldown=True)
+            onwards_verse += 1
+            _reset_onwards_timer()
+            threading.Thread(target=_fetch_next_onwards, daemon=True).start()
+            return True
     return False
 
 
@@ -723,32 +864,58 @@ def queue_verse_range(book, chapter, start_verse, end_verse, controller):
             ref  = f"{book} {chapter}:{v}"
             text = fetch_verse_text(ref)
             if text:
-                words   = re.findall(r'[a-z]+', text.lower())[:6]
-                trigger = " ".join(words)
                 with verse_queue_lock:
-                    verse_queue.append((ref, trigger))
-                logger.info(f"📚 Queued: {ref} | Trigger: '{trigger}'")
+                    verse_queue.append((ref, text))
+                logger.info(f"📚 Queued: {ref}")
 
     threading.Thread(target=fetch_all, daemon=True).start()
     logger.info(f"📖 Range queued: {book} {chapter}:{start_verse} → {end_verse}")
 
 
+_queue_semantic_in_flight = False
+_queue_last_excerpt = ""
+
 def check_verse_queue(transcript, controller) -> bool:
+    global _queue_semantic_in_flight, _queue_last_excerpt
     with verse_queue_lock:
         if not verse_queue:
             return False
-        next_ref, trigger = verse_queue[0]
-        transcript_words  = set(re.findall(r'[a-z]+', transcript.lower()))
-        check_words       = trigger.split()[:4]
-        matches           = sum(1 for w in check_words if w in transcript_words)
-        threshold         = min(2, len(check_words))
-        if matches >= threshold:
-            verse_queue.pop(0)
-        else:
-            return False
-    logger.info(f"🎯 AUTO-ADVANCE: {next_ref} (heard '{trigger[:30]}')")
-    controller.send_verse(next_ref, bypass_cooldown=True)
-    return True
+        next_ref, verse_text = verse_queue[0]
+        
+    excerpt = _excerpt_since_last_advance(40)
+    if not excerpt:
+        return False
+        
+    if cerebras_client:
+        if _queue_semantic_in_flight:
+            return False  # already checking; result will come
+        if excerpt == _queue_last_excerpt:
+            return False  # transcript unchanged since last check
+            
+        current_ref = next_ref
+        _queue_semantic_in_flight = True
+        _queue_last_excerpt = excerpt
+        
+        def task():
+            global _queue_semantic_in_flight, _queue_last_excerpt
+            try:
+                if _llm_semantic_match(verse_text, excerpt, label=f"QUEUE {current_ref}"):
+                    with verse_queue_lock:
+                        if verse_queue and verse_queue[0][0] == current_ref:
+                            verse_queue.pop(0)
+                        else:
+                            return  # Queue advanced while we were checking
+                    logger.info(f"🎯 AUTO-ADVANCE: {current_ref} (Cerebras)")
+                    _mark_advance_offset()
+                    controller.send_verse(current_ref, bypass_cooldown=True)
+            finally:
+                _queue_semantic_in_flight = False
+                _queue_last_excerpt = ""  # clear so next new excerpt triggers a fresh check
+                
+        threading.Thread(target=task, daemon=True).start()
+        return False
+    # Fallback: no Cerebras client → no auto-advance for this verse
+    return False
 
 
 def check_and_queue_range(text, base_ref, controller):
@@ -824,6 +991,76 @@ def extract_verse_with_llm(text):
     except Exception as e:
         logger.error(f"❌ LLM error: {e}")
         return None
+
+
+# Tracks where full_sermon_transcript ended when the last verse was auto-advanced.
+# The semantic check only sees words spoken AFTER this point, so old verse text
+# that is still in the rolling window cannot immediately trigger the next verse.
+_advance_transcript_offset: int = 0
+
+
+def _mark_advance_offset():
+    """Call this every time an auto-advance fires. Pins the current transcript length
+    so the next Cerebras check only sees NEW words spoken after this moment."""
+    global _advance_transcript_offset
+    _advance_transcript_offset = len(full_sermon_transcript)
+
+
+def _recent_transcript_excerpt(max_words: int = 30) -> str:
+    """Return the last N words of the running transcript (full window — used by Layer 9 LLM)."""
+    words = full_sermon_transcript.strip().split()
+    if not words:
+        return ""
+    if len(words) <= max_words:
+        return " ".join(words)
+    return " ".join(words[-max_words:])
+
+
+def _excerpt_since_last_advance(max_words: int = 40) -> str:
+    """Return only the words spoken SINCE the last auto-advance.
+    This prevents the previous verse's text from immediately triggering the next verse."""
+    tail = full_sermon_transcript[_advance_transcript_offset:].strip()
+    if not tail:
+        return ""
+    words = tail.split()
+    if len(words) <= max_words:
+        return " ".join(words)
+    return " ".join(words[-max_words:])
+
+
+def _llm_semantic_match(verse_text: str, transcript_excerpt: str, label: str = "") -> bool:
+    """Use Cerebras llama3.1-8b to decide if transcript_excerpt corresponds to verse_text (YES/NO)."""
+    if not cerebras_client:
+        return False
+    verse_text = (verse_text or "").strip()
+    transcript_excerpt = (transcript_excerpt or "").strip()
+    if not verse_text or not transcript_excerpt:
+        return False
+    logger.info(f"🧠 Cerebras{(' [' + label + ']') if label else ''}: checking '{transcript_excerpt[-60:]}' vs verse")
+    prompt = (
+        "You are helping a live Bible reading auto-advance system.\n"
+        "A specific Bible verse is shown below. Below that are the ONLY words spoken aloud "
+        "since this verse was last displayed on screen — no earlier transcript is included.\n\n"
+        f"Bible verse to detect:\n{verse_text}\n\n"
+        f"Words spoken since the last verse was shown:\n{transcript_excerpt}\n\n"
+        "Question: Has the speaker substantially read or quoted this verse in the words above? "
+        "Only say YES if the key content of this verse is clearly present in what was just spoken "
+        "(paraphrasing or a different translation is fine, but the verse idea must actually appear "
+        "— do NOT say YES just because a single common word like 'love' or 'God' is there).\n"
+        "Answer with YES or NO only."
+    )
+    try:
+        response = cerebras_client.chat.completions.create(
+            model="llama3.1-8b",
+            messages=[{"role": "user", "content": prompt}],
+        )
+        answer = response.choices[0].message.content.strip().upper()
+        result = answer.startswith("YES")
+        logger.info(f"🧠 Cerebras{(' [' + label + ']') if label else ''}: → {'YES ✅' if result else 'NO ❌'}")
+        return result
+    except Exception as e:
+        logger.error(f"❌ Cerebras semantic match error: {e}")
+        return False
 
 
 # ── VERSE CONTROLLER ──────────────────────────────────────────────────────────
@@ -1015,6 +1252,36 @@ class VerseController:
 # ── HYBRID VERSE DETECTOR ─────────────────────────────────────────────────────
 ONWARDS_KEYWORDS = ["onwards", "onward", "and following", "and beyond", "and after"]
 
+# Phrases that indicate "we're now in book X" — set context so next "Chapter N" uses this book
+BOOK_CONTEXT_PHRASES = re.compile(
+    r"(?:have\s+our\s+attention\s+in\s+the\s+book\s+of"
+    r"|have\s+our\s+attention\s+to\s+the\s+book\s+of"
+    r"|attention\s+in\s+the\s+book\s+of"
+    r"|attention\s+to\s+the\s+book\s+of"
+    r"|turn\s+(?:to|in)\s+(?:the\s+)?book\s+of"
+    r"|open\s+(?:your\s+)?(?:bibles?\s+)?to\s+(?:the\s+)?book\s+of"
+    r"|(?:the\s+)?book\s+of)\s+"
+    r"([0-9a-z]+(?:\s+[0-9a-z]+){0,2})",
+    re.IGNORECASE,
+)
+
+
+def _apply_book_context_if_mentioned(text: str) -> bool:
+    """If text mentions 'book of X' or 'attention in the book of X', set current book and clear chapter/verse. Returns True if context was set."""
+    global current_book, current_chapter, current_verse
+    m = BOOK_CONTEXT_PHRASES.search(text)
+    if not m:
+        return False
+    raw = m.group(1).strip()
+    book = resolve_book_eng(raw)
+    if book:
+        current_book = book
+        current_chapter = None
+        current_verse = None
+        logger.info(f"📖 Book context set to: {book} (from ‘…book of {raw}…’)")
+        return True
+    return False
+
 
 def detect_verse_hybrid(text, controller, confidence=1.0) -> bool:
     global current_book, current_chapter, current_verse
@@ -1038,9 +1305,13 @@ def detect_verse_hybrid(text, controller, confidence=1.0) -> bool:
                 _start_onwards(bk, ch, vs)
 
     try:
+        _apply_book_context_if_mentioned(text)
         if check_verse_queue(text, controller):
             return True
         if _check_onwards_advance(text, controller):
+            return True
+        # If Verse Interrupt is on, we may be waiting for speaker to say the verse
+        if VERSE_INTERRUPT_ENABLED and check_vtc(text, controller):
             return True
 
         num_norm = normalize_numbers_only(text)
@@ -1049,6 +1320,15 @@ def detect_verse_hybrid(text, controller, confidence=1.0) -> bool:
             lambda m: str(int(m.group(1)) + int(m.group(2))),
             num_norm,
         )
+
+        # Context helper — if we already know the book but not the chapter,
+        # allow "chapter 3" / "ch 3" to set chapter context (prevents LLM spam on chapter-only blobs).
+        if current_book and not current_chapter:
+            m_ch = re.search(r'\b(?:chapter|chap|ch)\s+(\d{1,3})\b', num_norm.lower())
+            if m_ch:
+                current_chapter = m_ch.group(1)
+                current_verse   = None
+                logger.info(f"📌 Chapter context set: {current_book} {current_chapter}")
 
         # Layer 1 — parser
         refs = PRIMARY_PARSER(text)
@@ -1061,12 +1341,14 @@ def detect_verse_hybrid(text, controller, confidence=1.0) -> bool:
                     "days", "weeks", "months", "years", "minutes", "hours",
                     "people", "men", "women", "points", "dollars",
                 ]
-                if any(re.search(rf'\b{chap_num}\s+{b}\b', num_norm) for b in blockers):
+                # Don't block legit "Book chapter N" just because "N days" appears nearby.
+                is_explicit_chapter = bool(re.search(rf'\b(?:chapter|chap|ch)\s+{re.escape(chap_num)}\b', num_norm.lower()))
+                if (not is_explicit_chapter) and any(re.search(rf'\b{chap_num}\s+{b}\b', num_norm) for b in blockers):
                     logger.info(f"🚫 BLOCKED Layer 1 False Positive: {verse} (Time/People phrase)")
                     is_blocked = True
             if not is_blocked:
                 logger.info(f"🔍 PARSER: {verse} ({int(confidence*100)}% Acc)")
-                controller.send_verse(verse, confidence=confidence)
+                deliver_verse(verse, controller, bypass_cooldown=False, confidence=confidence)
                 trigger_onwards_if_needed(verse, text)
                 if ":" in verse:
                     check_and_queue_range(text, verse, controller)
@@ -1091,7 +1373,7 @@ def detect_verse_hybrid(text, controller, confidence=1.0) -> bool:
             if is_valid:
                 ref = f"{current_book} {current_chapter}:{candidate}"
                 logger.info(f"🔍 CONTEXTUAL: {ref} ({int(confidence*100)}% Acc)")
-                controller.send_verse(ref, confidence=confidence)
+                deliver_verse(ref, controller, bypass_cooldown=False, confidence=confidence)
                 trigger_onwards_if_needed(ref, text)
                 check_and_queue_range(num_norm, ref, controller)
                 return True
@@ -1101,7 +1383,7 @@ def detect_verse_hybrid(text, controller, confidence=1.0) -> bool:
         if m_hi and current_book and current_chapter:
             ref = f"{current_book} {current_chapter}:{m_hi.group(1)}"
             logger.info(f"🔍 HINDI CTX: {ref} ({int(confidence*100)}% Acc)")
-            controller.send_verse(ref, confidence=confidence)
+            deliver_verse(ref, controller, bypass_cooldown=False, confidence=confidence)
             trigger_onwards_if_needed(ref, text)
             return True
 
@@ -1110,7 +1392,7 @@ def detect_verse_hybrid(text, controller, confidence=1.0) -> bool:
         if m_ml and current_book and current_chapter:
             ref = f"{current_book} {current_chapter}:{m_ml.group(1)}"
             logger.info(f"🔍 MALAYALAM CTX: {ref} ({int(confidence*100)}% Acc)")
-            controller.send_verse(ref, confidence=confidence)
+            deliver_verse(ref, controller, bypass_cooldown=False, confidence=confidence)
             trigger_onwards_if_needed(ref, text)
             return True
 
@@ -1123,7 +1405,7 @@ def detect_verse_hybrid(text, controller, confidence=1.0) -> bool:
                     if int(candidate) == int(current_verse) + 1:
                         ref = f"{current_book} {current_chapter}:{candidate}"
                         logger.info(f"🔍 SEQUENTIAL: {ref} ({int(confidence*100)}% Acc)")
-                        controller.send_verse(ref, confidence=confidence)
+                        deliver_verse(ref, controller, bypass_cooldown=False, confidence=confidence)
                         trigger_onwards_if_needed(ref, text)
                         return True
                 except ValueError:
@@ -1148,7 +1430,7 @@ def detect_verse_hybrid(text, controller, confidence=1.0) -> bool:
                             f"🔍 RANGE: {current_book} {current_chapter}:{start_v}→{end_v} "
                             f"({int(confidence*100)}% Acc)"
                         )
-                        controller.send_verse(ref_start, confidence=confidence)
+                        deliver_verse(ref_start, controller, bypass_cooldown=False, confidence=confidence)
                         queue_verse_range(current_book, current_chapter, start_v, end_v, controller)
                         trigger_onwards_if_needed(ref_start, text)
                         return True
@@ -1161,7 +1443,7 @@ def detect_verse_hybrid(text, controller, confidence=1.0) -> bool:
         if m_simple:
             ref = f"{m_simple.group(1).strip().title()} {m_simple.group(2)}"
             logger.info(f"🔍 SIMPLE: {ref} ({int(confidence*100)}% Acc)")
-            controller.send_verse(ref, confidence=confidence)
+            deliver_verse(ref, controller, bypass_cooldown=False, confidence=confidence)
             trigger_onwards_if_needed(ref, text)
             return True
 
@@ -1175,20 +1457,45 @@ def detect_verse_hybrid(text, controller, confidence=1.0) -> bool:
 
         if not has_book and not has_number:
             return False
-        if len(text.split()) < 4 and not has_number:
+                # Require BOTH a book name AND a number before burning an LLM call
+        if not (has_book and has_number):
             return False
 
+        # Need at least 6 words so context is rich enough for LLM
+        if len(text.split()) < 6:
+            return False
+
+        global _llm_in_flight
+        if _llm_in_flight:
+            return False  # let partial_context keep growing instead
+
+        # Avoid retrying the LLM on essentially the same rolling context over and over.
+        global _llm_last_key, _llm_last_time
+        llm_key = re.sub(r'\s+', ' ', text_lower).strip()[-220:]
+        now_ts  = time.time()
+        if _llm_last_key == llm_key and (now_ts - _llm_last_time) < 25:
+            return False
+        _llm_last_key  = llm_key
+        _llm_last_time = now_ts
+
         logger.info(f"📞 LLM: '{text[:80]}'")
+        _llm_in_flight = True
 
         def llm_task():
-            verse = extract_verse_with_llm(text)
-            if verse:
-                controller.send_verse(verse, confidence=confidence)
-                trigger_onwards_if_needed(verse, text)
-                check_and_queue_range(text, verse, controller)
+            global _llm_in_flight
+            try:
+                verse = extract_verse_with_llm(text)
+                if verse:
+                    deliver_verse(verse, controller, bypass_cooldown=False, confidence=confidence)
+                    trigger_onwards_if_needed(verse, text)
+                    check_and_queue_range(text, verse, controller)
+            finally:
+                _llm_in_flight = False
 
         threading.Thread(target=llm_task, daemon=True).start()
-        return True
+        # Return False — partial_context keeps accumulating until a verse is confirmed
+        return False
+
 
     except Exception as e:
         logger.error(f"Parse error: {e}")
@@ -1196,7 +1503,7 @@ def detect_verse_hybrid(text, controller, confidence=1.0) -> bool:
 
 
 # ── SENTENCE SPLITTER ─────────────────────────────────────────────────────────
-_CLAUSE_SPLIT_RE = re.compile(r'(?<=[.!?,।])\s+')
+_CLAUSE_SPLIT_RE = re.compile(r'(?<=[.!?।])\s+') 
 
 
 def _process_transcript_blob(sentence: str, partial_context_ref: list, controller):
@@ -1217,8 +1524,8 @@ def _process_transcript_blob(sentence: str, partial_context_ref: list, controlle
             break
     if partial_context:
         words = partial_context.split()
-        if len(words) > 30:
-            partial_context = " ".join(words[-15:])
+        if len(words) > 50:
+            partial_context = " ".join(words[-25:])
     partial_context_ref[0] = partial_context
 
 

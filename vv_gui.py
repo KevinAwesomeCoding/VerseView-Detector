@@ -312,6 +312,14 @@ class VerseViewApp(ctk.CTk):
         ctk.CTkCheckBox(right, text="Require Verification (Hear verse twice)", variable=self.verify_var).grid(row=row, column=0, sticky="w", padx=14, pady=(10, 4))
         row += 1
 
+        # ── VERSE INTERRUPT (wait for speaker to say verse before displaying) ──
+        self.verse_interrupt_var = ctk.BooleanVar(value=False)
+        ctk.CTkCheckBox(
+            right,
+            text="Verse Interrupt (wait for speaker to say verse before displaying; 60s timeout; new ref cancels current)",
+            variable=self.verse_interrupt_var,
+        ).grid(row=row, column=0, sticky="w", padx=14, pady=(10, 4))
+        row += 1
 
         # ── SMART AMEN TOGGLE ──
         self.smart_amen_var = ctk.BooleanVar(value=True)
@@ -538,6 +546,8 @@ class VerseViewApp(ctk.CTk):
 
         self.manual_var.set(s.get("manual_confirm", True))
         self.verify_var.set(s.get("verify", True))
+        # verse_text_confirm kept for backward compat when loading old settings
+        self.verse_interrupt_var.set(s.get("verse_interrupt", s.get("verse_text_confirm", False)))
         self.smart_amen_var.set(s.get("smart_amen", True))
         self.auto_save_var.set(s.get("auto_save_notes", True))
         self.auto_start_var.set(s.get("auto_start", False))
@@ -599,6 +609,7 @@ class VerseViewApp(ctk.CTk):
             "confidence":                 self.conf_var.get(),
             "manual_confirm":             self.manual_var.get(),
             "verify":                     self.verify_var.get(),
+            "verse_interrupt":            self.verse_interrupt_var.get(),
             "smart_amen":                 self.smart_amen_var.get(),
             "auto_save_notes":            self.auto_save_var.get(),
             "auto_start":                 self.auto_start_var.get(),
@@ -877,6 +888,7 @@ class VerseViewApp(ctk.CTk):
                 manual_confirm            = s["manual_confirm"],
                 confirm_callback          = self._user_confirm_callback,
                 verify                    = s["verify"],
+                verse_interrupt           = s.get("verse_interrupt", s.get("verse_text_confirm", False)),
                 smart_amen                = s["smart_amen"],
                 panic_key                 = s["panic_key"],
                 live_points_prompt        = s["live_points_prompt"],
