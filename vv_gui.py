@@ -266,88 +266,22 @@ class VerseViewApp(ctk.CTk):
         row += 1
 
 
-        # ── Verification & Confidence ──
-        self.conf_val_label = sep_label("Confidence Threshold: 75%")
+        # ── Options toggle (checkboxes + confidence + panic) ──
+        self._opts_open = False
+        self.btn_opts = ctk.CTkButton(
+            right, text="▶   Options",
+            fg_color="transparent",
+            text_color=("gray40", "gray60"),
+            anchor="w", hover=False,
+            command=self._toggle_options
+        )
+        self.btn_opts.grid(row=row, column=0, sticky="ew", padx=10, pady=(14, 2))
+        self._opts_row = row
+        row += 2  # row N+1 is reserved for opts_frame when expanded
 
-        self.conf_var = ctk.DoubleVar(value=0.75)
-
-        def update_conf_label(val):
-            self.conf_val_label.configure(text=f"Confidence Threshold: {int(float(val)*100)}%")
-
-
-        self.conf_slider = ctk.CTkSlider(right, from_=0.5, to=1.0, variable=self.conf_var, command=update_conf_label)
-        self.conf_slider.grid(row=row, column=0, sticky="ew", padx=14, pady=(0, 4))
-        row += 1
-
-
-        self.manual_var = ctk.BooleanVar(value=True)
-        ctk.CTkCheckBox(right, text="Require Manual Confirmation (Ask Y/N if low)", variable=self.manual_var).grid(row=row, column=0, sticky="w", padx=14, pady=(10, 4))
-        row += 1
-
-
-        # ── PANIC KEYBIND RECORDER ──
-        sep_label("Panic Keybind")
-        self.panic_var = ctk.StringVar(value="esc")
-        if sys.platform.startswith("win"):
-            # Windows: user can customize the global hotkey
-            self.panic_btn = ctk.CTkButton(
-                right, text="Panic Key: esc",
-                fg_color="#4a4a4a", hover_color="#333333",
-                command=self._record_panic_key
-            )
-            self.panic_btn.grid(row=row, column=0, sticky="ew", padx=14, pady=(0, 4))
-        else:
-            # macOS: fixed Shift+Escape window shortcut (no pynput, no permissions)
-            self.panic_btn = None
-            ctk.CTkLabel(
-                right,
-                text="⌨️  Panic Key: Shift + Escape (fixed on macOS)",
-                text_color=["#666666", "#888888"],
-                font=ctk.CTkFont(size=12)
-            ).grid(row=row, column=0, sticky="ew", padx=14, pady=(0, 4))
-        row += 1
-
-
-        self.verify_var = ctk.BooleanVar(value=True)
-        ctk.CTkCheckBox(right, text="Require Verification (Hear verse twice)", variable=self.verify_var).grid(row=row, column=0, sticky="w", padx=14, pady=(10, 4))
-        row += 1
-
-        # ── VERSE INTERRUPT (wait for speaker to say verse before displaying) ──
-        self.verse_interrupt_var = ctk.BooleanVar(value=False)
-        ctk.CTkCheckBox(
-            right,
-            text="Verse Interrupt (wait for speaker to say verse before displaying; 60s timeout; new ref cancels current)",
-            variable=self.verse_interrupt_var,
-        ).grid(row=row, column=0, sticky="w", padx=14, pady=(10, 4))
-        row += 1
-
-        # ── SMART AMEN TOGGLE ──
-        self.smart_amen_var = ctk.BooleanVar(value=True)
-        ctk.CTkCheckBox(right, text="Smart Amen (Auto-Clear on 'Let us pray')", variable=self.smart_amen_var).grid(row=row, column=0, sticky="w", padx=14, pady=(10, 4))
-        row += 1
-
-
-        # ── AUTO-SAVE TOGGLE ──
-        self.auto_save_var = ctk.BooleanVar(value=True)
-        ctk.CTkCheckBox(right, text="Auto-Save Sermon Notes on App Close", variable=self.auto_save_var).grid(row=row, column=0, sticky="w", padx=14, pady=(10, 4))
-        row += 1
-
-
-        # ── AUTO-START TOGGLE ──
-        self.auto_start_var = ctk.BooleanVar(value=False)
-        ctk.CTkCheckBox(right, text="Auto-Start on Launch (starts engine automatically)", variable=self.auto_start_var).grid(row=row, column=0, sticky="w", padx=14, pady=(10, 4))
-        row += 1
-
-
-        # ── SMART SCHEDULE TOGGLE ──
-        self.smart_schedule_var = ctk.BooleanVar(value=False)
-        ctk.CTkCheckBox(right, text="Smart Schedule (auto-set language by day & time)", variable=self.smart_schedule_var).grid(row=row, column=0, sticky="w", padx=14, pady=(4, 4))
-        row += 1
-        ctk.CTkLabel(right, text="  Sat→Malayalam  |  Sun 9:10AM→English  |  10:40AM→English  |  4:40PM→Hindi",
-                     text_color=["#666666","#888888"], font=ctk.CTkFont(size=11)
-        ).grid(row=row, column=0, sticky="w", padx=14, pady=(0, 4))
-        row += 1
-
+        self.opts_frame = ctk.CTkFrame(right)
+        self.opts_frame.grid_columnconfigure(0, weight=1)
+        self._build_options()
 
         # ── Advanced toggle ──
         self._adv_open = False
@@ -358,15 +292,13 @@ class VerseViewApp(ctk.CTk):
             anchor="w", hover=False,
             command=self._toggle_advanced
         )
-        self.btn_adv.grid(row=row, column=0, sticky="ew", padx=10, pady=(14, 2))
+        self.btn_adv.grid(row=row, column=0, sticky="ew", padx=10, pady=(4, 2))
         self._adv_row = row
-        row += 1
-
+        row += 2  # row N+1 is reserved for adv_frame when expanded
 
         self.adv_frame = ctk.CTkFrame(right)
         self.adv_frame.grid_columnconfigure(1, weight=1)
         self._build_advanced()
-
 
         ctk.CTkButton(
             right, text="💾  Save Settings",
@@ -404,7 +336,107 @@ class VerseViewApp(ctk.CTk):
         self.after(2000, self._refresh_context)
 
 
+    def _build_options(self):
+        f = self.opts_frame
+        r = 0
+
+        def o_sep(text):
+            nonlocal r
+            lbl = ctk.CTkLabel(
+                f, text=text, anchor="w",
+                font=ctk.CTkFont(size=12, weight="bold"),
+                text_color=("gray30", "gray70")
+            )
+            lbl.grid(row=r, column=0, sticky="ew", padx=10, pady=(12, 2))
+            r += 1
+            return lbl
+
+        # ── Confidence ──
+        self.conf_val_label = o_sep("Confidence Threshold: 75%")
+        self.conf_var = ctk.DoubleVar(value=0.75)
+
+        def _update_conf(val):
+            self.conf_val_label.configure(text=f"Confidence Threshold: {int(float(val)*100)}%")
+
+        self.conf_slider = ctk.CTkSlider(f, from_=0.5, to=1.0, variable=self.conf_var, command=_update_conf)
+        self.conf_slider.grid(row=r, column=0, sticky="ew", padx=10, pady=(0, 4))
+        r += 1
+
+        # ── Checkboxes ──
+        self.manual_var = ctk.BooleanVar(value=True)
+        ctk.CTkCheckBox(f, text="Require Manual Confirmation (Ask Y/N for low-confidence verses)",
+                        variable=self.manual_var).grid(row=r, column=0, sticky="w", padx=10, pady=(8, 3))
+        r += 1
+
+        self.verify_var = ctk.BooleanVar(value=True)
+        ctk.CTkCheckBox(f, text="Require Verification (Hear verse twice before displaying)",
+                        variable=self.verify_var).grid(row=r, column=0, sticky="w", padx=10, pady=(0, 3))
+        r += 1
+
+        self.verse_interrupt_var = ctk.BooleanVar(value=False)
+        ctk.CTkCheckBox(f, text="Verse Interrupt (wait for speaker to say verse; 60s timeout; new ref cancels)",
+                        variable=self.verse_interrupt_var).grid(row=r, column=0, sticky="w", padx=10, pady=(0, 3))
+        r += 1
+
+        self.smart_amen_var = ctk.BooleanVar(value=True)
+        ctk.CTkCheckBox(f, text="Smart Amen (auto-clear screen on 'Let us pray')",
+                        variable=self.smart_amen_var).grid(row=r, column=0, sticky="w", padx=10, pady=(0, 3))
+        r += 1
+
+        self.auto_save_var = ctk.BooleanVar(value=True)
+        ctk.CTkCheckBox(f, text="Auto-Save Sermon Notes on App Close",
+                        variable=self.auto_save_var).grid(row=r, column=0, sticky="w", padx=10, pady=(0, 3))
+        r += 1
+
+        self.auto_start_var = ctk.BooleanVar(value=False)
+        ctk.CTkCheckBox(f, text="Auto-Start on Launch (starts engine automatically)",
+                        variable=self.auto_start_var).grid(row=r, column=0, sticky="w", padx=10, pady=(0, 3))
+        r += 1
+
+        self.smart_schedule_var = ctk.BooleanVar(value=False)
+        ctk.CTkCheckBox(f, text="Smart Schedule (auto-set language by day & time)",
+                        variable=self.smart_schedule_var).grid(row=r, column=0, sticky="w", padx=10, pady=(0, 2))
+        r += 1
+        ctk.CTkLabel(f, text="  Sat→Malayalam  |  Sun 9:10 AM→English  |  10:40 AM→English  |  4:40 PM→Hindi",
+                     text_color=["#666666", "#888888"],
+                     font=ctk.CTkFont(size=11)).grid(row=r, column=0, sticky="w", padx=10, pady=(0, 6))
+        r += 1
+
+        # ── Panic keybind ──
+        o_sep("Panic Keybind")
+        self.panic_var = ctk.StringVar(value="esc")
+        if sys.platform.startswith("win"):
+            self.panic_btn = ctk.CTkButton(
+                f, text="Panic Key: esc",
+                fg_color="#4a4a4a", hover_color="#333333",
+                command=self._record_panic_key
+            )
+            self.panic_btn.grid(row=r, column=0, sticky="ew", padx=10, pady=(0, 8))
+        else:
+            self.panic_btn = None
+            ctk.CTkLabel(
+                f, text="⌨️  Panic Key: Shift + Escape (fixed on macOS)",
+                text_color=["#666666", "#888888"],
+                font=ctk.CTkFont(size=12)
+            ).grid(row=r, column=0, sticky="ew", padx=10, pady=(0, 8))
+        r += 1
+
+
+    def _toggle_options(self):
+        self._opts_open = not self._opts_open
+        if self._opts_open:
+            self.opts_frame.grid(
+                row=self._opts_row + 1, column=0,
+                sticky="ew", padx=14, pady=(0, 10)
+            )
+            self.btn_opts.configure(text="▼   Options")
+        else:
+            self.opts_frame.grid_forget()
+            self.btn_opts.configure(text="▶   Options")
+
+
     def _build_advanced(self):
+
         fields = [
             ("Sample Rate",      "16000", "rate_entry"),
             ("Chunk Size",       "4096",  "chunk_entry"),
