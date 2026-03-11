@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-import customtkinter as ctk
+import customtkinter as ctk  # type: ignore
 import tkinter.messagebox as mb
 import threading
 import asyncio
@@ -11,10 +11,9 @@ import re
 import os
 import sys
 
-import settings as cfg
-import vv_streaming_master as engine
-
-from live_points_app import LivePointsController
+import settings as cfg  # type: ignore
+import vv_streaming_master as engine  # type: ignore
+from live_points_app import LivePointsController  # type: ignore
 
 APP_VERSION = "1.2.0"
 
@@ -173,7 +172,7 @@ class VerseViewApp(ctk.CTk):
                 text_color=("gray30", "gray70")
             )
             lbl.grid(row=row, column=0, sticky="ew", padx=14, pady=(14, 2))
-            row += 1
+            row += 1  # type: ignore
             return lbl
 
 
@@ -181,7 +180,7 @@ class VerseViewApp(ctk.CTk):
             nonlocal row
             e = ctk.CTkEntry(right, placeholder_text=placeholder, show=show)
             e.grid(row=row, column=0, sticky="ew", padx=14, pady=(0, 4))
-            row += 1
+            row += 1  # type: ignore
             return e
 
 
@@ -190,7 +189,7 @@ class VerseViewApp(ctk.CTk):
             var = ctk.StringVar(value=values[0])
             m   = ctk.CTkOptionMenu(right, variable=var, values=values)
             m.grid(row=row, column=0, sticky="ew", padx=14, pady=(0, 4))
-            row += 1
+            row += 1  # type: ignore
             return var, m
 
 
@@ -348,7 +347,7 @@ class VerseViewApp(ctk.CTk):
                 text_color=("gray30", "gray70")
             )
             lbl.grid(row=r, column=0, sticky="ew", padx=10, pady=(12, 2))
-            r += 1
+            r += 1  # type: ignore
             return lbl
 
         # ── Confidence ──
@@ -532,7 +531,7 @@ class VerseViewApp(ctk.CTk):
 
         def recorder():
             try:
-                from pynput import keyboard as pynput_kb
+                from pynput import keyboard as pynput_kb  # type: ignore
                 with pynput_kb.Listener(on_press=on_press) as listener:
                     listener.join()
             except Exception as e:
@@ -745,7 +744,7 @@ class VerseViewApp(ctk.CTk):
 
 
     def _populate_mics(self):
-        import pyaudio
+        import pyaudio  # type: ignore
         p    = pyaudio.PyAudio()
         mics = {}
         for i in range(p.get_device_count()):
@@ -937,7 +936,7 @@ class VerseViewApp(ctk.CTk):
             self.mic_menu.configure(state="disabled")
 
 
-            self._engine_thread = threading.Thread(target=self._run_engine, daemon=True)
+            self._engine_thread = threading.Thread(target=self._run_engine, daemon=True)  # type: ignore
             self._engine_thread.start()
             self.after(2000, self._refresh_context)
 

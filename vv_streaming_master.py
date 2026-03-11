@@ -11,10 +11,10 @@ import requests
 import certifi
 import threading
 
-from parse_reference_eng   import parse_references as parse_eng,   normalize_numbers_only as norm_eng, resolve_book as resolve_book_eng
+from parse_reference_eng import parse_references as parse_eng, normalize_numbers_only as norm_eng, resolve_book as resolve_book_eng
 from parse_reference_hindi import parse_references as parse_hindi, normalize_numbers_only as norm_hindi
-from parse_reference_ml    import parse_references as parse_ml,    normalize_numbers_only as norm_ml
-from bible_fetcher         import fetch_verse as multi_fetch
+from parse_reference_ml import parse_references as parse_ml, normalize_numbers_only as norm_ml
+from bible_fetcher import fetch_verse as multi_fetch
 
 
 # ── GROQ CLIENT  (verse extraction — llama-3.1-8b-instant) ──────────────────
@@ -33,12 +33,19 @@ class _GroqCompletions:
         body    = {"model": model, "messages": messages, "temperature": temperature}
         if max_tokens is not None:
             body["max_tokens"] = max_tokens
-        r = requests.post(
-            "https://api.groq.com/openai/v1/chat/completions",
-            headers=headers, json=body, timeout=30, verify=certifi.where(),
-        )
-        r.raise_for_status()
-        return _GroqResponse(r.json()["choices"][0]["message"]["content"])
+        for attempt in range(3):
+            r = requests.post(  # type: ignore
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers=headers, json=body, timeout=30, verify=certifi.where(),  # type: ignore
+            )
+            if r.status_code == 429:
+                wait = min(2 ** attempt * 2, 8)
+                logger.warning(f"⚠️ Groq rate limited (429) — retrying in {wait}s...")
+                time.sleep(wait)
+                continue
+            r.raise_for_status()
+            return _GroqResponse(r.json()["choices"][0]["message"]["content"])  # type: ignore
+        raise RuntimeError("Groq API rate limit exceeded after 3 retries")
 
 class _GroqChat:
     def __init__(self, api_key): self.completions = _GroqCompletions(api_key)
@@ -97,12 +104,18 @@ class _MistralClient:
 
 
 # ── LOGGING ──────────────────────────────────────────────────────────────────
+import io
+session_log_stream = io.StringIO()
+session_log_handler = logging.StreamHandler(session_log_stream)
+session_log_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)-5s %(message)s"))
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)-5s %(message)s",
     handlers=[
         logging.FileHandler("verseview.log", encoding="utf-8"),
         logging.StreamHandler(),
+        session_log_handler,
     ],
 )
 logger = logging.getLogger(__name__)
@@ -187,21 +200,23 @@ class _DiscordLiveLog:
         url = self._url()
         if not url:
             return
-        log_path = "verseview.log"
-        if not os.path.exists(log_path):
-            return
         try:
             import datetime as _dt
             label   = _dt.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
             caption = f"📋 **VerseView Session Log** — {label}"
-            with open(log_path, "rb") as lf:
-                requests.post(
-                    url,
-                    data={"content": caption},
-                    files={"file": (f"verseview_{label}.log", lf, "text/plain")},
-                    timeout=30,
-                    verify=certifi.where(),
-                )
+            
+            # Fetch log content from in-memory stream output
+            log_content = session_log_stream.getvalue().encode("utf-8")
+            if not log_content.strip():
+                return
+                
+            requests.post(
+                url,
+                data={"content": caption},
+                files={"file": (f"verseview_{label}.log", log_content, "text/plain")},
+                timeout=30,
+                verify=certifi.where(),
+            )
         except Exception as ex:
             logger.debug(f"Discord log upload: {ex}")
 
@@ -386,14 +401,17 @@ async def live_points_loop():
         try:
             def fetch_points():
                 _client = cerebras_client or groq_client
-                response = _client.chat.completions.create(
+                if _client is None:
+                    return None
+                response = _client.chat.completions.create(  # type: ignore
                     model=("gpt-oss-120b" if cerebras_client else "llama-3.3-70b-versatile"),
                     messages=[{"role": "user", "content": prompt}],
                 )
                 return response.choices[0].message.content.strip()
 
-            points = await engine_loop.run_in_executor(None, fetch_points)
-            LIVE_POINTS_CALLBACK(points)
+            points = await engine_loop.run_in_executor(None, fetch_points)  # type: ignore
+            if points:
+                LIVE_POINTS_CALLBACK(points)  # type: ignore
         except Exception as e:
             logger.error(f"Live points generation failed: {e}")
 
@@ -455,7 +473,9 @@ def generate_sermon_summary():
 
         logger.info(f"⏳ Generating Sermon Cliff Notes via {_which}...")
         _client  = mistral_client or cerebras_client or groq_client
-        response = _client.chat.completions.create(
+        if _client is None:
+            return "⚠️ LLM disabled — add a Mistral, Cerebras, or Groq API key to generate summaries."
+        response = _client.chat.completions.create(  # type: ignore
             model=_model,
             messages=[{"role": "user", "content": prompt}],
         )
@@ -549,6 +569,9 @@ def configure(
     RATE              = rate
     CHUNK             = chunk
     REMOTE_URL        = remote_url
+    if not REMOTE_URL.startswith(("http://", "https://")):
+        logger.warning(f"⚠️ Invalid VerseView URL '{REMOTE_URL}' — resetting to default.")
+        REMOTE_URL = "http://localhost:50010/control.html"
     DEDUP_WINDOW      = dedup_window
     COOLDOWN          = cooldown
     LLM_ENABLED       = llm_enabled
@@ -1136,6 +1159,10 @@ class VerseController:
             return True
         except Exception as e:
             logger.error(f"VerseView connection failed: {e}")
+            if self.driver:
+                try: self.driver.quit()  # type: ignore
+                except Exception: pass
+                self.driver = None
             return False
 
     def close_presentation(self):
@@ -1544,6 +1571,8 @@ async def stream_audio(controller):
     try:
         mic_info = audio.get_device_info_by_index(MIC_INDEX)
         logger.info(f"Using: [{MIC_INDEX}] {mic_info['name']}")
+        if "stereo mix" in mic_info['name'].lower():
+            logger.warning("⚠️ Stereo Mix selected — ALL desktop audio will be captured. Non-church audio may trigger false detections.")
         stream = audio.open(
             format=pyaudio.paInt16, channels=1, rate=RATE,
             input=True, input_device_index=MIC_INDEX,
@@ -1625,11 +1654,15 @@ async def stream_audio(controller):
             receiver.cancel()
             await asyncio.gather(sender, receiver, return_exceptions=True)
             try:
-                await ws.send(json.dumps({"type": "CloseStream"}))
+                await ws.send(json.dumps({"type": "CloseStream"}))  # type: ignore
             except Exception:
                 pass
     except Exception as e:
-        logger.error(f"Deepgram WebSocket error: {e}")
+        err_str = str(e)
+        if "401" in err_str:
+            logger.error("❌ Deepgram API key rejected (HTTP 401). Check your key in Advanced Settings.")
+        else:
+            logger.error(f"Deepgram WebSocket error: {e}")
     finally:
         if stream:
             stream.stop_stream()
@@ -1684,13 +1717,23 @@ async def stream_audio_sarvam(controller):
 
                     async def send_audio():
                         try:
-                            while not stop_event.is_set():
-                                pcm_data = await loop.run_in_executor(None, read_chunk_blocking)
-                                await ws.transcribe(audio=base64.b64encode(pcm_data).decode("utf-8"))
+                            while not stop_event.is_set():  # type: ignore
+                                pcm_data = await loop.run_in_executor(None, read_chunk_blocking)  # type: ignore
+                                await ws.transcribe(audio=base64.b64encode(pcm_data).decode("utf-8"))  # type: ignore
                         except asyncio.CancelledError:
                             pass
                         except Exception as e:
                             logger.error(f"Sarvam send error: {e}")
+
+                    async def keepalive():
+                        try:
+                            while not stop_event.is_set():  # type: ignore
+                                await asyncio.sleep(25)
+                                if not stop_event.is_set():  # type: ignore
+                                    silence = b'\x00' * CHUNK * 2
+                                    await ws.transcribe(audio=base64.b64encode(silence).decode("utf-8"))  # type: ignore
+                        except Exception:
+                            pass
 
                     async def recv_transcripts():
                         global full_sermon_transcript
@@ -1720,14 +1763,16 @@ async def stream_audio_sarvam(controller):
                                 logger.warning(f"Sarvam session ended (will reconnect): {e}")
 
                     sender   = asyncio.create_task(send_audio())
+                    pinger   = asyncio.create_task(keepalive())
                     receiver = asyncio.create_task(recv_transcripts())
                     await asyncio.wait(
-                        [asyncio.ensure_future(stop_event.wait()), receiver],
+                        [asyncio.ensure_future(stop_event.wait()), receiver],  # type: ignore
                         return_when=asyncio.FIRST_COMPLETED,
                     )
                     sender.cancel()
+                    pinger.cancel()
                     receiver.cancel()
-                    await asyncio.gather(sender, receiver, return_exceptions=True)
+                    await asyncio.gather(sender, pinger, receiver, return_exceptions=True)
                     if stop_event.is_set():
                         break
                     logger.info("🔄 Sarvam session ended. Reconnecting in 2s...")
@@ -1778,10 +1823,13 @@ async def main():
 
     for attempt in range(1, 6):
         logger.info(f"Connection attempt {attempt}/5...")
+        if stop_event.is_set():  # type: ignore
+            logger.info("Stop requested — aborting connection.")
+            return
         if _controller.connect():
             connected = True
             break
-        if stop_event.is_set():
+        if stop_event.is_set():  # type: ignore
             return
         if attempt < 5:
             logger.warning("Retrying in 5s...")

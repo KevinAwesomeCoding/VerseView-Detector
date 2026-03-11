@@ -6,3 +6,5 @@ dist/
 build/
 *.spec.bak
 verseview.log
+.pyre/
+.mypy_cache/
