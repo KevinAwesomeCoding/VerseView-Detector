@@ -33,6 +33,7 @@ DEFAULTS = {
     "panic_key":                  "esc",
     "live_points_prompt":         "",
     "live_points_llm_enabled":    False,
+    "silence_timeout":            60,
 }
 
 

@@ -174,5 +174,9 @@ class LivePointsController:
         """Whether the AI Live Outline LLM should run for this service."""
         return bool(self.live_llm_enabled.get())
 
+    def get_live_llm_enabled(self):
+        """Alias for is_live_llm_enabled() (used by _collect_settings)."""
+        return self.is_live_llm_enabled()
+
     def set_live_llm_enabled(self, value: bool):
         self.live_llm_enabled.set(bool(value))

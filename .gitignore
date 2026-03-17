@@ -1,10 +1,23 @@
 # Settings (contains API keys - never commit)
+
 *.json
+
 __pycache__/
+
 *.pyc
+
 dist/
+
 build/
+
 *.spec.bak
+
 verseview.log
-.pyre/
-.mypy_cache/
+
+# Test and Debug files (never commit)
+test_*.py
+verify_*.py
+debug.py
+verseview.spec
+*.spec
+

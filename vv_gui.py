@@ -202,6 +202,26 @@ class VerseViewApp(ctk.CTk):
             "Multi (Nova-2)",
         ])
 
+        def _on_ml_raw_toggle():
+            engine.show_malayalam_raw = self.ml_raw_var.get()
+
+        self.ml_raw_var = ctk.BooleanVar(value=False)
+        self.ml_raw_cb = ctk.CTkCheckBox(
+            right, text="Show Malayalam 🇮🇳",
+            variable=self.ml_raw_var,
+            command=_on_ml_raw_toggle
+        )
+        self.ml_raw_cb.grid(row=row, column=0, sticky="w", padx=14, pady=(2, 4))
+        row += 1
+
+        def _on_lang_changed(val):
+            if "Malayalam" in val:
+                self.ml_raw_cb.configure(state="normal")
+            else:
+                self.ml_raw_cb.configure(state="disabled")
+        
+        self.lang_menu.configure(command=_on_lang_changed)
+
 
         # Bible Translation
         sep_label("Bible Translation")
@@ -437,10 +457,11 @@ class VerseViewApp(ctk.CTk):
     def _build_advanced(self):
 
         fields = [
-            ("Sample Rate",      "16000", "rate_entry"),
-            ("Chunk Size",       "4096",  "chunk_entry"),
-            ("Cooldown (s)",     "3.0",   "cooldown_entry"),
-            ("Dedup Window (s)", "60",    "dedup_entry"),
+            ("Sample Rate",          "16000", "rate_entry"),
+            ("Chunk Size",           "4096",  "chunk_entry"),
+            ("Cooldown (s)",         "3.0",   "cooldown_entry"),
+            ("Dedup Window (s)",     "60",    "dedup_entry"),
+            ("Silence Timeout (s)", "60",    "silence_entry"),
         ]
         for i, (lbl, default, attr) in enumerate(fields):
             ctk.CTkLabel(self.adv_frame, text=lbl, anchor="w").grid(
@@ -584,6 +605,14 @@ class VerseViewApp(ctk.CTk):
         self.auto_start_var.set(s.get("auto_start", False))
         self.smart_schedule_var.set(s.get("smart_schedule", False))
 
+        saved_ml_raw = s.get("show_malayalam_raw", False)
+        self.ml_raw_var.set(saved_ml_raw)
+        engine.show_malayalam_raw = saved_ml_raw
+        if "Malayalam" in self.lang_var.get():
+            self.ml_raw_cb.configure(state="normal")
+        else:
+            self.ml_raw_cb.configure(state="disabled")
+
         saved_panic = s.get("panic_key", "esc")
         self.panic_var.set(saved_panic)
         if self.panic_btn:
@@ -608,10 +637,11 @@ class VerseViewApp(ctk.CTk):
         self.live_app.set_live_llm_enabled(s.get("live_points_llm_enabled", False))
 
 
-        self.rate_entry.delete(0, "end");     self.rate_entry.insert(0,     str(s.get("rate",        16000)))
-        self.chunk_entry.delete(0, "end");    self.chunk_entry.insert(0,    str(s.get("chunk",        4096)))
-        self.cooldown_entry.delete(0, "end"); self.cooldown_entry.insert(0, str(s.get("cooldown",     3.0)))
-        self.dedup_entry.delete(0, "end");    self.dedup_entry.insert(0,    str(s.get("dedup_window", 60)))
+        self.rate_entry.delete(0, "end");     self.rate_entry.insert(0,     str(s.get("rate",            16000)))
+        self.chunk_entry.delete(0, "end");    self.chunk_entry.insert(0,    str(s.get("chunk",            4096)))
+        self.cooldown_entry.delete(0, "end"); self.cooldown_entry.insert(0, str(s.get("cooldown",         3.0)))
+        self.dedup_entry.delete(0, "end");    self.dedup_entry.insert(0,    str(s.get("dedup_window",     60)))
+        self.silence_entry.delete(0, "end");  self.silence_entry.insert(0,  str(s.get("silence_timeout",  60)))
         self.llm_var.set("Enabled" if s.get("llm_enabled", True) else "Disabled")
 
         # ── load all 3 Discord webhook URLs ──
@@ -645,6 +675,7 @@ class VerseViewApp(ctk.CTk):
             "auto_save_notes":            self.auto_save_var.get(),
             "auto_start":                 self.auto_start_var.get(),
             "smart_schedule":             self.smart_schedule_var.get(),
+            "show_malayalam_raw":         self.ml_raw_var.get(),
             "panic_key":                  self.panic_var.get(),
             "live_points_prompt":         self.live_app.get_prompt(),
             "live_points_llm_enabled":    self.live_app.get_live_llm_enabled() if hasattr(self.live_app, "get_live_llm_enabled") else False,
@@ -652,6 +683,7 @@ class VerseViewApp(ctk.CTk):
             "chunk":                      self._safe_int(self.chunk_entry,     4096),
             "cooldown":                   self._safe_float(self.cooldown_entry, 3.0),
             "dedup_window":               self._safe_int(self.dedup_entry,     60),
+            "silence_timeout":            self._safe_int(self.silence_entry,   60),
             "llm_enabled":                self.llm_var.get() == "Enabled",
             "deepgram_api_key":           self.dg_key_entry.get(),
             "groq_api_key":               self.or_key_entry.get(),
@@ -922,9 +954,11 @@ class VerseViewApp(ctk.CTk):
                 verse_interrupt           = s.get("verse_interrupt", s.get("verse_text_confirm", False)),
                 smart_amen                = s["smart_amen"],
                 panic_key                 = s["panic_key"],
-                live_points_prompt        = s["live_points_prompt"],
-                live_points_callback      = self.live_app.update_live_points,
-                live_points_get_current_cb = self.live_app.get_current_display
+                live_points_prompt         = s["live_points_prompt"],
+                live_points_callback       = self.live_app.update_live_points,
+                live_points_get_current_cb = self.live_app.get_current_display,
+                live_points_enabled        = self.live_app.is_live_llm_enabled(),
+                silence_timeout            = s.get("silence_timeout", 60),
             )
 
 
@@ -1080,7 +1114,12 @@ class VerseViewApp(ctk.CTk):
                 print(f"Emergency Auto-Save Failed: {e}")
 
         cfg.save(self._collect_settings())
+        # Feature 7: stamp the Discord log with a custom caption so the operator
+        # can identify sessions that ended via window-close rather than Stop.
         if self._running:
+            engine._discord_live_log.set_close_message(
+                "⚠️ App closed without Stop — auto-generated summary and log attached"
+            )
             engine.request_stop()
         self.destroy()
 
