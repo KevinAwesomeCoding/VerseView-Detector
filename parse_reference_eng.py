@@ -1,6 +1,16 @@
 # -*- coding: utf-8 -*-
 import re
 
+# ── Spoken Numeral Mode ──
+# When True, "john 3 16" (no colon, no 'verse' keyword) is treated as John 3:16.
+# Default OFF — call set_spoken_numeral_mode(True) to enable, or wire through configure().
+SPOKEN_NUMERAL_MODE: bool = False
+
+
+def set_spoken_numeral_mode(enabled: bool) -> None:
+    global SPOKEN_NUMERAL_MODE
+    SPOKEN_NUMERAL_MODE = enabled
+
 # ── BOOK ALIASES ──
 # Canonical names + common ASR (Deepgram) mishearings, phonetic spellings,
 # Indian-English variants, and alternate names. Keys are lowercase.
@@ -171,6 +181,114 @@ def convert_word_numbers(text: str) -> str:
     return " ".join(result)
 
 
+# ── Range-indicator words that mean two digits are a chapter RANGE, not book:verse ──
+_RANGE_WORDS_RE = re.compile(
+    r'\b(?:through|thru|until|to)\b',
+    re.IGNORECASE,
+)
+
+# ── All lowercase book-key aliases from BOOKS_ENG joined into one alternation RE ──
+# Built lazily on first use so module import stays fast.
+_BOOK_KEYS_RE: re.Pattern | None = None
+
+
+def _get_book_keys_re() -> re.Pattern:
+    global _BOOK_KEYS_RE
+    if _BOOK_KEYS_RE is None:
+        # Sort longest-first so multi-word keys ("song of solomon") match before shorter ones.
+        keys = sorted(BOOKS_ENG, key=len, reverse=True)
+        escaped = [re.escape(k) for k in keys]
+        _BOOK_KEYS_RE = re.compile(r'(?:' + '|'.join(escaped) + r')', re.IGNORECASE)
+    return _BOOK_KEYS_RE
+
+
+def _insert_chapter_verse_colon(text: str) -> str:
+    """
+    SPOKEN_NUMERAL_MODE preprocessing:
+    After digit-conversion, detect [book] [chap_digit] [verse_digit] with no colon already
+    present and no range word between the two digits, then replace the space with ':' so the
+    main regex can capture chapter:verse.
+
+    Guards:
+      - Range word (through/to/until/thru) between digits → skip (chapter range)
+      - chap > 150 or verse > 176 → skip (implausible)
+      - Already has ':' between the digits → skip
+    """
+    book_re = _get_book_keys_re()
+
+    # Build a pattern: [book_key] [spaces] [chap] [spaces] [verse]
+    # We capture group(1)=chap, group(2)=the whitespace between chapter and verse, group(3)=verse
+    # and replace group(2) with ':' only when guards pass.
+    pattern = re.compile(
+        r'(?:' + book_re.pattern + r')'    # book (non-capturing)
+        r'\s+(\d{1,3})'                    # chapter digit  → group 1
+        r'(\s+)'                           # whitespace gap → group 2
+        r'(\d{1,3})'                       # verse digit    → group 3
+        r'(?=\s|$)',                       # followed by space or end
+        re.IGNORECASE,
+    )
+
+    def _replacer(m: re.Match) -> str:
+        chap_str  = m.group(len(m.groups()) - 2)   # second-to-last group
+        gap       = m.group(len(m.groups()) - 1)   # last-but-one → whitespace
+        verse_str = m.group(len(m.groups()))        # last group
+
+        # Determine correct group indices (they vary based on how many book_re groups there are)
+        # Use named extraction: chap is at index -3 from end, gap at -2, verse at -1
+        chap  = int(chap_str)
+        verse = int(verse_str)
+
+        # Guard: plausibility
+        if chap > 150 or verse > 176:
+            return m.group(0)  # leave unchanged
+
+        # Guard: range word in the gap
+        if _RANGE_WORDS_RE.search(gap):
+            return m.group(0)
+
+        # Guard: colon already present in the gap
+        if ':' in gap:
+            return m.group(0)
+
+        # Replace gap with ':' — produces "john 3:16"
+        return m.group(0).replace(gap, ':', 1)
+
+    # Count groups in the book_re pattern to compute correct offsets
+    # Simpler: rebuild the pattern capturing all three targets explicitly
+    book_pat = book_re.pattern  # already no capturing groups (all non-capturing in _get_book_keys_re)
+    full_pat = re.compile(
+        r'(?:(?:[123]\s+)?' + r'(?:' + book_pat + r')'  + r')'  # book (allows "1 peter" etc.)
+        r'\s+'
+        r'(\d{1,3})'       # group 1: chapter
+        r'(\s+)'           # group 2: gap
+        r'(\d{1,3})'       # group 3: verse
+        r'(?=\s|$)',
+        re.IGNORECASE,
+    )
+
+    def _sub(m: re.Match) -> str:
+        chap      = int(m.group(1))
+        gap       = m.group(2)
+        verse     = int(m.group(3))
+
+        if chap > 150 or verse > 176:
+            return m.group(0)
+        if _RANGE_WORDS_RE.search(gap):
+            return m.group(0)
+        if ':' in gap:
+            return m.group(0)
+
+        # Replace the whitespace gap with ':' preserving the surrounding text
+        original = m.group(0)
+        # gap spans from group(1).end to group(3).start within m.group(0)
+        g1_end   = m.start(2) - m.start()
+        g2_end   = m.end(2)   - m.start()
+        return original[:g1_end] + ':' + original[g2_end:]
+
+    return full_pat.sub(_sub, text)
+
+
+
 def normalize_text(s: str) -> str:
     """Full normalization: lowercase, ordinal conversion, number conversion, noise removal."""
     s = s.lower()
@@ -181,6 +299,10 @@ def normalize_text(s: str) -> str:
     s = re.sub(r"[^a-z0-9: ]", " ", s)
     # Convert spoken numbers to digits
     s = convert_word_numbers(s)
+    # Spoken Numeral Mode: insert ':' between consecutive book+chapter+verse digit tokens
+    if SPOKEN_NUMERAL_MODE:
+        s = " ".join(s.split())
+        s = _insert_chapter_verse_colon(s)
     # Bug 6: Recognize 'X and Y' as chapter:verse before noise filter strips 'and'
     s = re.sub(r'\b(\d+)\s+and\s+(\d+)\b', r'\1:\2', s)
     # Bug 6: "X and Y" → "X:Y" — recognize spoken 'chapter and verse' pattern
@@ -264,11 +386,15 @@ def resolve_book(bookraw: str):
 # ── Main reference regex ──
 # Verse number is only captured when preceded by ":" or by "verse"/"verses"/"versus"
 # so "Psalms one fifty" → Psalm 150, not Psalm 1:50.
+# Bug 6: Negative lookahead on chapter digit to prevent it from consuming the leading digit 
+# of a numbered book (e.g. "pastor 1 peter" shouldn't match "pastor" as book and "1" as chapter)
+_NUMBERED_BOOK_WORDS = "chronicles|corinthians|john|kings|peter|samuel|thess|thessalonians|timothy|mac|maccabees"
 REF_RE = re.compile(
     r"(?P<book>(?:[123] )?[a-z]+(?:[a-z ]*)"
     r")"
     r"\s+"
     r"(?P<chap>\d{1,3})"
+    rf"(?!\s+(?:{_NUMBERED_BOOK_WORDS})\b)"
     r"(?::(?P<verses>\d{1,3})|\s+(?:verse|verses|versus)\s+(?P<verses_word>\d{1,3}))?",
     re.IGNORECASE,
 )

@@ -397,6 +397,11 @@ class VerseViewApp(ctk.CTk):
                         variable=self.verse_interrupt_var).grid(row=r, column=0, sticky="w", padx=10, pady=(0, 3))
         r += 1
 
+        self.spoken_numeral_var = ctk.BooleanVar(value=False)
+        ctk.CTkCheckBox(f, text="Spoken Numeral Mode ('John three sixteen' → John 3:16, no 'verse' keyword needed)",
+                        variable=self.spoken_numeral_var).grid(row=r, column=0, sticky="w", padx=10, pady=(0, 3))
+        r += 1
+
         self.smart_amen_var = ctk.BooleanVar(value=True)
         ctk.CTkCheckBox(f, text="Smart Amen (auto-clear screen on 'Let us pray')",
                         variable=self.smart_amen_var).grid(row=r, column=0, sticky="w", padx=10, pady=(0, 3))
@@ -600,6 +605,7 @@ class VerseViewApp(ctk.CTk):
         self.verify_var.set(s.get("verify", True))
         # verse_text_confirm kept for backward compat when loading old settings
         self.verse_interrupt_var.set(s.get("verse_interrupt", s.get("verse_text_confirm", False)))
+        self.spoken_numeral_var.set(s.get("spoken_numeral_mode", False))
         self.smart_amen_var.set(s.get("smart_amen", True))
         self.auto_save_var.set(s.get("auto_save_notes", True))
         self.auto_start_var.set(s.get("auto_start", False))
@@ -671,6 +677,7 @@ class VerseViewApp(ctk.CTk):
             "manual_confirm":             self.manual_var.get(),
             "verify":                     self.verify_var.get(),
             "verse_interrupt":            self.verse_interrupt_var.get(),
+            "spoken_numeral_mode":        self.spoken_numeral_var.get(),
             "smart_amen":                 self.smart_amen_var.get(),
             "auto_save_notes":            self.auto_save_var.get(),
             "auto_start":                 self.auto_start_var.get(),
@@ -806,9 +813,11 @@ class VerseViewApp(ctk.CTk):
 
     def _append_log(self, msg: str):
         def _do():
+            at_bottom = self.log_box.yview()[1] >= 0.99
             self.log_box.configure(state="normal")
             self.log_box.insert("end", msg + "\n")
-            self.log_box.see("end")
+            if at_bottom:
+                self.log_box.see("end")
             self.log_box.configure(state="disabled")
         self.after(0, _do)
 
@@ -951,7 +960,8 @@ class VerseViewApp(ctk.CTk):
                 manual_confirm            = s["manual_confirm"],
                 confirm_callback          = self._user_confirm_callback,
                 verify                    = s["verify"],
-                verse_interrupt           = s.get("verse_interrupt", s.get("verse_text_confirm", False)),
+                verse_interrupt           = s["verse_interrupt"],
+                spoken_numeral_mode       = s.get("spoken_numeral_mode", False),
                 smart_amen                = s["smart_amen"],
                 panic_key                 = s["panic_key"],
                 live_points_prompt         = s["live_points_prompt"],

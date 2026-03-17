@@ -11,7 +11,7 @@ import requests
 import certifi
 import threading
 
-from parse_reference_eng import parse_references as parse_eng, normalize_numbers_only as norm_eng, resolve_book as resolve_book_eng
+from parse_reference_eng import parse_references as parse_eng, normalize_numbers_only as norm_eng, resolve_book as resolve_book_eng, set_spoken_numeral_mode
 from parse_reference_hindi import parse_references as parse_hindi, normalize_numbers_only as norm_hindi
 from parse_reference_ml import parse_references as parse_ml, normalize_numbers_only as norm_ml
 from bible_fetcher import fetch_verse as multi_fetch
@@ -419,7 +419,8 @@ SMART_AMEN_KEYWORDS = [
 # Bug 4 fix: Smart Amen debounce timer (cancelled by panic key or new speech)
 _smart_amen_timer: threading.Timer | None = None
 
-VERSE_INTERRUPT_ENABLED = False
+VERSE_INTERRUPT_ENABLED  = False
+SPOKEN_NUMERAL_MODE      = False
 
 # ── LLM CLIENTS (initialised in configure()) ─────────────────────────────────
 groq_client     = None   # verse extraction only            (Groq llama-3.1-8b-instant)
@@ -740,6 +741,7 @@ def configure(
     discord_webhook_url="", discord_log_webhook_url="", discord_notes_webhook_url="",
     confidence=0.75, manual_confirm=True,
     confirm_callback=None, verify=True, verse_interrupt=False,
+    spoken_numeral_mode=False,
     panic_key="esc", smart_amen=True,
     live_points_prompt="", live_points_callback=None, live_points_get_current_cb=None,
     live_points_enabled=False, silence_timeout=60,
@@ -756,6 +758,7 @@ def configure(
     global LIVE_POINTS_PROMPT, LIVE_POINTS_CALLBACK, LIVE_POINTS_GET_CURRENT_CB
     global LIVE_POINTS_ENABLED, SILENCE_TIMEOUT
     global normalize_numbers_only
+    global VERSE_INTERRUPT_ENABLED, SPOKEN_NUMERAL_MODE
     _cancel_vtc()
 
     # NOTE: Sermon buffer is intentionally NOT reset here so memory persists across stops/starts!
@@ -837,7 +840,10 @@ def configure(
     REQUIRE_VERIFY         = verify
     PANIC_KEY              = panic_key
     SMART_AMEN_ENABLED     = smart_amen
-    VERSE_INTERRUPT_ENABLED = verse_interrupt
+    VERSE_INTERRUPT_ENABLED  = verse_interrupt
+    SPOKEN_NUMERAL_MODE      = spoken_numeral_mode
+    set_spoken_numeral_mode(spoken_numeral_mode)
+    logger.info(f"🔣 Spoken Numeral Mode: {'ON' if spoken_numeral_mode else 'OFF'}")
     LIVE_POINTS_PROMPT         = live_points_prompt
     LIVE_POINTS_CALLBACK       = live_points_callback
     LIVE_POINTS_GET_CURRENT_CB = live_points_get_current_cb
@@ -981,6 +987,12 @@ def _start_vtc(ref, controller):
     """Fetch verse text via Bible API, then use LLM semantic check to confirm it was spoken. New ref cancels previous."""
     global _vtc_pending_ref, _vtc_trigger_words, _vtc_timer
     
+    # Chapter-only refs (e.g. "John 3") have no specific verse text to match — skip VTC
+    if ':' not in ref:
+        logger.debug(f"🔀 VTC skip: {ref} is chapter-only (no verse text to match)")
+        controller.send_verse(ref, bypass_cooldown=True)
+        return
+
     if _vtc_pending_ref == ref:
         return # Ignore duplicate detections of the same verse we are already waiting for
         
@@ -988,7 +1000,12 @@ def _start_vtc(ref, controller):
 
     text = fetch_verse_text(ref)
     if not text:
-        logger.warning(f"⚠️ VTC: Could not fetch text for {ref}. Sending instantly.")
+        # Retry once after 1s for transient API failures
+        logger.debug(f"🔄 VTC: fetch_verse_text({ref}) returned None, retrying in 1s...")
+        time.sleep(1.0)
+        text = fetch_verse_text(ref)
+    if not text:
+        logger.warning(f"⚠️ VTC: Could not fetch text for {ref} after retry. Sending instantly.")
         controller.send_verse(ref, bypass_cooldown=True)
         return
 
@@ -1793,7 +1810,12 @@ BOOK_CONTEXT_PHRASES = re.compile(
     r"|i\s+want\s+to\s+take\s+you\s+to\s+(?:the\s+)?book\s+of"
     r"|we'?re?\s+going\s+to\s+(?:the\s+)?book\s+of"
     r"|we'?re?\s+reading\s+from\s+(?:the\s+)?book\s+of"
+    r"|we'?re?\s+in\s+(?:the\s+)?book\s+of"
+    r"|here\s+in\s+(?:the\s+)?book\s+of"
+    r"|reading\s+in\s+(?:the\s+)?book\s+of"
     r"|(?:let'?s?\s+)?read\s+from\s+(?:the\s+)?book\s+of"
+    r"|in\s+(?:the\s+)?book\s+of"
+    r"|from\s+(?:the\s+)?book\s+of"
     r"|take\s+your\s+bibles?\s+to\s+(?:the\s+)?book\s+of"
     r"|(?:bring(?:ing)?|have)\s+(?:our|your\s+)?attention\s+(?:in|to)\s+(?:the\s+)?book\s+of"
     r"|attention\s+(?:in|to)\s+(?:the\s+)?book\s+of)\s+"
@@ -2023,6 +2045,18 @@ def detect_verse_hybrid(text, controller, confidence=1.0) -> bool:
                 _range_latch_active = True
                 _range_latch_ref = current_ref
 
+        # Layer 0 — "Next Verse" command
+        if current_book and current_chapter and current_verse:
+            if re.search(r'\bnext\s+verse\b', text, re.IGNORECASE):
+                # Do not fire if followed by an explicit number (e.g. "next verse fourteen")
+                if not re.search(r'\bnext\s+verse\s+\d+\b', num_norm.lower(), re.IGNORECASE):
+                    next_v = int(current_verse) + 1
+                    ref = f"{current_book} {current_chapter}:{next_v}"
+                    logger.info(f"🔍 NEXT VERSE: {ref} (100% Acc)")
+                    deliver_verse(ref, controller, bypass_cooldown=False, confidence=1.0)
+                    trigger_onwards_if_needed(ref, text)
+                    return True
+
         # BUG 5: Intercept multi-verse listings BEFORE Layer 1 parser
         # If there are 3+ numbers, no "chapter" keyword, and "verse" keyword is present
         # AND we have active book/chapter context -> force skip Layer 1 so Layer 2 handles it safely
@@ -2086,6 +2120,22 @@ def detect_verse_hybrid(text, controller, confidence=1.0) -> bool:
             if not is_blocked:
                 is_blocked = _reject_verse_out_of_range(verse)
             
+            if not is_blocked:
+                # Bug : Proper Name False Positive Guard (e.g. "Evangelist Daniel")
+                person_prefixes = r"(?:pastor|evangelist|brother|bro|sister|sis|prophet|apostle|reverend|rev|bishop|dr|mr|mrs|mister|miss|ms|minister)"
+                book_kw_pattern = '|'.join(re.escape(kw) for kw in sorted(BOOK_KEYWORDS, key=len, reverse=True))
+                name_guard_re = re.compile(rf'\b{person_prefixes}\b(?:\s+[a-z\.]+){{0,3}}\s+({book_kw_pattern})\b', re.IGNORECASE)
+                
+                for m_person in name_guard_re.finditer(text):
+                    book_kw_start = m_person.start(1)
+                    book_kw_end = m_person.end(1)
+                    text_without_name = text[:book_kw_start] + text[book_kw_end:]
+                    
+                    if verse not in PRIMARY_PARSER(text_without_name):
+                        logger.info(f"🚫 BLOCKED Layer 1 False Positive: {verse} (Person Name Prefix: '{m_person.group(0).strip()}')")
+                        is_blocked = True
+                        break
+
             if not is_blocked:
                 logger.info(f"🔍 PARSER: {verse} ({int(confidence*100)}% Acc)")
                 chap_num = verse.split()[-1]
