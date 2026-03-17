@@ -446,7 +446,7 @@ _blocked_context_hashes = {}
 _BLOCKED_DEDUP_SECS = 30.0
 _MAX_VERSE_NUMBER = 200
 _RANGE_INDICATOR_RE = re.compile(
-    r'\b(?:through|thru|until|from|to)\b|മുതൽ|വരെ',
+    r'\b(?:through|thru|until)\b|മുതൽ|വരെ',
     re.IGNORECASE,
 )
 
@@ -1900,8 +1900,22 @@ def _reject_verse_out_of_range(ref: str) -> bool:
 
 
 def _is_range_not_verse(sentence: str, chap: str, verse: str) -> bool:
-    """Return True if the chapter:verse pair appears to be a chapter range (X through Y),
-    not a verse citation — by checking for range-indicator words between the two numbers."""
+    """Bug Fix 3: Return True if the two numbers (chap, verse) represent a chapter
+    range rather than a chapter:verse citation, so the fast-path does NOT present
+    it as a verse.
+
+    Two detection strategies are used:
+
+    A) Digit-present path — the literal digits appear in the sentence and a range
+       indicator word sits between them (handles English: "Daniel 1 through 6").
+
+    B) Word-number path — the digits were produced by the parser normalising
+       Malayalam/spoken number words (e.g. "ഒന്നു"→1, "ആറു"→6), so they may NOT
+       appear literally in the raw sentence.  If ANY unambiguous range indicator is
+       present AND both numbers are plausible chapter numbers (≤ 50), treat as range.
+       (Verse numbers that large — e.g. Psalm 119:176 — would not appear in a normal
+       chapter-range description.)"""
+    # Strategy A: digit-literal check with range indicator between them
     for m_ch in re.finditer(rf'\b{re.escape(chap)}\b', sentence):
         cp = m_ch.end()
         for m_vs in re.finditer(rf'\b{re.escape(verse)}\b', sentence):
@@ -1910,6 +1924,15 @@ def _is_range_not_verse(sentence: str, chap: str, verse: str) -> bool:
                 between = sentence[cp:vp]
                 if _RANGE_INDICATOR_RE.search(between) or re.search(r'\s[-–]\s', between):
                     return True
+
+    # Strategy B: spoken / Malayalam number-word path
+    if _RANGE_INDICATOR_RE.search(sentence):
+        try:
+            if int(chap) <= 50 and int(verse) <= 50:
+                return True
+        except ValueError:
+            pass
+
     return False
 
 
@@ -2019,19 +2042,22 @@ def detect_verse_hybrid(text, controller, confidence=1.0) -> bool:
             
             # BUG 3: Unconditional Revelation guard (blocks "revelation" in commentary)
             if "Revelation" in verse:
-                # Bug Fix 1A: If >40% of context chars are Malayalam Unicode, the word
-                # "revelation" is an ASR transliteration artifact — skip detection entirely.
-                _ml_chars = sum(1 for c in text if '\u0D00' <= c <= '\u0D7F')
-                _nospace   = len(text.replace(' ', ''))
-                _is_ml_ctx = _nospace > 0 and (_ml_chars / _nospace) > 0.40
+                _ml_chars  = sum(1 for c in text if '\u0D00' <= c <= '\u0D7F')
+                _nospace    = len(text.replace(' ', ''))
+                _is_ml_ctx  = _nospace > 0 and (_ml_chars / _nospace) > 0.40
                 if _is_ml_ctx:
-                    logger.debug("🚫 Skipping Revelation detection: >40% Malayalam context")
+                    # Malayalam-dominant context — "revelation" is transliteration noise
+                    logger.debug(f"🚫 Revelation detection skipped: >40% Malayalam context in '{text[:60]}'")
+                    is_blocked = True
+                elif not re.search(r'\brevelation\b', text, re.IGNORECASE):
+                    # "Revelation" does not appear as an isolated English word at all
+                    if _dedup_blocked(text, "revelation"):
+                        logger.info(f"\U0001f6ab BLOCKED: 'Revelation' not a standalone English word in '{text[:60]}'")
                     is_blocked = True
                 elif not (re.search(r'\bbook\s+of\s+revelation\b', text, re.IGNORECASE) or
                           re.search(r'\brevelation\s+(?:chapter|chap|ch)\b', text, re.IGNORECASE) or
-                          re.search(r'\brevelation\s+\d+\b', text, re.IGNORECASE) or
-                          re.search(r'\brevelation\b', text, re.IGNORECASE)):
-                    # "revelation" does not appear as a standalone English word at all
+                          re.search(r'\brevelation\s+\d+\b', text, re.IGNORECASE)):
+                    # Standalone "Revelation" without chapter/explicit phrasing
                     if _dedup_blocked(text, "revelation"):
                         logger.info(f"\U0001f6ab BLOCKED: 'Revelation' without chapter/explicit phrasing in '{text[:60]}'")
                     is_blocked = True
@@ -2039,12 +2065,11 @@ def detect_verse_hybrid(text, controller, confidence=1.0) -> bool:
             # BUG 4: Unconditional Numbers guard (blocks bare numbers words mapped to book)
             if "Numbers " in verse:  # Note trailing space to only match the book "Numbers N"
                 if not (re.search(r'\bNumbers\s+(?:chapter|chap|ch)\b', text, re.IGNORECASE) or
-                        re.search(r'\bNumbers\s+\d+\b', text)):  # Must be capitalized in text OR
-                    if "numbers" in text.lower() and "Numbers" not in text: 
-                        # Only lowercase "numbers" in raw text -> false positive
-                        if _dedup_blocked(text, "numbers"):
-                            logger.info(f"\U0001f6ab BLOCKED: lowercase 'numbers' assumed as quantity in '{text[:60]}'")
-                        is_blocked = True
+                        re.search(r'\bNumbers\s+\d+\b', text) or
+                        re.search(r'\bbook\s+of\s+numbers\b', text, re.IGNORECASE)):
+                    if _dedup_blocked(text, "numbers"):
+                        logger.info(f"\U0001f6ab BLOCKED: 'Numbers' without chapter/explicit phrasing in '{text[:60]}'")
+                    is_blocked = True
 
             # Bug 5: Require an explicit anchor — a book name, chapter/verse keyword, or colon.
             # A bare digit from casual speech ("one more thing", "three reasons") is not sufficient.
