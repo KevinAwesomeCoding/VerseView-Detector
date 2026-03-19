@@ -10,6 +10,8 @@ import logging
 import requests
 import certifi
 import threading
+import datetime as _dt
+import json
 
 from parse_reference_eng import parse_references as parse_eng, normalize_numbers_only as norm_eng, resolve_book as resolve_book_eng, set_spoken_numeral_mode
 from parse_reference_hindi import parse_references as parse_hindi, normalize_numbers_only as norm_hindi
@@ -421,6 +423,8 @@ _smart_amen_timer: threading.Timer | None = None
 
 VERSE_INTERRUPT_ENABLED  = False
 SPOKEN_NUMERAL_MODE      = False
+WORSHIP_MODE             = False
+_verse_history: list     = []
 
 # ── LLM CLIENTS (initialised in configure()) ─────────────────────────────────
 groq_client     = None   # verse extraction only            (Groq llama-3.1-8b-instant)
@@ -741,7 +745,7 @@ def configure(
     discord_webhook_url="", discord_log_webhook_url="", discord_notes_webhook_url="",
     confidence=0.75, manual_confirm=True,
     confirm_callback=None, verify=True, verse_interrupt=False,
-    spoken_numeral_mode=False,
+    spoken_numeral_mode=False, worship_mode=False,
     panic_key="esc", smart_amen=True,
     live_points_prompt="", live_points_callback=None, live_points_get_current_cb=None,
     live_points_enabled=False, silence_timeout=60,
@@ -758,7 +762,9 @@ def configure(
     global LIVE_POINTS_PROMPT, LIVE_POINTS_CALLBACK, LIVE_POINTS_GET_CURRENT_CB
     global LIVE_POINTS_ENABLED, SILENCE_TIMEOUT
     global normalize_numbers_only
-    global VERSE_INTERRUPT_ENABLED, SPOKEN_NUMERAL_MODE
+    global VERSE_INTERRUPT_ENABLED, SPOKEN_NUMERAL_MODE, WORSHIP_MODE, _verse_history
+    WORSHIP_MODE = False
+    _verse_history.clear()
     _cancel_vtc()
 
     # NOTE: Sermon buffer is intentionally NOT reset here so memory persists across stops/starts!
@@ -842,6 +848,9 @@ def configure(
     SMART_AMEN_ENABLED     = smart_amen
     VERSE_INTERRUPT_ENABLED  = verse_interrupt
     SPOKEN_NUMERAL_MODE      = spoken_numeral_mode
+    WORSHIP_MODE             = worship_mode
+    logger.info(f"🎸 Worship Mode       : {'ON' if WORSHIP_MODE else 'OFF'}")
+    # ── Discord: citations ──
     set_spoken_numeral_mode(spoken_numeral_mode)
     logger.info(f"🔣 Spoken Numeral Mode: {'ON' if spoken_numeral_mode else 'OFF'}")
     LIVE_POINTS_PROMPT         = live_points_prompt
@@ -936,16 +945,23 @@ def fetch_verse_text(ref: str) -> str | None:
 
 
 # ── VERSE INTERRUPT (wait for speaker to say verse, then display; 60s timeout; cancel on new ref) ─
-def deliver_verse(ref: str, controller, bypass_cooldown=False, confidence=1.0):
+def deliver_verse(ref: str, controller, bypass_cooldown=False, confidence=1.0, source="UNKNOWN"):
     """
     Deliver a detected verse: if Verse Interrupt is on, wait for the speaker to say the verse
     (fetch text via Bible API, listen for trigger words, 60s timeout; new ref cancels current).
     Otherwise send directly to controller.
     """
     if VERSE_INTERRUPT_ENABLED:
-        _start_vtc(ref, controller)
+        _start_vtc(ref, controller, source=source)
     else:
-        controller.send_verse(ref, bypass_cooldown=bypass_cooldown, confidence=confidence)
+        controller.send_verse(ref, bypass_cooldown=bypass_cooldown, confidence=confidence, source=source)
+
+
+def get_verse_history() -> list:
+    return list(_verse_history)
+
+def clear_verse_history():
+    _verse_history.clear()
 
 
 # ── ONWARDS MODE ──────────────────────────────────────────────────────────────
@@ -976,27 +992,29 @@ def _stop_onwards():
     logger.info("⏹️ ONWARDS mode stopped")
 
 def _cancel_vtc():
-    global _vtc_pending_ref, _vtc_trigger_words, _vtc_timer
+    global _vtc_pending_ref, _vtc_trigger_words, _vtc_timer, _vtc_source
+    _vtc_source = "UNKNOWN"
     if _vtc_timer:
         _vtc_timer.cancel()
     _vtc_pending_ref   = None
     _vtc_trigger_words = []
     _vtc_timer         = None
 
-def _start_vtc(ref, controller):
+def _start_vtc(ref, controller, source="UNKNOWN"):
     """Fetch verse text via Bible API, then use LLM semantic check to confirm it was spoken. New ref cancels previous."""
-    global _vtc_pending_ref, _vtc_trigger_words, _vtc_timer
+    global _vtc_pending_ref, _vtc_trigger_words, _vtc_timer, _vtc_source
     
     # Chapter-only refs (e.g. "John 3") have no specific verse text to match — skip VTC
     if ':' not in ref:
         logger.debug(f"🔀 VTC skip: {ref} is chapter-only (no verse text to match)")
-        controller.send_verse(ref, bypass_cooldown=True)
+        controller.send_verse(ref, bypass_cooldown=True, source=source)
         return
 
     if _vtc_pending_ref == ref:
         return # Ignore duplicate detections of the same verse we are already waiting for
         
     _cancel_vtc()  # void any previous pending ref (cancel-on-new-ref)
+    _vtc_source = source
 
     text = fetch_verse_text(ref)
     if not text:
@@ -1006,7 +1024,7 @@ def _start_vtc(ref, controller):
         text = fetch_verse_text(ref)
     if not text:
         logger.warning(f"⚠️ VTC: Could not fetch text for {ref} after retry. Sending instantly.")
-        controller.send_verse(ref, bypass_cooldown=True)
+        controller.send_verse(ref, bypass_cooldown=True, source=source)
         return
 
     _vtc_pending_ref   = ref
@@ -1159,7 +1177,7 @@ def _check_onwards_advance(text, controller) -> bool:
                         _onwards_consecutive_no = 0  # reset mismatch counter on success
                         logger.info(f"🎯 ONWARDS ADVANCE: {current_ref} (Cerebras)")
                         _mark_advance_offset()
-                        controller.send_verse(current_ref, bypass_cooldown=True)
+                        controller.send_verse(current_ref, bypass_cooldown=True, source="ONWARDS")
                         onwards_verse += 1
                         _reset_onwards_timer()
                         threading.Thread(target=_fetch_next_onwards, daemon=True).start()
@@ -1195,7 +1213,7 @@ def _check_onwards_advance(text, controller) -> bool:
         threshold = min(2, len(check_words))
         if matches >= threshold:
             logger.info(f"🎯 ONWARDS ADVANCE: {onwards_target_ref} (heard '{onwards_trigger[:30]}')")
-            controller.send_verse(onwards_target_ref, bypass_cooldown=True)
+            controller.send_verse(onwards_target_ref, bypass_cooldown=True, source="ONWARDS")
             onwards_verse += 1
             _reset_onwards_timer()
             threading.Thread(target=_fetch_next_onwards, daemon=True).start()
@@ -1225,6 +1243,8 @@ _queue_last_check_time    = 0.0
 _queue_last_excerpt       = ""
 
 def check_verse_queue(transcript, controller) -> bool:
+    if WORSHIP_MODE:
+        return False
     global _queue_semantic_in_flight, _queue_last_excerpt, _queue_last_check_time
     global current_book, current_chapter, current_verse
     with verse_queue_lock:
@@ -1313,7 +1333,7 @@ def check_verse_queue(transcript, controller) -> bool:
                             return  # Queue advanced while we were checking
                     logger.info(f"🎯 AUTO-ADVANCE: {current_ref}")
                     _mark_advance_offset()
-                    controller.send_verse(current_ref, bypass_cooldown=True)
+                    controller.send_verse(current_ref, bypass_cooldown=True, source="QUEUE")
             except Exception:
                 if _shutdown_flag.is_set():
                     return
@@ -1631,7 +1651,7 @@ class VerseController:
         except Exception as e:
             logger.debug(f"Could not click close button (maybe already closed): {e}")
 
-    def send_verse(self, ref, bypass_cooldown=False, confidence=1.0):
+    def send_verse(self, ref, bypass_cooldown=False, confidence=1.0, source="UNKNOWN"):
         global current_book, current_chapter, current_verse, verses_cited
         global _session_verse_high_water
         now = time.time()
@@ -1658,7 +1678,7 @@ class VerseController:
                     )
                     if CONFIRM_CALLBACK(ref, confidence):
                         logger.info(f"✅ User manually approved: {ref}")
-                        self.send_verse(ref, bypass_cooldown=True, confidence=1.0)
+                        self.send_verse(ref, bypass_cooldown=True, confidence=1.0, source=source)
                     else:
                         logger.info(f"❌ User rejected: {ref}")
                 threading.Thread(target=_ask_thread, daemon=True).start()
@@ -1728,6 +1748,12 @@ class VerseController:
             self.driver.execute_script("arguments[0].value = arguments[1];", self.box, ref)
             self.driver.execute_script("arguments[0].click();", self.btn)
             logger.info(f"✅ PRESENTED: {ref}")
+
+            _verse_history.append({
+                "ref": ref,
+                "time": _dt.datetime.now().strftime("%H:%M:%S"),
+                "layer": source
+            })
 
             if ref not in verses_cited:
                 verses_cited.append(ref)
@@ -1957,8 +1983,16 @@ def _is_range_not_verse(sentence: str, chap: str, verse: str) -> bool:
 
     return False
 
+def deliver_verse(ref, controller, bypass_cooldown=False, confidence=1.0, source="UNKNOWN"):
+    """Helper function to deliver a verse, potentially with VTC."""
+    if VERSE_INTERRUPT_ENABLED:
+        _start_vtc(ref, controller, source=source)
+    else:
+        controller.send_verse(ref, bypass_cooldown=bypass_cooldown, confidence=confidence, source=source)
 
 def detect_verse_hybrid(text, controller, confidence=1.0) -> bool:
+    if WORSHIP_MODE:
+        return False
     global current_book, current_chapter, current_verse, _last_explicit_ref_time
 
     if not text or len(text.strip()) < 3:
@@ -2053,7 +2087,7 @@ def detect_verse_hybrid(text, controller, confidence=1.0) -> bool:
                     next_v = int(current_verse) + 1
                     ref = f"{current_book} {current_chapter}:{next_v}"
                     logger.info(f"🔍 NEXT VERSE: {ref} (100% Acc)")
-                    deliver_verse(ref, controller, bypass_cooldown=False, confidence=1.0)
+                    deliver_verse(ref, controller, bypass_cooldown=False, confidence=1.0, source="NEXT VERSE")
                     trigger_onwards_if_needed(ref, text)
                     return True
 
@@ -2062,7 +2096,7 @@ def detect_verse_hybrid(text, controller, confidence=1.0) -> bool:
         # AND we have active book/chapter context -> force skip Layer 1 so Layer 2 handles it safely
         is_multi_verse_list = False
         if current_book and current_chapter:
-            all_digits = re.findall(r'\b\d{1,3}\b', num_norm)
+            all_digits = re.findall(r'\b(\d{1,3})\b', num_norm)
             has_verse_kw = re.search(r'\b(?:verse|verses)\b', text, re.IGNORECASE)
             has_chap_kw  = re.search(r'\b(?:chapter|chap|ch)\b', text, re.IGNORECASE)
             if len(all_digits) >= 3 and has_verse_kw and not has_chap_kw:
@@ -2150,7 +2184,7 @@ def detect_verse_hybrid(text, controller, confidence=1.0) -> bool:
                     is_blocked = True
             if not is_blocked:
                 logger.info(f"🔍 PARSER: {verse} ({int(confidence*100)}% Acc)")
-                deliver_verse(verse, controller, bypass_cooldown=False, confidence=confidence)
+                deliver_verse(verse, controller, bypass_cooldown=False, confidence=confidence, source="PARSER")
                 _last_explicit_ref_time = time.time()
                 trigger_onwards_if_needed(verse, text)
                 if ":" in verse:
@@ -2177,7 +2211,7 @@ def detect_verse_hybrid(text, controller, confidence=1.0) -> bool:
                 candidate = m_vkw.group(1)
                 ref = f"{current_book} {current_chapter}:{candidate}"
                 logger.info(f"🔍 CONTEXTUAL: {ref} ({int(confidence*100)}% Acc)")
-                deliver_verse(ref, controller, bypass_cooldown=False, confidence=confidence)
+                deliver_verse(ref, controller, bypass_cooldown=False, confidence=confidence, source="CONTEXTUAL")
                 trigger_onwards_if_needed(ref, text)
                 check_and_queue_range(num_norm, ref, controller)
                 return True
@@ -2200,7 +2234,7 @@ def detect_verse_hybrid(text, controller, confidence=1.0) -> bool:
                 if is_valid:
                     ref = f"{current_book} {current_chapter}:{candidate}"
                     logger.info(f"🔍 CONTEXTUAL: {ref} ({int(confidence*100)}% Acc)")
-                    deliver_verse(ref, controller, bypass_cooldown=False, confidence=confidence)
+                    deliver_verse(ref, controller, bypass_cooldown=False, confidence=confidence, source="CONTEXTUAL")
                     trigger_onwards_if_needed(ref, text)
                     check_and_queue_range(num_norm, ref, controller)
                     return True
@@ -2210,7 +2244,7 @@ def detect_verse_hybrid(text, controller, confidence=1.0) -> bool:
         if m_hi and current_book and current_chapter:
             ref = f"{current_book} {current_chapter}:{m_hi.group(1)}"
             logger.info(f"🔍 HINDI CTX: {ref} ({int(confidence*100)}% Acc)")
-            deliver_verse(ref, controller, bypass_cooldown=False, confidence=confidence)
+            deliver_verse(ref, controller, bypass_cooldown=False, confidence=confidence, source="CONTEXTUAL")
             trigger_onwards_if_needed(ref, text)
             return True
 
@@ -2219,7 +2253,7 @@ def detect_verse_hybrid(text, controller, confidence=1.0) -> bool:
         if m_ml and current_book and current_chapter:
             ref = f"{current_book} {current_chapter}:{m_ml.group(1)}"
             logger.info(f"🔍 MALAYALAM CTX: {ref} ({int(confidence*100)}% Acc)")
-            deliver_verse(ref, controller, bypass_cooldown=False, confidence=confidence)
+            deliver_verse(ref, controller, bypass_cooldown=False, confidence=confidence, source="CONTEXTUAL")
             trigger_onwards_if_needed(ref, text)
             return True
 
@@ -2232,7 +2266,7 @@ def detect_verse_hybrid(text, controller, confidence=1.0) -> bool:
                     if int(candidate) == int(current_verse) + 1:
                         ref = f"{current_book} {current_chapter}:{candidate}"
                         logger.info(f"🔍 SEQUENTIAL: {ref} ({int(confidence*100)}% Acc)")
-                        deliver_verse(ref, controller, bypass_cooldown=False, confidence=confidence)
+                        deliver_verse(ref, controller, bypass_cooldown=False, confidence=confidence, source="SEQUENTIAL")
                         trigger_onwards_if_needed(ref, text)
                         return True
                 except ValueError:
@@ -2266,7 +2300,7 @@ def detect_verse_hybrid(text, controller, confidence=1.0) -> bool:
                             f"🔍 RANGE: {current_book} {current_chapter}:{start_v}→{end_v} "
                             f"({int(confidence*100)}% Acc)"
                         )
-                        deliver_verse(ref_start, controller, bypass_cooldown=False, confidence=confidence)
+                        deliver_verse(ref_start, controller, bypass_cooldown=False, confidence=confidence, source="RANGE")
                         queue_verse_range(current_book, current_chapter, start_v, end_v, controller)
                         trigger_onwards_if_needed(ref_start, text)
                         return True
@@ -2354,7 +2388,7 @@ def detect_verse_hybrid(text, controller, confidence=1.0) -> bool:
                 verse = extract_verse_with_llm(text)
                 if verse:
                     _last_explicit_ref_time = time.time()
-                    deliver_verse(verse, controller, bypass_cooldown=False, confidence=confidence)
+                    deliver_verse(verse, controller, bypass_cooldown=False, confidence=confidence, source="LLM")
                     trigger_onwards_if_needed(verse, text)
                     check_and_queue_range(text, verse, controller)
             finally:
@@ -2393,7 +2427,7 @@ def _detect_explicit_reference(sentence: str, controller) -> bool:
                 continue
 
             logger.info(f"⚡ FAST-PATH explicit ref: {ref}")
-            deliver_verse(ref, controller, bypass_cooldown=True, confidence=1.0)
+            deliver_verse(ref, controller, bypass_cooldown=True, confidence=1.0, source="FAST-PATH")
             trigger_onwards_if_needed_standalone(ref, sentence)
             return True
     return False
@@ -2414,6 +2448,8 @@ def trigger_onwards_if_needed_standalone(ref_string: str, original_text: str):
 
 
 def _process_transcript_blob(sentence: str, partial_context_ref: list, controller):
+    if WORSHIP_MODE:
+        return
     # Bug 5: Self-correction detector — if the speaker says 'sorry' / 'I mean' / 'I meant',
     # discard the text before the correction and only parse what follows it.
     _corr_m = _CORRECTION_RE.search(sentence)

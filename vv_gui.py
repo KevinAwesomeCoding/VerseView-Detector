@@ -42,10 +42,11 @@ class VerseViewApp(ctk.CTk):
         self.minsize(800, 500)
 
 
-        self._s             = cfg.load()
-        self._running       = False
-        self._engine_thread = None
-        self._notes_saved   = False
+        self._s                   = cfg.load()
+        self._running             = False
+        self._engine_thread       = None
+        self._notes_saved         = False
+        self._worship_mode_active = False
 
 
         self._build_ui()
@@ -56,6 +57,8 @@ class VerseViewApp(ctk.CTk):
         self.bind("<Shift-Escape>", lambda e: self._panic_shortcut())
         # Trigger auto-start / smart schedule after window is ready
         self.after(500, self._check_auto_start)
+        self._last_history_len = 0
+        self.after(1000, self._update_history_loop)
 
 
     # ─────────────────────────────────────────────────
@@ -112,12 +115,50 @@ class VerseViewApp(ctk.CTk):
         )
         self.lbl_status.pack(side="left")
 
+        self.btn_worship = ctk.CTkButton(
+            top, text="🎵 Worship Mode", width=130,
+            fg_color="transparent", border_color="#5a3a8a", border_width=2,
+            text_color=("gray20", "gray90"), hover_color="#3f2060",
+            font=ctk.CTkFont(size=13, weight="bold"),
+            command=self._toggle_worship_mode
+        )
+        self.btn_worship.pack(side="right", padx=(16, 0))
+
+
+        # ── SPLIT FRAME FOR LOGS AND HISTORY ──
+        split_frame = ctk.CTkFrame(left, fg_color="transparent")
+        split_frame.grid(row=1, column=0, padx=10, pady=(0, 10), sticky="nsew")
+        split_frame.grid_rowconfigure(1, weight=1)
+        split_frame.grid_columnconfigure(0, weight=1) 
+        split_frame.grid_columnconfigure(1, weight=0) # lock sidebar width
 
         self.log_box = ctk.CTkTextbox(
-            left, state="disabled",
+            split_frame, state="disabled",
             font=("Segoe UI", 12), wrap="word"
         )
-        self.log_box.grid(row=1, column=0, padx=10, pady=(0, 10), sticky="nsew")
+        self.log_box.grid(row=1, column=0, padx=(0, 2), sticky="nsew")
+
+        history_right = ctk.CTkFrame(split_frame, fg_color="transparent", width=180)
+        history_right.grid(row=1, column=1, padx=(2, 0), sticky="nsew")
+        history_right.grid_rowconfigure(1, weight=1)
+        history_right.grid_columnconfigure(0, weight=1)
+        history_right.grid_propagate(False) # follow fixed width
+
+        self.btn_clear_history = ctk.CTkButton(
+            history_right, text="Clear", height=20, width=50,
+            fg_color="transparent", border_width=1,
+            text_color=("gray40", "gray60"),
+            font=ctk.CTkFont(size=11),
+            command=self._clear_verse_history
+        )
+        self.btn_clear_history.grid(row=0, column=0, pady=(0, 2), sticky="ew")
+
+        self.history_box = ctk.CTkTextbox(
+            history_right, state="disabled",
+            font=("Segoe UI", 9), wrap="none",
+            width=180
+        )
+        self.history_box.grid(row=1, column=0, sticky="nsew")
 
 
         # ── ACTION BUTTONS ROW ──
@@ -600,6 +641,11 @@ class VerseViewApp(ctk.CTk):
         saved_conf = s.get("confidence", 0.75)
         self.conf_var.set(saved_conf)
         self.conf_val_label.configure(text=f"Confidence Threshold: {int(saved_conf * 100)}%")
+
+        # Reset Worship Mode button visually if it was active
+        if self._worship_mode_active:
+            self.btn_worship.configure(fg_color="transparent", text_color=("gray20", "gray90"))
+        self._worship_mode_active = False
 
         self.manual_var.set(s.get("manual_confirm", True))
         self.verify_var.set(s.get("verify", True))
@@ -1097,6 +1143,54 @@ class VerseViewApp(ctk.CTk):
             self._append_log("🗑️ Sermon memory wiped clean for the next service.")
 
 
+    def _toggle_worship_mode(self):
+        self._worship_mode_active = not self._worship_mode_active
+        engine.WORSHIP_MODE = self._worship_mode_active
+        if self._worship_mode_active:
+            self.btn_worship.configure(fg_color="#5a3a8a", text_color="white")
+            self._append_log("🎵 Worship Mode ON — verse detection suspended")
+        else:
+            self.btn_worship.configure(fg_color="transparent", text_color=("gray20", "gray90"))
+            self._append_log("🎵 Worship Mode OFF — verse detection resumed")
+
+
+    def _clear_verse_history(self):
+        engine.clear_verse_history()
+        self._last_history_len = 0
+        self.history_box.configure(state="normal")
+        self.history_box.delete("1.0", "end")
+        self.history_box.configure(state="disabled")
+
+    def _update_history_loop(self):
+        try:
+            hist = engine.get_verse_history()
+            if len(hist) != self._last_history_len:
+                if len(hist) == 0:
+                    self.history_box.configure(state="normal")
+                    self.history_box.delete("1.0", "end")
+                    self.history_box.configure(state="disabled")
+                    self._last_history_len = 0
+                else:
+                    new_items = hist[self._last_history_len:]
+                    
+                    # Check if scrolled to bottom before inserting
+                    is_at_bottom = self.history_box.yview()[1] == 1.0
+
+                    self.history_box.configure(state="normal")
+                    for item in new_items:
+                        line = f"[{item['time']}] {item['ref']}\n"
+                        self.history_box.insert("end", line)
+                    self.history_box.configure(state="disabled")
+
+                    if is_at_bottom:
+                        self.history_box.see("end")
+                    
+                    self._last_history_len = len(hist)
+        except Exception as e:
+            pass
+        finally:
+            self.after(1000, self._update_history_loop)
+
     def on_closing(self):
         if self.auto_save_var.get() and not self._notes_saved and engine.full_sermon_transcript and len(engine.full_sermon_transcript.strip()) > 100:
             self.lbl_status.configure(text="● Auto-Saving Notes...", text_color="#a07020")
@@ -1130,6 +1224,7 @@ class VerseViewApp(ctk.CTk):
             engine._discord_live_log.set_close_message(
                 "⚠️ App closed without Stop — auto-generated summary and log attached"
             )
+            self._append_log("⚠️ App closed without Stop — auto-generated summary and log attached")
             engine.request_stop()
         self.destroy()
 
