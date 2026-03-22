@@ -39,7 +39,8 @@ a = Analysis(
         'pynput.keyboard._win32',
         'webdriver_manager',
         'sarvamai',
-        'keyboard'
+        'keyboard',
+        'PyATEMMax',
     ],
     hookspath=[],
     runtime_hooks=[],
