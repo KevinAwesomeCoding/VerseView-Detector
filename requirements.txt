@@ -9,3 +9,4 @@ certifi
 openai
 requests
 pynput
+PyATEMMax
