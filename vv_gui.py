@@ -153,12 +153,11 @@ class VerseViewApp(ctk.CTk):
         )
         self.btn_clear_history.grid(row=0, column=0, pady=(0, 2), sticky="ew")
 
-        self.history_box = ctk.CTkTextbox(
-            history_right, state="disabled",
-            font=("Segoe UI", 9), wrap="none",
-            width=180
+        self.history_scroll_frame = ctk.CTkScrollableFrame(
+            history_right, width=168, label_text=""
         )
-        self.history_box.grid(row=1, column=0, sticky="nsew")
+        self.history_scroll_frame.grid(row=1, column=0, sticky="nsew")
+        self.history_scroll_frame.grid_columnconfigure(0, weight=1)
 
 
         # ── ACTION BUTTONS ROW ──
@@ -467,6 +466,30 @@ class VerseViewApp(ctk.CTk):
                      font=ctk.CTkFont(size=11)).grid(row=r, column=0, sticky="w", padx=10, pady=(0, 6))
         r += 1
 
+        # ── ATEM Chroma Key Overlay ──
+        o_sep("🎬 ATEM Chroma Key Overlay")
+
+        self.atem_var = ctk.BooleanVar(value=False)
+        ctk.CTkCheckBox(f, text="Enable ATEM Keyer on Verse Display",
+                        variable=self.atem_var).grid(
+            row=r, column=0, sticky="w", padx=10, pady=(0, 4))
+        r += 1
+
+        atem_sub = ctk.CTkFrame(f, fg_color="transparent")
+        atem_sub.grid(row=r, column=0, sticky="ew", padx=10, pady=(0, 6))
+        atem_sub.grid_columnconfigure(1, weight=1)
+        r += 1
+
+        ctk.CTkLabel(atem_sub, text="ATEM IP", anchor="w", width=70).grid(
+            row=0, column=0, padx=(0, 6), pady=2, sticky="w")
+        self.atem_ip_entry = ctk.CTkEntry(atem_sub, placeholder_text="192.168.1.240", width=140)
+        self.atem_ip_entry.grid(row=0, column=1, sticky="ew", pady=2)
+
+        ctk.CTkLabel(atem_sub, text="Key On (s)", anchor="w", width=70).grid(
+            row=1, column=0, padx=(0, 6), pady=2, sticky="w")
+        self.atem_dur_entry = ctk.CTkEntry(atem_sub, placeholder_text="5.0", width=60)
+        self.atem_dur_entry.grid(row=1, column=1, sticky="w", pady=2)
+
         # ── Panic keybind ──
         o_sep("Panic Keybind")
         self.panic_var = ctk.StringVar(value="esc")
@@ -696,6 +719,10 @@ class VerseViewApp(ctk.CTk):
         self.silence_entry.delete(0, "end");  self.silence_entry.insert(0,  str(s.get("silence_timeout",  60)))
         self.llm_var.set("Enabled" if s.get("llm_enabled", True) else "Disabled")
 
+        self.atem_var.set(s.get("atem_enabled", False))
+        self.atem_ip_entry.delete(0, "end");  self.atem_ip_entry.insert(0,  s.get("atem_ip", "192.168.1.240"))
+        self.atem_dur_entry.delete(0, "end"); self.atem_dur_entry.insert(0, str(s.get("atem_key_duration", 5.0)))
+
         # ── load all 3 Discord webhook URLs ──
         for attr, key in [
             ("dg_key_entry",       "deepgram_api_key"),
@@ -749,6 +776,9 @@ class VerseViewApp(ctk.CTk):
             "discord_log_webhook_url":    self.dc_log_key_entry.get(),
             "discord_notes_webhook_url":  self.dc_notes_key_entry.get(),
             "mic_index":                  self._mic_index(),
+            "atem_enabled":               self.atem_var.get(),
+            "atem_ip":                    self.atem_ip_entry.get().strip() or "192.168.1.240",
+            "atem_key_duration":          self._safe_float(self.atem_dur_entry, 5.0),
         }
 
 
@@ -1015,6 +1045,9 @@ class VerseViewApp(ctk.CTk):
                 live_points_get_current_cb = self.live_app.get_current_display,
                 live_points_enabled        = self.live_app.is_live_llm_enabled(),
                 silence_timeout            = s.get("silence_timeout", 60),
+                atem_enabled               = s.get("atem_enabled", False),
+                atem_ip                    = s.get("atem_ip", "192.168.1.240"),
+                atem_key_duration          = s.get("atem_key_duration", 5.0),
             )
 
 
@@ -1157,36 +1190,79 @@ class VerseViewApp(ctk.CTk):
     def _clear_verse_history(self):
         engine.clear_verse_history()
         self._last_history_len = 0
-        self.history_box.configure(state="normal")
-        self.history_box.delete("1.0", "end")
-        self.history_box.configure(state="disabled")
+        for w in self.history_scroll_frame.winfo_children():
+            w.destroy()
+
+    def _open_verse_popup(self, ref: str):
+        """Open a large popup showing the verse text for a history entry."""
+        win = ctk.CTkToplevel(self)
+        win.title(ref)
+        win.geometry("520x340")
+        win.resizable(True, True)
+        win.attributes("-topmost", True)
+        self.after(150, lambda: win.attributes("-topmost", False))
+
+        textbox = ctk.CTkTextbox(win, font=("Segoe UI", 18), wrap="word")
+        textbox.pack(fill="both", expand=True, padx=14, pady=(14, 6))
+        textbox.insert("1.0", f"📖  {ref}\n\n(Loading verse text...)")
+        textbox.configure(state="disabled")
+
+        def _load_verse():
+            text = engine.fetch_verse_text(ref)
+            def _update():
+                textbox.configure(state="normal")
+                textbox.delete("1.0", "end")
+                if text:
+                    textbox.insert("1.0", f"📖  {ref}\n\n{text}")
+                else:
+                    textbox.insert("1.0", f"📖  {ref}\n\n(Verse text unavailable — check Bible translation setting)")
+                textbox.configure(state="disabled")
+            self.after(0, _update)
+
+        threading.Thread(target=_load_verse, daemon=True).start()
+
+        def _resend():
+            ctrl = getattr(engine, "_controller", None)
+            if ctrl:
+                engine.deliver_verse(ref, ctrl, bypass_cooldown=True)
+                self._append_log(f"🔁 Re-sent from history: {ref}")
+            else:
+                self._append_log(f"⚠️ Engine not running — cannot re-send {ref}")
+
+        ctk.CTkButton(
+            win, text="🔁 Send Again",
+            font=ctk.CTkFont(size=13, weight="bold"),
+            fg_color="#2a7a2a", hover_color="#1f5c1f",
+            command=_resend
+        ).pack(pady=(0, 12))
 
     def _update_history_loop(self):
         try:
             hist = engine.get_verse_history()
             if len(hist) != self._last_history_len:
                 if len(hist) == 0:
-                    self.history_box.configure(state="normal")
-                    self.history_box.delete("1.0", "end")
-                    self.history_box.configure(state="disabled")
+                    for w in self.history_scroll_frame.winfo_children():
+                        w.destroy()
                     self._last_history_len = 0
                 else:
                     new_items = hist[self._last_history_len:]
-                    
-                    # Check if scrolled to bottom before inserting
-                    is_at_bottom = self.history_box.yview()[1] == 1.0
-
-                    self.history_box.configure(state="normal")
                     for item in new_items:
-                        line = f"[{item['time']}] {item['ref']}\n"
-                        self.history_box.insert("end", line)
-                    self.history_box.configure(state="disabled")
-
-                    if is_at_bottom:
-                        self.history_box.see("end")
-                    
+                        ref  = item["ref"]
+                        lbl  = f"[{item['time']}] {ref}"
+                        btn  = ctk.CTkButton(
+                            self.history_scroll_frame,
+                            text=lbl,
+                            anchor="w",
+                            fg_color="transparent",
+                            hover_color=("gray80", "gray25"),
+                            text_color=("gray20", "gray85"),
+                            font=ctk.CTkFont(size=10),
+                            height=22,
+                            command=lambda r=ref: self._open_verse_popup(r),
+                        )
+                        btn.pack(fill="x", padx=2, pady=1)
                     self._last_history_len = len(hist)
-        except Exception as e:
+        except Exception:
             pass
         finally:
             self.after(1000, self._update_history_loop)
