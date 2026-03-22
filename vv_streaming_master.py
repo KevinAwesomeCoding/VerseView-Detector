@@ -2050,7 +2050,9 @@ def _is_range_not_verse(sentence: str, chap: str, verse: str) -> bool:
 
 # ── Bug Fix 1: Book-count guard ───────────────────────────────────────────────
 _BOOK_COUNT_RE = re.compile(
-    r'\b(\d+)\s+(?:books?|പുസ്തകങ്ങൾ|പുസ്തകം)',
+    r'\b(\d+)\s+(?:books?|episodes?|letters?|chapters?|times?|'
+    r'missionaries|journeys?|trips?|people|men|women|'
+    r'പുസ്തകങ്ങൾ|പുസ്തകം)',
     re.IGNORECASE
 )
 
@@ -2081,6 +2083,18 @@ def _strip_ordinal_occasions(text: str) -> str:
 def _is_john_the_baptist(text: str) -> bool:
     """Return True if 'John' in this text refers to John the Baptist, not the Gospel."""
     return bool(re.search(r'\bJohn\s+the\s+Baptist\b', text, re.IGNORECASE))
+
+
+def _is_john_surname(text: str) -> bool:
+    """Return True if 'John' in this text only appears as part of a 
+    surname like Johnson, Johnston, Johnny — not as a standalone word."""
+    # If "John" appears standalone (word boundary on both sides), it's legit
+    if re.search(r'\bJohn\b', text, re.IGNORECASE):
+        return False
+    # "John" only appears embedded in a longer word (e.g. Johnson)
+    if re.search(r'\bJohn\w+', text, re.IGNORECASE):
+        return True
+    return False
     """Helper function to deliver a verse, potentially with VTC."""
     if VERSE_INTERRUPT_ENABLED:
         _start_vtc(ref, controller, source=source)
@@ -2221,7 +2235,7 @@ def detect_verse_hybrid(text, controller, confidence=1.0) -> bool:
                         logger.info(f"\U0001f6ab BLOCKED: 'Revelation' not a standalone English word in '{text[:60]}'")
                     is_blocked = True
                 elif not (re.search(r'\bbook\s+of\s+revelation\b', text, re.IGNORECASE) or
-                          re.search(r'\brevelation\s+(?:chapter|chap|ch)\b', text, re.IGNORECASE) or
+                          re.search(r'\brevelation\s+(?:chapters?|chap|ch)\b', text, re.IGNORECASE) or
                           re.search(r'\brevelation\s+\d+\b', text, re.IGNORECASE)):
                     # Standalone "Revelation" without chapter/explicit phrasing
                     if _dedup_blocked(text, "revelation"):
@@ -2284,7 +2298,11 @@ def detect_verse_hybrid(text, controller, confidence=1.0) -> bool:
                     has_verse_kw = re.search(r'\b(?:verse|verses)\b|വാക്യ|വചന', text, re.IGNORECASE)
                     try:
                         chap_int = int(chap_token)
-                        if has_verse_kw and chap_token != current_chapter and chap_int <= 50:
+                        # Only block if the ref's book matches current_book.
+                        # If the parser found a different book explicitly, trust it.
+                        ref_book = " ".join(verse.split()[:-1]).strip().lower()
+                        same_book = (ref_book == (current_book or "").lower())
+                        if has_verse_kw and chap_token != current_chapter and chap_int <= 50 and same_book:
                             logger.info(f"🚫 BLOCKED: {verse} — chapter looks like verse number in {current_book} {current_chapter} context")
                             is_blocked = True
                     except ValueError:
@@ -2292,7 +2310,7 @@ def detect_verse_hybrid(text, controller, confidence=1.0) -> bool:
 
             if not is_blocked:
                 # Bug Fix 3B: "John the Baptist" is not the book of John
-                if "John" in verse and _is_john_the_baptist(text):
+                if "John" in verse and (_is_john_the_baptist(text) or _is_john_surname(text)):
                     logger.info(f"🚫 BLOCKED: 'John the Baptist' is not the book of John in '{text[:60]}'")
                     is_blocked = True
 
@@ -2554,7 +2572,7 @@ def _detect_explicit_reference(sentence: str, controller) -> bool:
             if _is_book_count_number(sentence, chap):
                 logger.debug(f"⚡ FAST-PATH skipped: '{ref}' chapter is a book-count in '{sentence[:60]}'")
                 continue
-            if "John" in ref and _is_john_the_baptist(sentence):
+            if "John" in ref and (_is_john_the_baptist(sentence) or _is_john_surname(sentence)):
                 logger.debug(f"⚡ FAST-PATH skipped: 'John the Baptist' is not the book of John")
                 continue
             if _reject_verse_out_of_range(ref):
