@@ -6,34 +6,50 @@ import tkinter.filedialog as fd
 import tkinter.messagebox as mb
 
 DEFAULTS = {
+    # ── API Keys ──
     "deepgram_api_key":           "",
     "groq_api_key":               "",
+    "gemini_api_key":             "",
     "cerebras_api_key":           "",
     "mistral_api_key":            "",
     "sarvam_api_key":             "",
     "discord_webhook_url":        "",
     "discord_log_webhook_url":    "",
     "discord_notes_webhook_url":  "",
+    # ── Language / Input ──
     "language":                   "English (Nova-2)",
     "mic_index":                  0,
+    "show_malayalam_raw":         False,
+    # ── Display ──
     "remote_url":                 "http://localhost:50010/control.html",
+    "display_screen":             "Display 2 (Right/Extended)",
     "bible_translation":          "KJV",
+    # ── Audio / Timing ──
     "rate":                       16000,
     "chunk":                      4096,
     "cooldown":                   3.0,
     "dedup_window":               60,
+    "silence_timeout":            60,
+    # ── Detection Options ──
     "llm_enabled":                True,
     "confidence":                 0.75,
     "manual_confirm":             True,
     "verify":                     True,
+    "verse_interrupt":            False,
+    "spoken_numeral_mode":        False,
     "smart_amen":                 True,
+    # ── App Behaviour ──
     "auto_save_notes":            True,
     "auto_start":                 False,
     "smart_schedule":             False,
     "panic_key":                  "esc",
+    # ── Live Points ──
     "live_points_prompt":         "",
     "live_points_llm_enabled":    False,
-    "silence_timeout":            60,
+    # ── ATEM Chroma Key Overlay ──
+    "atem_enabled":               False,
+    "atem_ip":                    "192.168.1.240",
+    "atem_key_duration":          5.0,
 }
 
 
