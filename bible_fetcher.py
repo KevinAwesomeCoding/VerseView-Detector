@@ -214,3 +214,109 @@ def fetch_verse(ref: str, translation: str = "kjv") -> str | None:
         return _fetch_bible_api_com(ref, "kjv")
 
     return None
+
+
+def _parse_helloao_verse_content(content: list) -> str:
+    """Extract plain text from a helloao verse content array.
+    Items can be dicts with 'text' key, dicts with other keys (headings, verse
+    numbers, footnote markers), or raw strings — we only want the spoken text."""
+    parts = []
+    for item in content:
+        if isinstance(item, str):
+            # raw string node — usually whitespace, skip
+            continue
+        if not isinstance(item, dict):
+            continue
+        # Only accept items whose sole or primary purpose is body text
+        item_type = item.get("type", "")
+        if item_type in ("heading", "verse_number", "footnote", "note",
+                         "cross_reference", "poetry_indent"):
+            continue
+        t = item.get("text", "").strip()
+        if t:
+            parts.append(t)
+    return " ".join(parts).strip()
+
+
+def _fetch_chapter_helloao(book: str, chapter: str, translation: str) -> list:
+    book_id = HELLOAO_BOOK_IDS.get(book.lower())
+    if not book_id:
+        return []
+    tl = translation.upper()
+    try:
+        url = f"https://bible.helloao.org/api/{tl}/{book_id}/{chapter}.json"
+        r   = requests.get(url, timeout=10, verify=certifi.where())
+        if r.status_code != 200:
+            logger.debug(f"fetch_chapter helloao: HTTP {r.status_code} [{tl}]")
+            return []
+        verses  = r.json().get("chapter", {}).get("verses", [])
+        result  = []
+        for v in verses:
+            text = _parse_helloao_verse_content(v.get("content", []))
+            if not text:
+                # second pass — just grab any "text" field regardless of type
+                text = " ".join(
+                    item.get("text", "") for item in v.get("content", [])
+                    if isinstance(item, dict) and item.get("text", "").strip()
+                ).strip()
+            if text:
+                result.append({"num": v.get("number"), "text": text})
+        return result
+    except Exception as e:
+        logger.debug(f"fetch_chapter helloao error: {e}")
+    return []
+
+
+def _fetch_chapter_bible_api_com(book: str, chapter: str, translation: str) -> list:
+    """bible-api.com supports WEB/KJV/ASV etc. and returns full chapters."""
+    tl = translation.lower()
+    # bible-api.com only supports a subset
+    if tl not in ("kjv", "web", "asv", "oeb", "webbe", "clementine", "almeida", "rccv"):
+        tl = "kjv"
+    try:
+        book_slug = book.lower().replace(" ", "+")
+        url = f"https://bible-api.com/{book_slug}+{chapter}?translation={tl}"
+        r   = requests.get(url, timeout=10, verify=certifi.where())
+        if r.status_code != 200:
+            logger.debug(f"fetch_chapter bible-api.com: HTTP {r.status_code} [{tl}]")
+            return []
+        data   = r.json()
+        verses = data.get("verses", [])
+        return [
+            {"num": v.get("verse"), "text": v.get("text", "").strip()}
+            for v in verses
+            if v.get("text", "").strip()
+        ]
+    except Exception as e:
+        logger.debug(f"fetch_chapter bible-api.com error: {e}")
+    return []
+
+
+def fetch_chapter(book: str, chapter: str, translation: str = "kjv") -> list:
+    """Return [{num: int, text: str}, ...] for every verse in the chapter.
+
+    Tries helloao first (supports 1000+ translations), then falls back to
+    bible-api.com (reliable WEB/KJV support), then falls back to KJV on
+    bible-api.com as a last resort.
+    """
+    tl = translation.lower()
+
+    # 1 — helloao (best coverage)
+    result = _fetch_chapter_helloao(book, chapter, tl)
+    if result:
+        return result
+
+    # 2 — bible-api.com
+    result = _fetch_chapter_bible_api_com(book, chapter, tl)
+    if result:
+        return result
+
+    # 3 — KJV fallback on bible-api.com
+    if tl != "kjv":
+        logger.warning(f"⚠️ fetch_chapter: {translation} failed for {book} {chapter}, falling back to KJV")
+        result = _fetch_chapter_bible_api_com(book, chapter, "kjv")
+        if result:
+            return result
+
+    logger.warning(f"⚠️ fetch_chapter: all APIs failed for {book} {chapter} [{translation}]")
+    return []

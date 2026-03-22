@@ -16,7 +16,11 @@ import json
 from parse_reference_eng import parse_references as parse_eng, normalize_numbers_only as norm_eng, resolve_book as resolve_book_eng, set_spoken_numeral_mode
 from parse_reference_hindi import parse_references as parse_hindi, normalize_numbers_only as norm_hindi
 from parse_reference_ml import parse_references as parse_ml, normalize_numbers_only as norm_ml
-from bible_fetcher import fetch_verse as multi_fetch
+from bible_fetcher import fetch_verse as multi_fetch, fetch_chapter as _fetch_chapter_raw
+
+def fetch_chapter_verses(book: str, chapter: str) -> list:
+    """GUI-callable: returns [{num, text}] for the current translation."""
+    return _fetch_chapter_raw(book, chapter, BIBLE_TRANSLATION)
 
 # Default to English normalizer until set_language() is called
 normalize_numbers_only = norm_eng
@@ -297,6 +301,17 @@ class _DiscordLiveLog:
         self._stop_evt.set()
         self._delete()
         self._upload_log_file()
+
+    def reset(self):
+        """Re-arm for a new session: clear state and restart the flush thread."""
+        with self._lock:
+            self._msg_id        = None
+            self._lines         = []
+            self._dirty         = False
+            self._close_message = ""
+        self._stop_evt.clear()
+        t = threading.Thread(target=self._flush_loop, daemon=True)
+        t.start()
 
 
 class _DiscordLogHandler(logging.Handler):
@@ -800,6 +815,11 @@ def configure(
     WORSHIP_MODE = False
     _verse_history.clear()
     _cancel_vtc()
+
+    # Reset Discord live log and session log stream for fresh session
+    _discord_live_log.reset()
+    session_log_stream.truncate(0)
+    session_log_stream.seek(0)
 
     # NOTE: Sermon buffer is intentionally NOT reset here so memory persists across stops/starts!
     global _llm_in_flight
@@ -1694,6 +1714,10 @@ class VerseController:
     def send_verse(self, ref, bypass_cooldown=False, confidence=1.0, source="UNKNOWN"):
         global current_book, current_chapter, current_verse, verses_cited
         global _session_verse_high_water
+        # Worship Mode is the master gate — nothing gets through regardless of source
+        if WORSHIP_MODE:
+            logger.debug(f"🎵 Worship Mode: suppressed {ref}")
+            return False
         now = time.time()
         logger.debug(f"VerseController.send_verse: ref={ref}, bypass={bypass_cooldown}")
 
@@ -2969,12 +2993,25 @@ async def main():
             except Exception:
                 pass
         _active_bg_threads.clear()
-        
-        points_task.cancel()
-        watchdog_task.cancel()
+
+        try:
+            points_task.cancel()
+        except Exception:
+            pass
+        try:
+            watchdog_task.cancel()
+        except Exception:
+            pass
         if panic_listener:
-            panic_listener.stop()
-        _controller.cleanup()
+            try:
+                panic_listener.stop()
+            except Exception:
+                pass
+        if _controller:
+            try:
+                _controller.cleanup()
+            except Exception:
+                pass
         _controller = None
         logger.info(f"📊 LLM calls: {LLM_CALL_COUNT}")
         logger.info("Shutdown complete")

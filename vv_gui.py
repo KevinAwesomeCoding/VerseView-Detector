@@ -59,6 +59,7 @@ class VerseViewApp(ctk.CTk):
         self.after(500, self._check_auto_start)
         self._last_history_len = 0
         self.after(1000, self._update_history_loop)
+        self.after(1500, self._update_chapter_browser_loop)
 
 
     # ─────────────────────────────────────────────────
@@ -138,11 +139,17 @@ class VerseViewApp(ctk.CTk):
         )
         self.log_box.grid(row=1, column=0, padx=(0, 2), sticky="nsew")
 
+        # Read the actual rendered bg color from log_box so scroll frames match exactly
+        _log_fg = ("gray86", "gray17")
+
         history_right = ctk.CTkFrame(split_frame, fg_color="transparent", width=180)
         history_right.grid(row=1, column=1, padx=(2, 0), sticky="nsew")
-        history_right.grid_rowconfigure(1, weight=1)
+        history_right.grid_rowconfigure(1, weight=1)   # verse history — grows
+        history_right.grid_rowconfigure(3, weight=1)   # chapter browser — grows equally
+        history_right.grid_rowconfigure(2, weight=0)   # divider label — fixed
+        history_right.grid_rowconfigure(4, weight=0)   # manual entry — fixed
         history_right.grid_columnconfigure(0, weight=1)
-        history_right.grid_propagate(False) # follow fixed width
+        history_right.grid_propagate(False)
 
         self.btn_clear_history = ctk.CTkButton(
             history_right, text="Clear", height=20, width=50,
@@ -153,11 +160,70 @@ class VerseViewApp(ctk.CTk):
         )
         self.btn_clear_history.grid(row=0, column=0, pady=(0, 2), sticky="ew")
 
-        self.history_scroll_frame = ctk.CTkScrollableFrame(
-            history_right, width=168, label_text=""
+        # Rounded wrapper gives visible corners; scroll frame fills it flush
+        _hist_wrapper = ctk.CTkFrame(
+            history_right, fg_color=_log_fg, corner_radius=10
         )
-        self.history_scroll_frame.grid(row=1, column=0, sticky="nsew")
+        _hist_wrapper.grid(row=1, column=0, sticky="nsew")
+        _hist_wrapper.grid_rowconfigure(0, weight=1)
+        _hist_wrapper.grid_columnconfigure(0, weight=1)
+
+        self.history_scroll_frame = ctk.CTkScrollableFrame(
+            _hist_wrapper, width=168, label_text="",
+            fg_color=_log_fg,
+            corner_radius=10,
+            scrollbar_button_color=("gray70", "gray30"),
+            scrollbar_button_hover_color=("gray60", "gray40"),
+        )
+        self.history_scroll_frame.grid(row=0, column=0, sticky="nsew", padx=0, pady=0)
         self.history_scroll_frame.grid_columnconfigure(0, weight=1)
+        self.after(200, lambda: self._sync_scrollframe_bg(
+            self.history_scroll_frame, _log_fg))
+
+        # ── thin separator instead of label ──
+        _sep = ctk.CTkFrame(history_right, height=1, fg_color=("gray70", "gray35"))
+        _sep.grid(row=2, column=0, sticky="ew", padx=4, pady=(3, 3))
+
+        # store reference for the chapter header text update
+        self._chapter_browser_label = ctk.CTkLabel(
+            history_right, text="",
+            text_color=("gray50", "gray50"),
+            font=ctk.CTkFont(size=9),
+        )
+        self._chapter_browser_label.grid(row=2, column=0, pady=0)
+        self._chapter_browser_label.grid_remove()  # hidden — sep is enough
+
+        _chap_wrapper = ctk.CTkFrame(
+            history_right, fg_color=_log_fg, corner_radius=10
+        )
+        _chap_wrapper.grid(row=3, column=0, sticky="nsew")
+        _chap_wrapper.grid_rowconfigure(0, weight=1)
+        _chap_wrapper.grid_columnconfigure(0, weight=1)
+
+        self.chapter_browser_frame = ctk.CTkScrollableFrame(
+            _chap_wrapper, width=168, label_text="",
+            fg_color=_log_fg,
+            corner_radius=10,
+            scrollbar_button_color=("gray70", "gray30"),
+            scrollbar_button_hover_color=("gray60", "gray40"),
+        )
+        self.chapter_browser_frame.grid(row=0, column=0, sticky="nsew", padx=0, pady=0)
+        self.chapter_browser_frame.grid_columnconfigure(0, weight=1)
+        self.after(200, lambda: self._sync_scrollframe_bg(
+            self.chapter_browser_frame, _log_fg))
+
+        self._chapter_browser_loaded = ""  # "Genesis 1" — skip reload if same
+        self._chapter_browser_loading = False
+
+        # ── MANUAL VERSE ENTRY ──
+        self.manual_verse_entry = ctk.CTkEntry(
+            history_right,
+            placeholder_text="e.g. gen 3 2  or  john 3:16",
+            font=ctk.CTkFont(size=10),
+            height=26,
+        )
+        self.manual_verse_entry.grid(row=4, column=0, sticky="ew", pady=(4, 2))
+        self.manual_verse_entry.bind("<Return>", lambda e: self._send_manual_verse())
 
 
         # ── ACTION BUTTONS ROW ──
@@ -1187,11 +1253,233 @@ class VerseViewApp(ctk.CTk):
             self._append_log("🎵 Worship Mode OFF — verse detection resumed")
 
 
+    def _sync_scrollframe_bg(self, frame, color_pair):
+        """Patch the inner tkinter Canvas of a CTkScrollableFrame to match log_box exactly."""
+        try:
+            # Read the real rendered bg color straight from log_box's tkinter Text widget
+            actual_bg = self.log_box._textbox.cget("background")
+            # Walk every child of the scrollable frame looking for Canvas widgets
+            def _patch(widget):
+                try:
+                    if widget.winfo_class() == "Canvas":
+                        widget.configure(bg=actual_bg)
+                except Exception:
+                    pass
+                for child in widget.winfo_children():
+                    _patch(child)
+            _patch(frame)
+            # Also patch via the CTk internal attribute if it exists
+            canvas = getattr(frame, "_parent_canvas", None)
+            if canvas:
+                try:
+                    canvas.configure(bg=actual_bg)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
     def _clear_verse_history(self):
         engine.clear_verse_history()
         self._last_history_len = 0
         for w in self.history_scroll_frame.winfo_children():
             w.destroy()
+
+    # ── FUZZY BOOK RESOLVER ──────────────────────────────────────────────────
+    # Canonical list of all 66 Bible books (lowercase, with numbered variants)
+    _ALL_BOOKS = [
+        "genesis", "exodus", "leviticus", "numbers", "deuteronomy",
+        "joshua", "judges", "ruth",
+        "1 samuel", "2 samuel", "1 kings", "2 kings",
+        "1 chronicles", "2 chronicles",
+        "ezra", "nehemiah", "esther", "job", "psalms", "proverbs",
+        "ecclesiastes", "song of solomon",
+        "isaiah", "jeremiah", "lamentations", "ezekiel", "daniel",
+        "hosea", "joel", "amos", "obadiah", "jonah", "micah",
+        "nahum", "habakkuk", "zephaniah", "haggai", "zechariah", "malachi",
+        "matthew", "mark", "luke", "john", "acts", "romans",
+        "1 corinthians", "2 corinthians", "galatians", "ephesians",
+        "philippians", "colossians",
+        "1 thessalonians", "2 thessalonians",
+        "1 timothy", "2 timothy", "titus", "philemon", "hebrews",
+        "james", "1 peter", "2 peter",
+        "1 john", "2 john", "3 john",
+        "jude", "revelation",
+    ]
+
+    @classmethod
+    def _resolve_book(cls, token: str) -> str | None:
+        """Return the canonical book name for a prefix token, or None if ambiguous/unknown.
+
+        Rules:
+        - Numbered books: token "1pe" matches "1 peter" — strip the space for prefix matching.
+        - A prefix matches if exactly ONE canonical book starts with it (case-insensitive).
+        - Exact match always wins even if it is also a prefix of something longer.
+        """
+        t = token.lower().replace(" ", "")
+        matches = []
+        for book in cls._ALL_BOOKS:
+            b = book.replace(" ", "")
+            if b == t:
+                # Exact match — return immediately
+                return book
+            if b.startswith(t):
+                matches.append(book)
+        if len(matches) == 1:
+            return matches[0]
+        return None  # 0 = unknown, 2+ = ambiguous
+
+    def _send_manual_verse(self):
+        """Parse the typed string (e.g. 'gen 3 2', 'josh 5:3', '1pe 3 8'),
+        resolve the book via unique-prefix matching, update engine context,
+        then send via Selenium."""
+        raw = self.manual_verse_entry.get().strip()
+        if not raw:
+            return
+
+        # ── 1. Normalise separators: colon → space, commas → space ──
+        text = re.sub(r'[:\-,]', ' ', raw).lower()
+        tokens = text.split()
+        if not tokens:
+            return
+
+        # ── 2. Extract book token (may be "1 peter" style — consume leading digit) ──
+        book_token = tokens[0]
+        rest       = tokens[1:]
+        if book_token.isdigit() and rest:
+            # e.g. "1 pe 3 8" → book_token = "1pe", rest = ["3", "8"]
+            book_token = book_token + rest[0]
+            rest       = rest[1:]
+
+        book = self._resolve_book(book_token)
+        if not book:
+            mb.showerror(
+                "Unknown Book",
+                f'"{book_token}" is ambiguous or not recognised.\n'
+                f'Try a longer prefix, e.g. "jos" for Joshua, "joh" for John.'
+            )
+            return
+
+        # Title-case the canonical name for display / Selenium
+        book_display = book.title()
+
+        # ── 3. Parse chapter and optional verse from remaining tokens ──
+        nums = [t for t in rest if t.isdigit()]
+        if not nums:
+            mb.showerror("Missing Chapter", f"Please include a chapter number.\nExample: {book_display} 3")
+            return
+
+        chapter = nums[0]
+        verse   = nums[1] if len(nums) >= 2 else None
+
+        ref = f"{book_display} {chapter}" + (f":{verse}" if verse else "")
+
+        # ── 4. Update engine context ──
+        try:
+            engine.set_context(book_display, chapter, verse or "")
+        except Exception:
+            pass
+
+        # ── 5. Force chapter browser to reload ──
+        self._chapter_browser_loaded = ""
+
+        # ── 6. Send via Selenium ──
+        ctrl = getattr(engine, "_controller", None)
+        if not ctrl or not ctrl.driver:
+            mb.showerror("Not Connected", "VerseView is not connected.\nStart the engine first.")
+            return
+        if not ctrl.box or not ctrl.btn:
+            mb.showerror("Not Connected",
+                         "Could not find the VerseView input or PRESENT button.\n"
+                         "Check your VerseView URL.")
+            return
+        try:
+            ctrl.driver.execute_script("arguments[0].value = arguments[1];", ctrl.box, ref)
+            ctrl.driver.execute_script("arguments[0].click();", ctrl.btn)
+            self._append_log(f"✏️ Manual verse sent: {ref}")
+            self.manual_verse_entry.delete(0, "end")
+        except Exception as e:
+            mb.showerror("Send Error", f"Failed to send verse:\n{e}")
+
+    def _update_chapter_browser_loop(self):
+        """Poll engine context every 2s. When book+chapter changes, reload the panel."""
+        try:
+            book    = engine.current_book
+            chapter = engine.current_chapter
+            if book and chapter:
+                key = f"{book} {chapter}"
+                if key != self._chapter_browser_loaded:
+                    self._chapter_browser_loaded = key
+                    self._chapter_browser_label.configure(
+                        text=f"── {book} {chapter} ──"
+                    )
+                    # Clear old buttons
+                    for w in self.chapter_browser_frame.winfo_children():
+                        w.destroy()
+                    # Loading placeholder
+                    ctk.CTkLabel(
+                        self.chapter_browser_frame,
+                        text="Loading...",
+                        text_color=("gray50", "gray50"),
+                        font=ctk.CTkFont(size=10),
+                    ).pack(padx=4, pady=4)
+                    # Fetch in background thread
+                    def _load(b=book, c=chapter):
+                        verses = engine.fetch_chapter_verses(b, c)
+                        self.after(0, lambda: self._populate_chapter_browser(b, c, verses))
+                    threading.Thread(target=_load, daemon=True).start()
+        except Exception:
+            pass
+        finally:
+            self.after(2000, self._update_chapter_browser_loop)
+
+    def _populate_chapter_browser(self, book: str, chapter: str, verses: list):
+        """Fill the chapter browser panel with one clickable ref per verse."""
+        # Clear loading placeholder
+        for w in self.chapter_browser_frame.winfo_children():
+            w.destroy()
+        if not verses:
+            ctk.CTkLabel(
+                self.chapter_browser_frame,
+                text="No verses loaded.\nCheck translation.",
+                text_color=("gray50", "gray50"),
+                font=ctk.CTkFont(size=10),
+            ).pack(padx=4, pady=4)
+            return
+        for v in verses:
+            ref = f"{book} {chapter}:{v['num']}"
+            btn = ctk.CTkButton(
+                self.chapter_browser_frame,
+                text=ref,
+                anchor="w",
+                fg_color="transparent",
+                hover_color=("gray80", "gray25"),
+                text_color=("gray10", "gray90"),
+                font=ctk.CTkFont(size=10),
+                height=22,
+                command=lambda r=ref: self._send_chapter_verse(r),
+            )
+            btn.pack(fill="x", padx=2, pady=1)
+
+    def _send_chapter_verse(self, ref: str):
+        ctrl = getattr(engine, "_controller", None)
+        if not ctrl or not ctrl.driver or not ctrl.box or not ctrl.btn:
+            mb.showerror("Not Connected", "VerseView is not connected.")
+            return
+        try:
+            ctrl.driver.execute_script("arguments[0].value = arguments[1];", ctrl.box, ref)
+            ctrl.driver.execute_script("arguments[0].click();", ctrl.btn)
+            self._append_log(f"📖 Chapter browser sent: {ref}")
+            # Update engine context so the rest of detection stays in sync
+            parts = ref.split()
+            if len(parts) >= 2 and ":" in parts[-1]:
+                book_ctx    = " ".join(parts[:-1])
+                chap_ctx, v = parts[-1].split(":")
+                try:
+                    engine.set_context(book_ctx, chap_ctx, v)
+                except Exception:
+                    pass
+        except Exception as e:
+            mb.showerror("Send Error", f"Failed to send verse:\n{e}")
 
     def _open_verse_popup(self, ref: str):
         """Open a large popup showing the verse text for a history entry."""
