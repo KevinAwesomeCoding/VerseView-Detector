@@ -450,6 +450,11 @@ _sarvam_ignore_until = 0.0
 _blocked_context_hashes = {}
 _BLOCKED_DEDUP_SECS = 30.0
 _MAX_VERSE_NUMBER = 200
+
+# ── ATEM Chroma Key Overlay ──────────────────────────────────────────────────
+ATEM_ENABLED      = False
+ATEM_IP           = "192.168.1.240"
+ATEM_KEY_DURATION = 5.0   # seconds the upstream keyer stays ON
 _RANGE_INDICATOR_RE = re.compile(
     r'\b(?:through|thru|until)\b|മുതൽ|വരെ',
     re.IGNORECASE,
@@ -734,6 +739,33 @@ def clear_sermon_buffer():
     logger.info("🗑️ Sermon memory has been manually cleared.")
 
 
+# ── ATEM KEYER TRIGGER ────────────────────────────────────────────────────────
+def _trigger_atem_keyer():
+    """Fire upstream keyer 1 ON for ATEM_KEY_DURATION seconds, then OFF.
+    Runs entirely in a daemon thread — never blocks verse delivery."""
+    if not ATEM_ENABLED:
+        return
+    def _run():
+        try:
+            import PyATEMMax  # type: ignore
+            sw = PyATEMMax.ATEMMax()
+            sw.connect(ATEM_IP)
+            import time as _t
+            _t.sleep(2)          # wait for data exchange
+            sw.setKeyerOnAirEnabled(0, 0, True)
+            logger.info(f"🎬 ATEM: keyer ON  ({ATEM_IP})")
+            _t.sleep(ATEM_KEY_DURATION)
+            sw.setKeyerOnAirEnabled(0, 0, False)
+            logger.info(f"🎬 ATEM: keyer OFF (was on for {ATEM_KEY_DURATION}s)")
+            _t.sleep(0.5)
+            sw.disconnect()
+        except ImportError:
+            logger.warning("⚠️ PyATEMMax not installed — pip install PyATEMMax")
+        except Exception as e:
+            logger.warning(f"⚠️ ATEM error: {e}")
+    threading.Thread(target=_run, daemon=True).start()
+
+
 # ── CONFIGURE ────────────────────────────────────────────────────────────────
 def configure(
     language="en", mic_index=1, rate=16000, chunk=4096,
@@ -749,6 +781,7 @@ def configure(
     panic_key="esc", smart_amen=True,
     live_points_prompt="", live_points_callback=None, live_points_get_current_cb=None,
     live_points_enabled=False, silence_timeout=60,
+    atem_enabled=False, atem_ip="192.168.1.240", atem_key_duration=5.0,
 ):
     global DEEPGRAM_API_KEY, GROQ_API_KEY, GEMINI_API_KEY, CEREBRAS_API_KEY, MISTRAL_API_KEY, SARVAM_API_KEY
     global DISCORD_WEBHOOK_URL, DISCORD_LOG_WEBHOOK_URL, DISCORD_NOTES_WEBHOOK_URL
@@ -763,6 +796,7 @@ def configure(
     global LIVE_POINTS_ENABLED, SILENCE_TIMEOUT
     global normalize_numbers_only
     global VERSE_INTERRUPT_ENABLED, SPOKEN_NUMERAL_MODE, WORSHIP_MODE, _verse_history
+    global ATEM_ENABLED, ATEM_IP, ATEM_KEY_DURATION
     WORSHIP_MODE = False
     _verse_history.clear()
     _cancel_vtc()
@@ -859,6 +893,12 @@ def configure(
     LIVE_POINTS_ENABLED        = live_points_enabled
     SILENCE_TIMEOUT            = silence_timeout
     logger.info(f"📋 Live Points: {'ON' if LIVE_POINTS_ENABLED else 'OFF'}")
+
+    ATEM_ENABLED      = atem_enabled
+    ATEM_IP           = atem_ip
+    ATEM_KEY_DURATION = atem_key_duration
+    if ATEM_ENABLED:
+        logger.info(f"🎬 ATEM Overlay        : ON  ({ATEM_IP}, key on for {ATEM_KEY_DURATION}s)")
 
     if language == "en":
         USE_SARVAM             = False
@@ -1748,6 +1788,7 @@ class VerseController:
             self.driver.execute_script("arguments[0].value = arguments[1];", self.box, ref)
             self.driver.execute_script("arguments[0].click();", self.btn)
             logger.info(f"✅ PRESENTED: {ref}")
+            _trigger_atem_keyer()
 
             _verse_history.append({
                 "ref": ref,
@@ -1983,7 +2024,39 @@ def _is_range_not_verse(sentence: str, chap: str, verse: str) -> bool:
 
     return False
 
-def deliver_verse(ref, controller, bypass_cooldown=False, confidence=1.0, source="UNKNOWN"):
+# ── Bug Fix 1: Book-count guard ───────────────────────────────────────────────
+_BOOK_COUNT_RE = re.compile(
+    r'\b(\d+)\s+(?:books?|പുസ്തകങ്ങൾ|പുസ്തകം)',
+    re.IGNORECASE
+)
+
+def _is_book_count_number(text: str, num_str: str) -> bool:
+    """Return True if num_str appears as a book-count quantity in text.
+    e.g. 'the last three books' → '3' is a count, not a chapter number."""
+    for m in _BOOK_COUNT_RE.finditer(text):
+        if m.group(1) == num_str:
+            return True
+    return False
+
+
+# ── Bug Fix 2B: Ordinal-occasion guard ────────────────────────────────────────
+_ORDINAL_OCCASION_RE = re.compile(
+    r'\b(?:second|third|fourth|once\s+again|another)\s+(?:chance|time|opportunity|occasion)\b'
+    r'|രണ്ടാമത്\s*(?:ഒരു\s+)?(?:അവസരം|തവണ)'
+    r'|വീണ്ടും\s+(?:ഒരു\s+)?(?:അവസരം|തവണ)',
+    re.IGNORECASE
+)
+
+def _strip_ordinal_occasions(text: str) -> str:
+    """Remove 'second chance / third time / രണ്ടാമത് അവസരം' phrases from text
+    before parsing so ordinals are not mistaken for chapter numbers."""
+    return _ORDINAL_OCCASION_RE.sub(' ', text)
+
+
+# ── Bug Fix 3B: John the Baptist guard ────────────────────────────────────────
+def _is_john_the_baptist(text: str) -> bool:
+    """Return True if 'John' in this text refers to John the Baptist, not the Gospel."""
+    return bool(re.search(r'\bJohn\s+the\s+Baptist\b', text, re.IGNORECASE))
     """Helper function to deliver a verse, potentially with VTC."""
     if VERSE_INTERRUPT_ENABLED:
         _start_vtc(ref, controller, source=source)
@@ -2102,8 +2175,9 @@ def detect_verse_hybrid(text, controller, confidence=1.0) -> bool:
             if len(all_digits) >= 3 and has_verse_kw and not has_chap_kw:
                 is_multi_verse_list = True
 
-        # Layer 1 — parser
-        refs = [] if is_multi_verse_list else PRIMARY_PARSER(text)
+        # Bug Fix 2B: strip ordinal-occasion phrases before re-parsing
+        text_for_parser = _strip_ordinal_occasions(text)
+        refs = [] if is_multi_verse_list else PRIMARY_PARSER(text_for_parser)
         if refs:
             verse      = refs[0]
             is_blocked = False
@@ -2169,6 +2243,34 @@ def detect_verse_hybrid(text, controller, confidence=1.0) -> bool:
                         logger.info(f"🚫 BLOCKED Layer 1 False Positive: {verse} (Person Name Prefix: '{m_person.group(0).strip()}')")
                         is_blocked = True
                         break
+
+            if not is_blocked:
+                # Bug Fix 1: Block chapter refs where the chapter number is a book-count
+                # e.g. "Deuteronomy...the last three books" → Deuteronomy 3 is wrong
+                chap_token = verse.split()[-1].split(":")[0]
+                if _is_book_count_number(text, chap_token):
+                    logger.info(f"🚫 BLOCKED: {verse} — chapter number is a book-count in '{text[:60]}'")
+                    is_blocked = True
+
+            if not is_blocked:
+                # Bug Fix 2A: If a verse keyword is present and the ref is chapter-only
+                # and we have active chapter context, the number is likely a verse — not a new chapter
+                if ":" not in verse and current_book and current_chapter:
+                    chap_token = verse.split()[-1]
+                    has_verse_kw = re.search(r'\b(?:verse|verses)\b|വാക്യ|വചന', text, re.IGNORECASE)
+                    try:
+                        chap_int = int(chap_token)
+                        if has_verse_kw and chap_token != current_chapter and chap_int <= 50:
+                            logger.info(f"🚫 BLOCKED: {verse} — chapter looks like verse number in {current_book} {current_chapter} context")
+                            is_blocked = True
+                    except ValueError:
+                        pass
+
+            if not is_blocked:
+                # Bug Fix 3B: "John the Baptist" is not the book of John
+                if "John" in verse and _is_john_the_baptist(text):
+                    logger.info(f"🚫 BLOCKED: 'John the Baptist' is not the book of John in '{text[:60]}'")
+                    is_blocked = True
 
             if not is_blocked:
                 logger.info(f"🔍 PARSER: {verse} ({int(confidence*100)}% Acc)")
@@ -2412,7 +2514,9 @@ def _detect_explicit_reference(sentence: str, controller) -> bool:
     """Bug 7: Fast-path for fully explicit references (book + chapter + verse).
     Runs the parser directly on the raw sentence and delivers immediately,
     bypassing the LLM window queue. Only fires when chapter AND verse are present."""
-    refs = PRIMARY_PARSER(sentence)
+    # Bug Fix 2B: strip ordinal-occasion phrases before parsing
+    clean = _strip_ordinal_occasions(sentence)
+    refs = PRIMARY_PARSER(clean)
     if not refs:
         return False
     for ref in refs:
@@ -2422,7 +2526,13 @@ def _detect_explicit_reference(sentence: str, controller) -> bool:
             verse = parts[1]
             if _is_range_not_verse(sentence, chap, verse):
                 logger.debug(f"⚡ FAST-PATH skipped: '{ref}' looks like chapter range in '{sentence[:60]}'")
-                continue  # fall through to contextual or discard
+                continue
+            if _is_book_count_number(sentence, chap):
+                logger.debug(f"⚡ FAST-PATH skipped: '{ref}' chapter is a book-count in '{sentence[:60]}'")
+                continue
+            if "John" in ref and _is_john_the_baptist(sentence):
+                logger.debug(f"⚡ FAST-PATH skipped: 'John the Baptist' is not the book of John")
+                continue
             if _reject_verse_out_of_range(ref):
                 continue
 
@@ -2731,7 +2841,11 @@ async def stream_audio_sarvam(controller):
                                     check_verse_queue(english_text, controller)
                                     full_sermon_transcript += " " + english_text.strip()
                                     _last_transcript_time = time.time()
-                                    _process_transcript_blob(english_text, partial_context, controller)
+                                    # Bug Fix 3A: Parse the original transcript (which preserves
+                                    # English book names the preacher actually said) rather than
+                                    # Sarvam's English translation, which can hallucinate names
+                                    # like "John the Baptist" from Malayalam context words.
+                                    _process_transcript_blob(malayalam_text, partial_context, controller)
                                         
                                 except Exception as e:
                                     logger.error(f"Sarvam message processing error: {e}")
