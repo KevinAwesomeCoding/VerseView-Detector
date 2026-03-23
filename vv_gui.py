@@ -142,7 +142,7 @@ class VerseViewApp(ctk.CTk):
         # Read the actual rendered bg color from log_box so scroll frames match exactly
         _log_fg = ("gray86", "gray17")
 
-        history_right = ctk.CTkFrame(split_frame, fg_color="transparent", width=180)
+        history_right = ctk.CTkFrame(split_frame, fg_color="transparent", width=240)
         history_right.grid(row=1, column=1, padx=(2, 0), sticky="nsew")
         history_right.grid_rowconfigure(1, weight=1)   # verse history — grows
         history_right.grid_rowconfigure(3, weight=1)   # chapter browser — grows equally
@@ -169,7 +169,8 @@ class VerseViewApp(ctk.CTk):
         _hist_wrapper.grid_columnconfigure(0, weight=1)
 
         self.history_scroll_frame = ctk.CTkScrollableFrame(
-            _hist_wrapper, width=168, label_text="",
+            _hist_wrapper, width=228, label_text="📜 Verse History",
+            label_font=ctk.CTkFont(size=10, weight="bold"),
             fg_color=_log_fg,
             corner_radius=10,
             scrollbar_button_color=("gray70", "gray30"),
@@ -185,13 +186,7 @@ class VerseViewApp(ctk.CTk):
         _sep.grid(row=2, column=0, sticky="ew", padx=4, pady=(3, 3))
 
         # store reference for the chapter header text update
-        self._chapter_browser_label = ctk.CTkLabel(
-            history_right, text="",
-            text_color=("gray50", "gray50"),
-            font=ctk.CTkFont(size=9),
-        )
-        self._chapter_browser_label.grid(row=2, column=0, pady=0)
-        self._chapter_browser_label.grid_remove()  # hidden — sep is enough
+        # (Header now integrated into ScrollableFrame label)
 
         _chap_wrapper = ctk.CTkFrame(
             history_right, fg_color=_log_fg, corner_radius=10
@@ -201,7 +196,8 @@ class VerseViewApp(ctk.CTk):
         _chap_wrapper.grid_columnconfigure(0, weight=1)
 
         self.chapter_browser_frame = ctk.CTkScrollableFrame(
-            _chap_wrapper, width=168, label_text="",
+            _chap_wrapper, width=228, label_text="📖 Chapter Verses",
+            label_font=ctk.CTkFont(size=10, weight="bold"),
             fg_color=_log_fg,
             corner_radius=10,
             scrollbar_button_color=("gray70", "gray30"),
@@ -1409,8 +1405,8 @@ class VerseViewApp(ctk.CTk):
                 key = f"{book} {chapter}"
                 if key != self._chapter_browser_loaded:
                     self._chapter_browser_loaded = key
-                    self._chapter_browser_label.configure(
-                        text=f"── {book} {chapter} ──"
+                    self.chapter_browser_frame.configure(
+                        label_text=f"📖 {book} {chapter} Verses"
                     )
                     # Clear old buttons
                     for w in self.chapter_browser_frame.winfo_children():
