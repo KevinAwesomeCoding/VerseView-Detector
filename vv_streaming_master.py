@@ -1460,7 +1460,7 @@ def translate_to_english(text: str) -> str:
             "input": text,
             "source_language_code": "ml-IN",
             "target_language_code": "en-IN",
-            "model": "sarvam-translate:v1",
+            "model": "mayura:v1",
             "speaker_gender": "Male",
             "mode": "formal",
             "enable_preprocessing": True
@@ -2602,7 +2602,7 @@ def trigger_onwards_if_needed_standalone(ref_string: str, original_text: str):
 def _process_transcript_blob(sentence: str, partial_context_ref: list, controller):
     if WORSHIP_MODE:
         return
-    # Bug 5: Self-correction detector — if the speaker says 'sorry' / 'i mean' / 'i meant',
+    # Bug 5: Self-correction detector — if the speaker says 'sorry' / 'I mean' / 'I meant',
     # discard the text before the correction and only parse what follows it.
     _corr_m = _CORRECTION_RE.search(sentence)
     if _corr_m:
