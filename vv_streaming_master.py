@@ -587,8 +587,7 @@ async def live_points_loop():
             continue
 
         current_transcript = full_sermon_transcript.strip()
-        lpl = last_processed_length or 0
-        if len(current_transcript) < 150 or len(current_transcript) <= lpl + 50:
+        if len(current_transcript) < 150 or len(current_transcript) <= last_processed_length + 50:
             continue
 
         last_processed_length       = len(current_transcript)
@@ -1172,8 +1171,7 @@ def _fetch_next_onwards():
     global onwards_target_ref, onwards_trigger, onwards_target_text
     if not onwards_active:
         return
-    curr_v = onwards_verse or 0
-    next_v = curr_v + 1
+    next_v = onwards_verse + 1
     ref    = f"{onwards_book} {onwards_chapter}:{next_v}"
     text   = fetch_verse_text(ref)
     if text:
@@ -1509,9 +1507,7 @@ def extract_verse_with_llm(text):
         )
 
     try:
-        global LLM_CALL_COUNT
-        LLM_CALL_COUNT = (LLM_CALL_COUNT or 0) + 1
-        wait_time = LLM_CALL_COUNT + 50
+        LLM_CALL_COUNT += 1
         response = groq_client.chat.completions.create(
             model="llama-3.1-8b-instant",
             messages=[{
@@ -2615,7 +2611,7 @@ def _process_transcript_blob(sentence: str, partial_context_ref: list, controlle
             logger.debug(f"🔄 Self-correction detected — using: '{corrected}'")
             sentence = corrected
 
-    partial_context: str = partial_context_ref[0] or ""
+    partial_context = partial_context_ref[0]
 
     # Bug 7: Explicit full reference fast-path — fires before partial context even accumulates
     if _detect_explicit_reference(sentence, controller):
@@ -2631,7 +2627,7 @@ def _process_transcript_blob(sentence: str, partial_context_ref: list, controlle
             partial_context = ""
             break
         check_verse_queue(part, controller)
-        partial_context = (partial_context or "") + " " + part
+        partial_context += " " + part
         found = detect_verse_hybrid(partial_context.strip(), controller, confidence=1.0)
         if found:
             partial_context = ""
@@ -2728,6 +2724,7 @@ async def stream_audio(controller):
                 try:
                     async for msg in ws:
                         try:
+                            data     = json.loads(msg)
                             msg_type = data.get("type", "Results")
                             if msg_type != "Results":
                                 continue
