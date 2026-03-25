@@ -136,7 +136,84 @@ HI_ONES_TENS = (
 
 BOOK_FILLERS_HI = ["अध्याय", "वचन", "पद"]
 
-# ------------------- English Math & Resolver -------------------
+# ------------------- Fuzzy Book-Name Corrector -------------------
+# When Nova-3 Hindi mishears an English book name (e.g. "Corintens",
+# "Corinthans", "Phillipins"), this corrects it before the parser runs.
+# Uses rapidfuzz if available, falls back to difflib — both standard.
+
+_FUZZY_TARGETS = [
+    "Genesis", "Exodus", "Leviticus", "Numbers", "Deuteronomy",
+    "Joshua", "Judges", "Ruth", "Samuel", "Kings", "Chronicles",
+    "Ezra", "Nehemiah", "Esther", "Job", "Psalms", "Proverbs",
+    "Ecclesiastes", "Isaiah", "Jeremiah", "Lamentations", "Ezekiel",
+    "Daniel", "Hosea", "Joel", "Amos", "Obadiah", "Jonah", "Micah",
+    "Nahum", "Habakkuk", "Zephaniah", "Haggai", "Zechariah", "Malachi",
+    "Matthew", "Mark", "Luke", "John", "Acts", "Romans",
+    "Corinthians", "Galatians", "Ephesians", "Philippians", "Colossians",
+    "Thessalonians", "Timothy", "Titus", "Philemon", "Hebrews",
+    "James", "Peter", "Jude", "Revelation",
+]
+# Minimum character length before we even attempt fuzzy matching —
+# avoids correcting short common words like "job", "mark", "acts"
+_FUZZY_MIN_LEN = 5
+# Similarity threshold (0–100). 75 = must be 75% similar to correct.
+_FUZZY_THRESHOLD = 75
+
+def _fuzzy_correct_token(token: str) -> str:
+    """Return the best-matching Bible book name if similarity ≥ threshold,
+    otherwise return the original token unchanged."""
+    if len(token) < _FUZZY_MIN_LEN:
+        return token
+    tl = token.lower()
+    # Skip if already an exact match (case-insensitive)
+    for t in _FUZZY_TARGETS:
+        if tl == t.lower():
+            return token
+    try:
+        from rapidfuzz import process as _rfp, fuzz as _rfz
+        match, score, _ = _rfp.extractOne(
+            tl,
+            [t.lower() for t in _FUZZY_TARGETS],
+            scorer=_rfz.ratio,
+        )
+        if score >= _FUZZY_THRESHOLD:
+            # Return the properly-cased canonical name
+            return _FUZZY_TARGETS[[t.lower() for t in _FUZZY_TARGETS].index(match)]
+    except ImportError:
+        import difflib as _dl
+        close = _dl.get_close_matches(
+            tl,
+            [t.lower() for t in _FUZZY_TARGETS],
+            n=1,
+            cutoff=_FUZZY_THRESHOLD / 100,
+        )
+        if close:
+            return _FUZZY_TARGETS[[t.lower() for t in _FUZZY_TARGETS].index(close[0])]
+    return token
+
+
+def fuzzy_correct_book_names(text: str) -> str:
+    """Scan each whitespace-separated token. If it looks like a misspelt
+    English Bible book name, correct it in-place. Leave everything else
+    (Hindi script, numbers, punctuation) untouched."""
+    words  = text.split()
+    result = []
+    i      = 0
+    while i < len(words):
+        w = words[i]
+        # Only attempt correction on ASCII-looking tokens (not Hindi/Devanagari)
+        if w.isascii() and w.isalpha():
+            corrected = _fuzzy_correct_token(w)
+            if corrected != w:
+                result.append(corrected)
+                i += 1
+                continue
+        result.append(w)
+        i += 1
+    return " ".join(result)
+
+
+
 def convert_word_numbers_eng(text):
     text = text.replace("-", " ")
     words = text.split()
@@ -224,6 +301,9 @@ def normalize_numbers_only(s: str) -> str:
 def parse_references(text: str):
     if not text:
         return []
+    # Workaround 2: correct phonetic mis-transcriptions of English book names
+    # (e.g. Nova-3 Hindi "Corintens" → "Corinthians") before any parsing
+    text = fuzzy_correct_book_names(text)
     results = []
     t = text.lower()
     for word, num in ORDINAL_WORDS_ENG.items():

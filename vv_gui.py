@@ -1340,8 +1340,8 @@ class VerseViewApp(ctk.CTk):
 
         # ── 2. Extract book token (may be "1 peter" style — consume leading digit) ──
         book_token = tokens[0]
-        rest       = tokens[1:]
-        if book_token.isdigit() and rest:
+        rest: list[str] = tokens[1:] # type: ignore
+        if book_token.isdigit() and len(rest) > 0:
             # e.g. "1 pe 3 8" → book_token = "1pe", rest = ["3", "8"]
             book_token = book_token + rest[0]
             rest       = rest[1:]
@@ -1380,10 +1380,13 @@ class VerseViewApp(ctk.CTk):
 
         # ── 6. Send via Selenium ──
         ctrl = getattr(engine, "_controller", None)
-        if not ctrl or not ctrl.driver:
+        if not ctrl or not hasattr(ctrl, 'driver') or not ctrl.driver:
             mb.showerror("Not Connected", "VerseView is not connected.\nStart the engine first.")
             return
-        if not ctrl.box or not ctrl.btn:
+        # Explicit check to satisfy IDE type checker
+        box = getattr(ctrl, 'box', None)
+        btn = getattr(ctrl, 'btn', None)
+        if not box or not btn:
             mb.showerror("Not Connected",
                          "Could not find the VerseView input or PRESENT button.\n"
                          "Check your VerseView URL.")

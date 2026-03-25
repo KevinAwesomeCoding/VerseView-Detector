@@ -587,7 +587,8 @@ async def live_points_loop():
             continue
 
         current_transcript = full_sermon_transcript.strip()
-        if len(current_transcript) < 150 or len(current_transcript) <= last_processed_length + 50:
+        lpl = last_processed_length or 0
+        if len(current_transcript) < 150 or len(current_transcript) <= lpl + 50:
             continue
 
         last_processed_length       = len(current_transcript)
@@ -1171,7 +1172,8 @@ def _fetch_next_onwards():
     global onwards_target_ref, onwards_trigger, onwards_target_text
     if not onwards_active:
         return
-    next_v = onwards_verse + 1
+    curr_v = onwards_verse or 0
+    next_v = curr_v + 1
     ref    = f"{onwards_book} {onwards_chapter}:{next_v}"
     text   = fetch_verse_text(ref)
     if text:
@@ -1507,7 +1509,9 @@ def extract_verse_with_llm(text):
         )
 
     try:
-        LLM_CALL_COUNT += 1
+        global LLM_CALL_COUNT
+        LLM_CALL_COUNT = (LLM_CALL_COUNT or 0) + 1
+        wait_time = LLM_CALL_COUNT + 50
         response = groq_client.chat.completions.create(
             model="llama-3.1-8b-instant",
             messages=[{
@@ -2602,7 +2606,7 @@ def trigger_onwards_if_needed_standalone(ref_string: str, original_text: str):
 def _process_transcript_blob(sentence: str, partial_context_ref: list, controller):
     if WORSHIP_MODE:
         return
-    # Bug 5: Self-correction detector — if the speaker says 'sorry' / 'I mean' / 'I meant',
+    # Bug 5: Self-correction detector — if the speaker says 'sorry' / 'i mean' / 'i meant',
     # discard the text before the correction and only parse what follows it.
     _corr_m = _CORRECTION_RE.search(sentence)
     if _corr_m:
@@ -2611,7 +2615,7 @@ def _process_transcript_blob(sentence: str, partial_context_ref: list, controlle
             logger.debug(f"🔄 Self-correction detected — using: '{corrected}'")
             sentence = corrected
 
-    partial_context = partial_context_ref[0]
+    partial_context: str = partial_context_ref[0] or ""
 
     # Bug 7: Explicit full reference fast-path — fires before partial context even accumulates
     if _detect_explicit_reference(sentence, controller):
@@ -2627,7 +2631,7 @@ def _process_transcript_blob(sentence: str, partial_context_ref: list, controlle
             partial_context = ""
             break
         check_verse_queue(part, controller)
-        partial_context += " " + part
+        partial_context = (partial_context or "") + " " + part
         found = detect_verse_hybrid(partial_context.strip(), controller, confidence=1.0)
         if found:
             partial_context = ""
@@ -2666,6 +2670,24 @@ async def stream_audio(controller):
         logger.error(f"Microphone error: {e}")
         return
 
+    # ── Deepgram keywords boosting — helps Nova-3 Hindi recognise accented
+    # English Bible book names (e.g. "Corintens" → "Corinthians") ──────────
+    _BIBLE_KEYWORDS = [
+        "Genesis", "Exodus", "Leviticus", "Numbers", "Deuteronomy",
+        "Joshua", "Judges", "Ruth", "Samuel", "Kings", "Chronicles",
+        "Ezra", "Nehemiah", "Esther", "Job", "Psalms", "Proverbs",
+        "Ecclesiastes", "Isaiah", "Jeremiah", "Lamentations", "Ezekiel",
+        "Daniel", "Hosea", "Joel", "Amos", "Obadiah", "Jonah", "Micah",
+        "Nahum", "Habakkuk", "Zephaniah", "Haggai", "Zechariah", "Malachi",
+        "Matthew", "Mark", "Luke", "John", "Acts", "Romans",
+        "Corinthians", "Galatians", "Ephesians", "Philippians", "Colossians",
+        "Thessalonians", "Timothy", "Titus", "Philemon", "Hebrews",
+        "James", "Peter", "Jude", "Revelation",
+    ]
+    _kw_params = "".join(
+        f"&keywords={kw}%3A5" for kw in _BIBLE_KEYWORDS
+    ) if DEEPGRAM_LANGUAGE == "hi" else ""
+
     url = (
         f"wss://api.deepgram.com/v1/listen"
         f"?language={DEEPGRAM_LANGUAGE}"
@@ -2677,6 +2699,7 @@ async def stream_audio(controller):
         f"&endpointing=300"
         f"&encoding=linear16"
         f"&sample_rate={RATE}"
+        f"{_kw_params}"
     )
     headers = {"Authorization": f"Token {DEEPGRAM_API_KEY}"}
     loop    = asyncio.get_event_loop()
@@ -2705,7 +2728,6 @@ async def stream_audio(controller):
                 try:
                     async for msg in ws:
                         try:
-                            data     = json.loads(msg)
                             msg_type = data.get("type", "Results")
                             if msg_type != "Results":
                                 continue

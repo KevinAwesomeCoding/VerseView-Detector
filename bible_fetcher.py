@@ -141,7 +141,10 @@ def _fetch_helloao(ref: str, translation: str) -> str | None:
         if r.status_code == 200:
             data     = r.json()
             verses   = data.get("chapter", {}).get("verses", [])
-            verse_int = int(verse)
+            if verse:
+                verse_int = int(verse)
+            else:
+                return None
             for v in verses:
                 if v.get("number") == verse_int:
                     text = " ".join(
