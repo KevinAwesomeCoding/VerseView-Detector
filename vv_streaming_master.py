@@ -2198,7 +2198,7 @@ def detect_verse_hybrid(text, controller, confidence=1.0) -> bool:
                     next_v = int(current_verse) + 1
                     ref = f"{current_book} {current_chapter}:{next_v}"
                     logger.info(f"🔍 NEXT VERSE: {ref} (100% Acc)")
-                    deliver_verse(ref, controller, bypass_cooldown=False, confidence=1.0, source="NEXT VERSE")
+                    deliver_verse(ref, controller, bypass_cooldown=True, confidence=1.0, source="NEXT VERSE")
                     trigger_onwards_if_needed(ref, text)
                     return True
 
