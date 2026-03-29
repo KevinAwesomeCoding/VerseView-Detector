@@ -369,7 +369,7 @@ USE_XPATH             = sys.platform == "darwin"
 USE_SARVAM            = False
 show_malayalam_raw    = False
 DEEPGRAM_LANGUAGE     = "en"
-DEEPGRAM_MODEL        = "nova-2"
+DEEPGRAM_MODEL        = "nova-3"
 SARVAM_LANGUAGE       = "ml-IN"
 PRIMARY_PARSER        = parse_eng
 MIC_INDEX             = 1
@@ -758,6 +758,10 @@ def clear_sermon_buffer():
 # ── ATEM IP CACHE ─────────────────────────────────────────────────────────────
 _atem_resolved_ip: str | None = None   # cached after first successful discovery
 
+# ── ATEM CIRCUIT BREAKER ──────────────────────────────────────────────────────
+_atem_fail_until: float = 0.0   # epoch time — skip keyer until this passes
+_ATEM_BACKOFF_SECS = 60.0       # wait 60s after a connection failure before retrying
+
 # Blackmagic Design MAC OUI prefixes (for ARP fallback)
 _BMD_OUI = ("00:26:b0", "7c:2e:0d", "b4:fb:e4", "00:14:03")
 
@@ -851,7 +855,14 @@ def _trigger_atem_keyer():
         return
 
     def _run():
+        global _atem_fail_until
         import time as _t
+
+        # Circuit breaker — skip if we failed recently
+        if _t.time() < _atem_fail_until:
+            logger.debug(f"🎬 ATEM: skipped (circuit open, retrying in {int(_atem_fail_until - _t.time())}s)")
+            return
+
         ip = _resolve_atem_ip()
         if not ip:
             logger.warning("⚠️ ATEM: no IP available — keyer skipped")
@@ -868,10 +879,12 @@ def _trigger_atem_keyer():
             logger.info(f"🎬 ATEM: keyer OFF (was on for {ATEM_KEY_DURATION}s)")
             _t.sleep(0.5)
             sw.disconnect()
+            _atem_fail_until = 0.0  # reset on success
         except ImportError:
             logger.warning("⚠️ PyATEMMax not installed — pip install PyATEMMax")
         except Exception as e:
-            logger.warning(f"⚠️ ATEM error: {e}")
+            _atem_fail_until = _t.time() + _ATEM_BACKOFF_SECS
+            logger.warning(f"⚠️ ATEM error: {e} — pausing keyer for {int(_ATEM_BACKOFF_SECS)}s")
 
     threading.Thread(target=_run, daemon=True).start()
 
@@ -1014,13 +1027,15 @@ def configure(
     ATEM_KEY_DURATION = atem_key_duration
     global _atem_resolved_ip
     _atem_resolved_ip = None  # clear cache so IP is re-resolved each session
+    global _atem_fail_until
+    _atem_fail_until = 0.0    # reset circuit breaker
     if ATEM_ENABLED:
         logger.info(f"🎬 ATEM Overlay        : ON  ({ATEM_IP or 'Auto'}, key on for {ATEM_KEY_DURATION}s)")
 
     if language == "en":
         USE_SARVAM             = False
         DEEPGRAM_LANGUAGE      = "en"
-        DEEPGRAM_MODEL         = "nova-2"
+        DEEPGRAM_MODEL         = "nova-3"
         PRIMARY_PARSER         = parse_eng
         normalize_numbers_only = norm_eng
     elif language == "hi":
@@ -1037,7 +1052,7 @@ def configure(
     else:
         USE_SARVAM             = False
         DEEPGRAM_LANGUAGE      = "multi"
-        DEEPGRAM_MODEL         = "nova-2"
+        DEEPGRAM_MODEL         = "nova-3"
         PRIMARY_PARSER         = parse_eng
         normalize_numbers_only = norm_eng
 
@@ -1818,16 +1833,28 @@ class VerseController:
         now = time.time()
         logger.debug(f"VerseController.send_verse: ref={ref}, bypass={bypass_cooldown}")
 
-        # Bug 4: When returning to a chapter that was already tracked verse-by-verse this
-        # session, upgrade the bare-chapter ref to the last known verse so the display
-        # resumes from the correct position instead of regressing to chapter level.
+        # ── CHAPTER-ONLY REF: update context + chapter browser, do NOT present ──
+        # When the speaker says "Matthew chapter 5" with no verse, we set context
+        # so the chapter browser auto-reloads and the parser has the right book/chapter.
+        # We do NOT send to Selenium — VerseView would default to verse 1 which is wrong.
         if ":" not in ref:
             _parts = ref.split()
             if len(_parts) >= 2:
                 _hw = _session_verse_high_water.get(ref)
                 if _hw:
+                    # We've already been tracking verses in this chapter this session —
+                    # upgrade to the last known verse so display resumes correctly
                     ref = f"{ref}:{_hw}"
                     logger.info(f"📍 Resuming: chapter ref → {ref} (last known verse this session)")
+                else:
+                    # Pure chapter-only: just update context, skip display
+                    new_book    = " ".join(_parts[:-1])
+                    new_chapter = _parts[-1]
+                    current_book    = new_book
+                    current_chapter = new_chapter
+                    current_verse   = None
+                    logger.info(f"📌 Chapter context set (no display): {new_book} {new_chapter}")
+                    return True
 
         # ── MANUAL CONFIRMATION ──
         if confidence < CONFIDENCE_THRESHOLD and not bypass_cooldown:
