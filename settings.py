@@ -48,7 +48,7 @@ DEFAULTS = {
     "live_points_llm_enabled":    False,
     # ── ATEM Chroma Key Overlay ──
     "atem_enabled":               False,
-    "atem_ip":                    "192.168.1.240",
+    "atem_ip":                    "",
     "atem_key_duration":          5.0,
 }
 

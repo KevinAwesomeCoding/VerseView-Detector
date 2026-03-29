@@ -544,7 +544,7 @@ class VerseViewApp(ctk.CTk):
 
         ctk.CTkLabel(atem_sub, text="ATEM IP", anchor="w", width=70).grid(
             row=0, column=0, padx=(0, 6), pady=2, sticky="w")
-        self.atem_ip_entry = ctk.CTkEntry(atem_sub, placeholder_text="192.168.1.240", width=140)
+        self.atem_ip_entry = ctk.CTkEntry(atem_sub, placeholder_text="Auto (or enter IP)", width=140)
         self.atem_ip_entry.grid(row=0, column=1, sticky="ew", pady=2)
 
         ctk.CTkLabel(atem_sub, text="Key On (s)", anchor="w", width=70).grid(
@@ -782,7 +782,7 @@ class VerseViewApp(ctk.CTk):
         self.llm_var.set("Enabled" if s.get("llm_enabled", True) else "Disabled")
 
         self.atem_var.set(s.get("atem_enabled", False))
-        self.atem_ip_entry.delete(0, "end");  self.atem_ip_entry.insert(0,  s.get("atem_ip", "192.168.1.240"))
+        self.atem_ip_entry.delete(0, "end");  self.atem_ip_entry.insert(0,  s.get("atem_ip", ""))
         self.atem_dur_entry.delete(0, "end"); self.atem_dur_entry.insert(0, str(s.get("atem_key_duration", 5.0)))
 
         # ── load all 3 Discord webhook URLs ──
@@ -839,7 +839,7 @@ class VerseViewApp(ctk.CTk):
             "discord_notes_webhook_url":  self.dc_notes_key_entry.get(),
             "mic_index":                  self._mic_index(),
             "atem_enabled":               self.atem_var.get(),
-            "atem_ip":                    self.atem_ip_entry.get().strip() or "192.168.1.240",
+            "atem_ip":                    self.atem_ip_entry.get().strip(),
             "atem_key_duration":          self._safe_float(self.atem_dur_entry, 5.0),
         }
 
@@ -1108,7 +1108,7 @@ class VerseViewApp(ctk.CTk):
                 live_points_enabled        = self.live_app.is_live_llm_enabled(),
                 silence_timeout            = s.get("silence_timeout", 60),
                 atem_enabled               = s.get("atem_enabled", False),
-                atem_ip                    = s.get("atem_ip", "192.168.1.240"),
+                atem_ip                    = s.get("atem_ip", ""),
                 atem_key_duration          = s.get("atem_key_duration", 5.0),
             )
 

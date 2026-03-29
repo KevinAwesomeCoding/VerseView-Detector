@@ -755,20 +755,114 @@ def clear_sermon_buffer():
 
 
 # ── ATEM KEYER TRIGGER ────────────────────────────────────────────────────────
+# ── ATEM IP CACHE ─────────────────────────────────────────────────────────────
+_atem_resolved_ip: str | None = None   # cached after first successful discovery
+
+# Blackmagic Design MAC OUI prefixes (for ARP fallback)
+_BMD_OUI = ("00:26:b0", "7c:2e:0d", "b4:fb:e4", "00:14:03")
+
+
+def _discover_atem_ip() -> str | None:
+    """Try to find the ATEM's current IP automatically.
+    1. mDNS/Bonjour — ATEM advertises _blackmagic._tcp on the LAN
+    2. ARP scan      — look for Blackmagic Design MAC OUI on local subnet
+    Returns the IP string or None if not found."""
+    global _atem_resolved_ip
+
+    # ── Strategy 1: mDNS (zeroconf) ──────────────────────────────────────────
+    try:
+        from zeroconf import Zeroconf, ServiceBrowser  # type: ignore
+        import time as _t
+        found_ip: list = []
+
+        class _Listener:
+            def add_service(self, zc, type_, name):
+                info = zc.get_service_info(type_, name)
+                if info and info.addresses:
+                    import socket as _sock
+                    ip = _sock.inet_ntoa(info.addresses[0])
+                    found_ip.append(ip)
+            def remove_service(self, *_): pass
+            def update_service(self, *_): pass
+
+        zc = Zeroconf()
+        ServiceBrowser(zc, "_blackmagic._tcp.local.", _Listener())
+        _t.sleep(2)   # give it 2s to respond
+        zc.close()
+
+        if found_ip:
+            logger.info(f"🎬 ATEM discovered via mDNS: {found_ip[0]}")
+            return found_ip[0]
+    except ImportError:
+        logger.debug("zeroconf not installed — skipping mDNS ATEM discovery")
+    except Exception as e:
+        logger.debug(f"mDNS ATEM discovery error: {e}")
+
+    # ── Strategy 2: ARP table scan ────────────────────────────────────────────
+    try:
+        import subprocess as _sp, socket as _sock, re as _re
+        result = _sp.run(["arp", "-a"], capture_output=True, text=True, timeout=5)
+        for line in result.stdout.splitlines():
+            mac_m = _re.search(r"([\da-f]{2}[:\-]){5}[\da-f]{2}", line, _re.IGNORECASE)
+            ip_m  = _re.search(r"(\d{1,3}(?:\.\d{1,3}){3})", line)
+            if mac_m and ip_m:
+                mac = mac_m.group(0).lower().replace("-", ":")
+                if any(mac.startswith(oui) for oui in _BMD_OUI):
+                    ip = ip_m.group(1)
+                    logger.info(f"🎬 ATEM discovered via ARP: {ip} (MAC {mac})")
+                    return ip
+    except Exception as e:
+        logger.debug(f"ARP ATEM discovery error: {e}")
+
+    return None
+
+
+def _resolve_atem_ip() -> str | None:
+    """Return the ATEM IP to use.
+    - If ATEM_IP is set to a real IP → use it directly.
+    - If ATEM_IP is blank, 'auto', or '0.0.0.0' → auto-discover.
+    Caches the result so discovery only runs once per session."""
+    global _atem_resolved_ip
+
+    # Already resolved this session
+    if _atem_resolved_ip:
+        return _atem_resolved_ip
+
+    manual = ATEM_IP.strip().lower()
+    if manual and manual not in ("", "auto", "0.0.0.0"):
+        _atem_resolved_ip = ATEM_IP.strip()
+        return _atem_resolved_ip
+
+    # Auto-discover
+    logger.info("🎬 ATEM IP set to Auto — scanning network...")
+    ip = _discover_atem_ip()
+    if ip:
+        _atem_resolved_ip = ip
+    else:
+        logger.warning("⚠️ ATEM auto-discovery failed — keyer will be skipped")
+    return _atem_resolved_ip
+
+
 def _trigger_atem_keyer():
     """Fire upstream keyer 1 ON for ATEM_KEY_DURATION seconds, then OFF.
+    Resolves the ATEM IP automatically if not hardcoded.
     Runs entirely in a daemon thread — never blocks verse delivery."""
     if not ATEM_ENABLED:
         return
+
     def _run():
+        import time as _t
+        ip = _resolve_atem_ip()
+        if not ip:
+            logger.warning("⚠️ ATEM: no IP available — keyer skipped")
+            return
         try:
             import PyATEMMax  # type: ignore
             sw = PyATEMMax.ATEMMax()
-            sw.connect(ATEM_IP)
-            import time as _t
+            sw.connect(ip)
             _t.sleep(2)          # wait for data exchange
             sw.setKeyerOnAirEnabled(0, 0, True)
-            logger.info(f"🎬 ATEM: keyer ON  ({ATEM_IP})")
+            logger.info(f"🎬 ATEM: keyer ON  ({ip})")
             _t.sleep(ATEM_KEY_DURATION)
             sw.setKeyerOnAirEnabled(0, 0, False)
             logger.info(f"🎬 ATEM: keyer OFF (was on for {ATEM_KEY_DURATION}s)")
@@ -778,6 +872,7 @@ def _trigger_atem_keyer():
             logger.warning("⚠️ PyATEMMax not installed — pip install PyATEMMax")
         except Exception as e:
             logger.warning(f"⚠️ ATEM error: {e}")
+
     threading.Thread(target=_run, daemon=True).start()
 
 
@@ -917,8 +1012,10 @@ def configure(
     ATEM_ENABLED      = atem_enabled
     ATEM_IP           = atem_ip
     ATEM_KEY_DURATION = atem_key_duration
+    global _atem_resolved_ip
+    _atem_resolved_ip = None  # clear cache so IP is re-resolved each session
     if ATEM_ENABLED:
-        logger.info(f"🎬 ATEM Overlay        : ON  ({ATEM_IP}, key on for {ATEM_KEY_DURATION}s)")
+        logger.info(f"🎬 ATEM Overlay        : ON  ({ATEM_IP or 'Auto'}, key on for {ATEM_KEY_DURATION}s)")
 
     if language == "en":
         USE_SARVAM             = False

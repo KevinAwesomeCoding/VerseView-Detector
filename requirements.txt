@@ -10,4 +10,4 @@ openai
 requests
 pynput
 PyATEMMax
-rapidfuzz
+zeroconf
