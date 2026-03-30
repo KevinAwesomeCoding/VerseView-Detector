@@ -2174,7 +2174,7 @@ def _is_range_not_verse(sentence: str, chap: str, verse: str) -> bool:
 
 # ── Bug Fix 1: Book-count guard ───────────────────────────────────────────────
 _BOOK_COUNT_RE = re.compile(
-    r'\b(\d+)\s+(?:books?|episodes?|letters?|chapters?|times?|'
+    r'\b(\d+)\s+(?:books?|episodes?|letters?|chapters?|times?|words?|'
     r'missionaries|journeys?|trips?|people|men|women|'
     r'പുസ്തകങ്ങൾ|പുസ്തകം)',
     re.IGNORECASE
@@ -2458,6 +2458,20 @@ def detect_verse_hybrid(text, controller, confidence=1.0) -> bool:
                 if ":" in verse:
                     check_and_queue_range(text, verse, controller)
                 return True
+
+        # VERSE-OF-CHAPTER (e.g. "verse 13 of 25")
+        m_vof = re.search(
+            r'\bverse\s+(\d{1,3})\s+of\s+(?:chapter\s+)?(\d{1,3})\b',
+            num_norm, re.IGNORECASE
+        )
+        if m_vof and current_book:
+            verse_n = m_vof.group(1)
+            chap_n = m_vof.group(2)
+            ref = f"{current_book} {chap_n}:{verse_n}"
+            logger.info(f"🔍 VERSE-OF-CHAPTER: {ref} (100% Acc)")
+            deliver_verse(ref, controller, bypass_cooldown=False,
+                          confidence=confidence, source="VERSE-OF-CHAPTER")
+            return True
 
         # Layer 2 — contextual (number only, same book/chapter)
         if current_book and current_chapter:
