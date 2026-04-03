@@ -920,8 +920,14 @@ def configure(
     global normalize_numbers_only
     global VERSE_INTERRUPT_ENABLED, SPOKEN_NUMERAL_MODE, WORSHIP_MODE, _verse_history
     global ATEM_ENABLED, ATEM_IP, ATEM_KEY_DURATION
+    global current_book, current_chapter, current_verse
     WORSHIP_MODE = False
     _verse_history.clear()
+    # Reset context so stale chapter from previous session never bleeds in
+    current_book    = None
+    current_chapter = None
+    current_verse   = None
+    logger.info("📌 Context reset for new session")
     _cancel_vtc()
 
     # Reset Discord live log and session log stream for fresh session
