@@ -54,7 +54,7 @@ self.minsize(800, 500)
     self._populate_mics()
     self._attach_log_handler()
     self._load_into_ui()
-    # Shift+Escape panic binding — no pynput, no permissions needed
+    # Shift+Escape panic binding  -  no pynput, no permissions needed
     self.bind("<Shift-Escape>", lambda e: self._panic_shortcut())
     # Trigger auto-start / smart schedule after window is ready
     self.after(500, self._check_auto_start)
@@ -145,10 +145,10 @@ def _build_ui(self):
 
     history_right = ctk.CTkFrame(split_frame, fg_color="transparent", width=240)
     history_right.grid(row=1, column=1, padx=(2, 0), sticky="nsew")
-    history_right.grid_rowconfigure(1, weight=1)   # verse history — grows
-    history_right.grid_rowconfigure(3, weight=1)   # chapter browser — grows equally
-    history_right.grid_rowconfigure(2, weight=0)   # divider label — fixed
-    history_right.grid_rowconfigure(4, weight=0)   # manual entry — fixed
+    history_right.grid_rowconfigure(1, weight=1)   # verse history  -  grows
+    history_right.grid_rowconfigure(3, weight=1)   # chapter browser  -  grows equally
+    history_right.grid_rowconfigure(2, weight=0)   # divider label  -  fixed
+    history_right.grid_rowconfigure(4, weight=0)   # manual entry  -  fixed
     history_right.grid_columnconfigure(0, weight=1)
     history_right.grid_propagate(False)
 
@@ -209,7 +209,7 @@ def _build_ui(self):
     self.after(200, lambda: self._sync_scrollframe_bg(
         self.chapter_browser_frame, _log_fg))
 
-    self._chapter_browser_loaded = ""  # "Genesis 1" — skip reload if same
+    self._chapter_browser_loaded = ""  # "Genesis 1"  -  skip reload if same
     self._chapter_browser_loading = False
 
     # ── MANUAL VERSE ENTRY ──
@@ -710,7 +710,7 @@ def _record_panic_key(self):
 
 
 def _panic_shortcut(self):
-    """Shift+Escape clears the screen — uses tkinter binding, no pynput."""
+    """Shift+Escape clears the screen  -  uses tkinter binding, no pynput."""
     if self._running:
         engine.trigger_panic()
         self._append_log("\U0001f6a8 Panic! Screen cleared via Shift+Escape")
@@ -1040,7 +1040,7 @@ def _get_scheduled_language(self):
         return "Malayalam (Sarvam AI)"
 
 
-    if wd == 6:  # Sunday — pick the LATEST threshold that has passed
+    if wd == 6:  # Sunday  -  pick the LATEST threshold that has passed
         if t >= datetime.time(16, 40):
             return "Hindi (Nova-3)"
         if t >= datetime.time(10, 40):
@@ -1049,7 +1049,7 @@ def _get_scheduled_language(self):
             return "English (Nova-2)"
 
 
-    return None  # weekday or too early — no auto-language
+    return None  # weekday or too early  -  no auto-language
 
 
 def _check_auto_start(self):
@@ -1272,7 +1272,7 @@ def _toggle_atem_keyer_manual(self):
                 import time as _t
                 ip = engine._resolve_atem_ip()
                 if not ip:
-                    self._append_log("⚠️ ATEM: no IP — check settings")
+                    self._append_log("⚠️ ATEM: no IP  -  check settings")
                     self.after(0, lambda: self._reset_atem_test_btn())
                     return
                 sw = PyATEMMax.ATEMMax()
@@ -1321,10 +1321,10 @@ def _toggle_worship_mode(self):
     engine.WORSHIP_MODE = self._worship_mode_active
     if self._worship_mode_active:
         self.btn_worship.configure(fg_color="#5a3a8a", text_color="white")
-        self._append_log("🎵 Worship Mode ON — verse detection suspended")
+        self._append_log("🎵 Worship Mode ON  -  verse detection suspended")
     else:
         self.btn_worship.configure(fg_color="transparent", text_color=("gray20", "gray90"))
-        self._append_log("🎵 Worship Mode OFF — verse detection resumed")
+        self._append_log("🎵 Worship Mode OFF  -  verse detection resumed")
 
 
 def _sync_scrollframe_bg(self, frame, color_pair):
@@ -1385,7 +1385,7 @@ def _resolve_book(cls, token: str) -> str | None:
     """Return the canonical book name for a prefix token, or None if ambiguous/unknown.
 
     Rules:
-    - Numbered books: token "1pe" matches "1 peter" — strip the space for prefix matching.
+    - Numbered books: token "1pe" matches "1 peter"  -  strip the space for prefix matching.
     - A prefix matches if exactly ONE canonical book starts with it (case-insensitive).
     - Exact match always wins even if it is also a prefix of something longer.
     """
@@ -1394,7 +1394,7 @@ def _resolve_book(cls, token: str) -> str | None:
     for book in cls._ALL_BOOKS:
         b = book.replace(" ", "")
         if b == t:
-            # Exact match — return immediately
+            # Exact match  -  return immediately
             return book
         if b.startswith(t):
             matches.append(book)
@@ -1416,7 +1416,7 @@ def _send_manual_verse(self):
     if not tokens:
         return
 
-    # ── 2. Extract book token (may be "1 peter" style — consume leading digit) ──
+    # ── 2. Extract book token (may be "1 peter" style  -  consume leading digit) ──
     book_token = tokens[0]
     rest       = tokens[1:]
     if book_token.isdigit() and rest:
@@ -1577,7 +1577,7 @@ def _open_verse_popup(self, ref: str):
             if text:
                 textbox.insert("1.0", f"📖  {ref}\n\n{text}")
             else:
-                textbox.insert("1.0", f"📖  {ref}\n\n(Verse text unavailable — check Bible translation setting)")
+                textbox.insert("1.0", f"📖  {ref}\n\n(Verse text unavailable  -  check Bible translation setting)")
             textbox.configure(state="disabled")
         self.after(0, _update)
 
@@ -1589,7 +1589,7 @@ def _open_verse_popup(self, ref: str):
             engine.deliver_verse(ref, ctrl, bypass_cooldown=True)
             self._append_log(f"🔁 Re-sent from history: {ref}")
         else:
-            self._append_log(f"⚠️ Engine not running — cannot re-send {ref}")
+            self._append_log(f"⚠️ Engine not running  -  cannot re-send {ref}")
 
     ctk.CTkButton(
         win, text="🔁 Send Again",
@@ -1660,9 +1660,9 @@ def on_closing(self):
     # can identify sessions that ended via window-close rather than Stop.
     if self._running:
         engine._discord_live_log.set_close_message(
-            "⚠️ App closed without Stop — auto-generated summary and log attached"
+            "⚠️ App closed without Stop  -  auto-generated summary and log attached"
         )
-        self._append_log("⚠️ App closed without Stop — auto-generated summary and log attached")
+        self._append_log("⚠️ App closed without Stop  -  auto-generated summary and log attached")
         engine.request_stop()
     self.destroy()
 ```
