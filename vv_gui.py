@@ -544,8 +544,14 @@ class VerseViewApp(ctk.CTk):
 
         ctk.CTkLabel(atem_sub, text="ATEM IP", anchor="w", width=70).grid(
             row=0, column=0, padx=(0, 6), pady=2, sticky="w")
-        self.atem_ip_entry = ctk.CTkEntry(atem_sub, placeholder_text="Auto (or enter IP)", width=140)
+        self.atem_ip_entry = ctk.CTkEntry(atem_sub, placeholder_text="Auto (or enter IP)", width=110)
         self.atem_ip_entry.grid(row=0, column=1, sticky="ew", pady=2)
+        self.atem_scan_btn = ctk.CTkButton(
+            atem_sub, text="🔍", width=28,
+            fg_color="#4a4a4a", hover_color="#666666",
+            command=self._scan_atem_ip
+        )
+        self.atem_scan_btn.grid(row=0, column=2, sticky="w", padx=(4, 0), pady=2)
 
         ctk.CTkLabel(atem_sub, text="Key On (s)", anchor="w", width=70).grid(
             row=1, column=0, padx=(0, 6), pady=2, sticky="w")
@@ -1250,6 +1256,25 @@ class VerseViewApp(ctk.CTk):
             self._notes_saved = False
             self._append_log("🗑️ Sermon memory wiped clean for the next service.")
 
+
+    def _scan_atem_ip(self):
+        """Run ATEM auto-discovery in the background and fill the IP field if found."""
+        self.atem_scan_btn.configure(text="⏳", state="disabled")
+        self._append_log("🔍 Scanning for ATEM on network (port 9910)...")
+        engine._atem_resolved_ip = None  # flush cache
+
+        def _run():
+            ip = engine._discover_atem_ip()
+            if ip:
+                self.after(0, lambda: self.atem_ip_entry.delete(0, "end"))
+                self.after(0, lambda: self.atem_ip_entry.insert(0, ip))
+                self._append_log(f"✅ ATEM found: {ip} — IP filled in automatically")
+            else:
+                self._append_log("⚠️ ATEM not found — make sure the switcher is on and on the same network")
+            self.after(0, lambda: self.atem_scan_btn.configure(text="🔍", state="normal"))
+
+        import threading
+        threading.Thread(target=_run, daemon=True).start()
 
     def _toggle_atem_keyer_manual(self):
         """Manual ON/OFF toggle for the ATEM upstream keyer — for testing without a verse."""

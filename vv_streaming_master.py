@@ -763,7 +763,12 @@ _atem_fail_until: float = 0.0   # epoch time — skip keyer until this passes
 _ATEM_BACKOFF_SECS = 60.0       # wait 60s after a connection failure before retrying
 
 # Blackmagic Design MAC OUI prefixes (for ARP fallback)
-_BMD_OUI = ("00:26:b0", "7c:2e:0d", "b4:fb:e4", "00:14:03")
+_BMD_OUI = (
+    "00:26:b0", "7c:2e:0d", "b4:fb:e4", "00:14:03",
+    "28:c8:7a", "d4:20:b0", "b4:a9:fc", "00:17:f2",
+    "ac:de:48",  # additional Blackmagic OUIs seen in the wild
+)
+_ATEM_CONTROL_PORT = 9910  # ATEM switchers listen on this TCP port
 
 
 def _discover_atem_ip() -> str | None:
@@ -817,6 +822,70 @@ def _discover_atem_ip() -> str | None:
                     return ip
     except Exception as e:
         logger.debug(f"ARP ATEM discovery error: {e}")
+
+    # ── Strategy 3: Port 9910 subnet scan ───────────────────────────────────
+    # ATEM switchers always listen on TCP 9910. Scan every host on the local
+    # subnet(s) with a short timeout. Skips loopback and link-local ranges.
+    try:
+        import socket as _sock, ipaddress as _ipa, concurrent.futures as _cf
+        import time as _t
+
+        # Collect local subnet prefixes from all non-loopback interfaces
+        local_prefixes: list = []
+        try:
+            import netifaces as _ni  # type: ignore
+            for iface in _ni.interfaces():
+                addrs = _ni.ifaddresses(iface).get(_ni.AF_INET, [])
+                for a in addrs:
+                    ip_s  = a.get("addr", "")
+                    mask  = a.get("netmask", "")
+                    if ip_s and mask and not ip_s.startswith("127.") and not ip_s.startswith("169."):
+                        try:
+                            net = _ipa.IPv4Network(f"{ip_s}/{mask}", strict=False)
+                            if net.num_addresses <= 512:   # only scan /23 or smaller
+                                local_prefixes.append(str(net))
+                        except Exception:
+                            pass
+        except ImportError:
+            pass
+
+        # Fallback: derive subnet from default gateway route
+        if not local_prefixes:
+            try:
+                s = _sock.socket(_sock.AF_INET, _sock.SOCK_DGRAM)
+                s.connect(("8.8.8.8", 80))
+                my_ip = s.getsockname()[0]
+                s.close()
+                parts = my_ip.rsplit(".", 1)
+                local_prefixes.append(f"{parts[0]}.0/24")
+            except Exception:
+                pass
+
+        def _probe(host: str) -> str | None:
+            try:
+                s = _sock.socket(_sock.AF_INET, _sock.SOCK_STREAM)
+                s.settimeout(0.25)
+                result = s.connect_ex((host, _ATEM_CONTROL_PORT))
+                s.close()
+                if result == 0:
+                    return host
+            except Exception:
+                pass
+            return None
+
+        for prefix in local_prefixes:
+            hosts = [str(h) for h in _ipa.IPv4Network(prefix, strict=False).hosts()]
+            logger.info(f"🎬 ATEM port scan: checking {len(hosts)} hosts on {prefix}...")
+            with _cf.ThreadPoolExecutor(max_workers=80) as ex:
+                results = list(ex.map(_probe, hosts))
+            hits = [r for r in results if r]
+            if hits:
+                ip = hits[0]
+                logger.info(f"🎬 ATEM discovered via port scan: {ip}")
+                return ip
+
+    except Exception as e:
+        logger.debug(f"Port-scan ATEM discovery error: {e}")
 
     return None
 
