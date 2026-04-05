@@ -35,10 +35,7 @@ jobs:
         run: echo "build-$($env:GITHUB_SHA.Substring(0,7))-${{ github.run_number }}" | Out-File -FilePath version.txt -Encoding utf8 -NoNewline
 
       - name: Build EXE
-        env:
-          TCL_LIBRARY: ${{ env.pythonLocation }}\tcl\tcl8.6
-          TK_LIBRARY: ${{ env.pythonLocation }}\tcl\tk8.6
-        run: pyinstaller --clean --collect-data customtkinter verseview.spec
+        run: pyinstaller --clean verseview.spec
 
       - name: Upload Windows artifact
         uses: actions/upload-artifact@v4

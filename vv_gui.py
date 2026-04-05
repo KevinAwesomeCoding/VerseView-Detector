@@ -1366,7 +1366,7 @@ class VerseViewApp(ctk.CTk):
         ).pack(pady=(0, 4))
 
         if info.get("is_windows"):
-            desc = "The new .exe will download, then the app\nwill restart and update automatically."
+            desc = "Windows: your browser will open the\nrelease page to download manually."
         elif info.get("is_mac_intel"):
             desc = "Full update: all _internal/ files will be\nreplaced. A restart is required."
         else:
