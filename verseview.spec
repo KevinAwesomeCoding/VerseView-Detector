@@ -1,13 +1,26 @@
 import sys
 import os
-from PyInstaller.utils.hooks import collect_data_files
+import glob
+from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs
 
 block_cipher = None
 
+# Collect customtkinter assets explicitly — collect_data_files alone misplaces
+# the theme JSON files on Windows, causing blue.json not found at runtime.
+import customtkinter as _ctk
+_ctk_dir = os.path.dirname(_ctk.__file__)
+datas = [(os.path.join(_ctk_dir, 'assets'), 'customtkinter/assets')]
+# Also collect the rest of customtkinter data (fonts, images etc.)
+datas += collect_data_files('customtkinter')
+# Remove duplicates while preserving order
+_seen = set()
+_dedup = []
+for item in datas:
+    if item not in _seen:
+        _seen.add(item)
+        _dedup.append(item)
+datas = _dedup
 
-from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs
-
-datas = collect_data_files('customtkinter')
 datas += collect_data_files('tkinter')
 datas += [
     ('settings.py', '.'),

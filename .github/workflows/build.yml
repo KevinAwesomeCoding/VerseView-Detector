@@ -38,7 +38,7 @@ jobs:
         env:
           TCL_LIBRARY: ${{ env.pythonLocation }}\tcl\tcl8.6
           TK_LIBRARY: ${{ env.pythonLocation }}\tcl\tk8.6
-        run: pyinstaller --clean verseview.spec
+        run: pyinstaller --clean --collect-data customtkinter verseview.spec
 
       - name: Upload Windows artifact
         uses: actions/upload-artifact@v4
