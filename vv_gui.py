@@ -48,6 +48,7 @@ class VerseViewApp(ctk.CTk):
 
         self._s                   = cfg.load()
         self._running             = False
+        self._closing             = False
         self._engine_thread       = None
         self._notes_saved         = False
         self._worship_mode_active = False
@@ -1187,11 +1188,15 @@ class VerseViewApp(ctk.CTk):
 
     def _on_stopped(self):
         self._running = False
-        self.btn_start.configure(state="normal")
         self.btn_stop.configure(state="disabled")
         self.lbl_status.configure(text="● Stopped", text_color="#666666")
         self.lang_menu.configure(state="normal")
         self.mic_menu.configure(state="normal")
+        if getattr(self, "_closing", False):
+            # Window X was clicked while engine was running — finish the close now
+            self.after(200, self._finish_close)
+            return
+        self.btn_start.configure(state="normal")
 
 
     # ── FOLDER MANAGER ──
@@ -1315,7 +1320,7 @@ class VerseViewApp(ctk.CTk):
         ).pack(pady=(0, 4))
 
         if info.get("is_windows"):
-            desc = "Windows: your browser will open the\nrelease page to download manually."
+            desc = "The new .exe will download, then the app\nwill restart and update automatically."
         elif info.get("is_mac_intel"):
             desc = "Full update: all _internal/ files will be\nreplaced. A restart is required."
         else:
@@ -1790,40 +1795,49 @@ class VerseViewApp(ctk.CTk):
             self.after(1000, self._update_history_loop)
 
     def on_closing(self):
+        cfg.save(self._collect_settings())
+
+        if self._running:
+            # Engine is still live — stop it first, then finish closing once it settles
+            engine._discord_live_log.set_close_message(
+                "⚠️ App closed without Stop — auto-generated summary and log attached"
+            )
+            self._append_log("⚠️ App closed without Stop — stopping engine before closing...")
+            self.lbl_status.configure(text="● Stopping...", text_color="#a07020")
+            self.btn_stop.configure(state="disabled")
+            self.btn_start.configure(state="disabled")
+            self._closing = True   # flag so _on_stopped knows to finish the close
+            engine.request_stop()
+            # _on_stopped() will call _finish_close() once the engine thread ends
+        else:
+            self._finish_close()
+
+    def _finish_close(self):
+        """Called after the engine has fully stopped (or was already stopped)."""
+        # Auto-save summary if needed
         if self.auto_save_var.get() and not self._notes_saved and engine.full_sermon_transcript and len(engine.full_sermon_transcript.strip()) > 100:
             self.lbl_status.configure(text="● Auto-Saving Notes...", text_color="#a07020")
             self.update()
             try:
-                self._append_log("⚠️ App closed without saving! Auto-generating summary...")
+                self._append_log("⚠️ Auto-generating summary before close...")
                 content = engine.generate_sermon_summary()
 
                 default_title = "Unsaved_Sermon"
-                first_line = content.split('\n')[0]
+                first_line = content.split("\n")[0]
                 if first_line.startswith("TITLE:"):
                     raw_title = first_line.replace("TITLE:", "").strip()
                     default_title = re.sub(r'[\\/*?:"<>|]', "", raw_title)
 
                 date_str = datetime.date.today().strftime("%B %d %Y")
                 filename = f"{default_title} {date_str}.txt"
-
                 notes_folder = self._get_sermon_notes_dir()
                 filepath = os.path.join(notes_folder, filename)
-
                 with open(filepath, "w", encoding="utf-8") as f:
                     f.write(content)
                 print(f"Emergency Auto-Save triggered: {filepath}")
             except Exception as e:
                 print(f"Emergency Auto-Save Failed: {e}")
 
-        cfg.save(self._collect_settings())
-        # Feature 7: stamp the Discord log with a custom caption so the operator
-        # can identify sessions that ended via window-close rather than Stop.
-        if self._running:
-            engine._discord_live_log.set_close_message(
-                "⚠️ App closed without Stop — auto-generated summary and log attached"
-            )
-            self._append_log("⚠️ App closed without Stop — auto-generated summary and log attached")
-            engine.request_stop()
         self.destroy()
 
 

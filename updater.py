@@ -169,12 +169,46 @@ def download_and_apply(
             if on_progress:
                 on_progress(82)
 
-            # ── 2. Windows — open browser ─────────────────────────────────────
+            # ── 2. Windows — download .new.exe, write bat helper, signal restart ──
             if sys.platform == "win32":
-                import webbrowser
-                webbrowser.open(GITHUB_REL_PAGE)
+                # Place the new exe next to the current one
+                current_exe = sys.executable
+                new_exe     = current_exe + ".new"
+
+                # Rename the downloaded file to .new alongside the running exe
+                shutil.move(tmp_path, new_exe)
+                tmp_path = None  # prevent finally-block deletion
+
+                # Write a .bat that waits for this process to exit, swaps files, relaunches
+                bat_path = current_exe + ".updater.bat"
+                pid      = os.getpid()
+                bat = (
+                    "@echo off\n"
+                    f"echo Waiting for VerseView to close...\n"
+                    f":wait\n"
+                    f"tasklist /FI \"PID eq {pid}\" 2>NUL | find \"{pid}\" >NUL\n"
+                    f"if not errorlevel 1 (timeout /t 1 /nobreak >NUL & goto wait)\n"
+                    f"echo Applying update...\n"
+                    f"del /F /Q \"{current_exe}\"\n"
+                    f"rename \"{new_exe}\" \"{os.path.basename(current_exe)}\"\n"
+                    f"start \"\" \"{current_exe}\"\n"
+                    f"del /F /Q \"%~f0\"\n"  # bat deletes itself
+                )
+                with open(bat_path, "w", encoding="utf-8") as bf:
+                    bf.write(bat)
+
+                # Launch the bat detached (it runs after we exit)
+                import subprocess
+                subprocess.Popen(
+                    ["cmd.exe", "/c", bat_path],
+                    creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
+                    close_fds=True,
+                )
+
+                if on_progress:
+                    on_progress(100)
                 if on_done:
-                    on_done()
+                    on_done()   # GUI will call restart_app() → closes this process → bat takes over
                 return
 
             if not zipfile.is_zipfile(tmp_path):
