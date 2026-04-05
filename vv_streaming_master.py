@@ -1494,8 +1494,7 @@ _queue_last_check_time    = 0.0
 _queue_last_excerpt       = ""
 
 def check_verse_queue(transcript, controller) -> bool:
-    if WORSHIP_MODE:
-        return False
+    # NOTE: WORSHIP_MODE does NOT bail here — detection runs for debug logging.
     global _queue_semantic_in_flight, _queue_last_excerpt, _queue_last_check_time
     global current_book, current_chapter, current_verse
     with verse_queue_lock:
@@ -1905,9 +1904,10 @@ class VerseController:
     def send_verse(self, ref, bypass_cooldown=False, confidence=1.0, source="UNKNOWN"):
         global current_book, current_chapter, current_verse, verses_cited
         global _session_verse_high_water
-        # Worship Mode is the master gate — nothing gets through regardless of source
+        # Worship Mode is the master gate — detection ran and logged above, but
+        # nothing gets sent to the display (Selenium / VerseView) while worship is active.
         if WORSHIP_MODE:
-            logger.debug(f"🎵 Worship Mode: suppressed {ref}")
+            logger.info(f"🎵 [WORSHIP MODE] Detected but suppressed: {ref}")
             return False
         now = time.time()
         logger.debug(f"VerseController.send_verse: ref={ref}, bypass={bypass_cooldown}")
@@ -2305,8 +2305,8 @@ def _is_john_surname(text: str) -> bool:
         controller.send_verse(ref, bypass_cooldown=bypass_cooldown, confidence=confidence, source=source)
 
 def detect_verse_hybrid(text, controller, confidence=1.0) -> bool:
-    if WORSHIP_MODE:
-        return False
+    # NOTE: WORSHIP_MODE does NOT bail here — detection runs fully for debug logging.
+    # The display gate is inside send_verse / VerseController.send_verse.
     global current_book, current_chapter, current_verse, _last_explicit_ref_time
 
     if not text or len(text.strip()) < 3:
@@ -2857,8 +2857,8 @@ def _detect_from_translation(english_text: str, controller) -> bool:
 
 
 def _process_transcript_blob(sentence: str, partial_context_ref: list, controller):
-    if WORSHIP_MODE:
-        return
+    # NOTE: WORSHIP_MODE does NOT bail here — detection runs fully for debug logging.
+    # The display gate is inside send_verse / VerseController.send_verse.
     # Bug 5: Self-correction detector — if the speaker says 'sorry' / 'I mean' / 'I meant',
     # discard the text before the correction and only parse what follows it.
     _corr_m = _CORRECTION_RE.search(sentence)
