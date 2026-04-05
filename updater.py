@@ -1,16 +1,3 @@
-"""
-updater.py — VerseView self-update module
-
-Platform behaviour:
-  Mac Intel  (x86_64) -> downloads VerseView-Detector-Mac-Intel.zip
-                          replaces the ENTIRE _internal/ folder
-                          (handles new libraries, not just Python files)
-  Mac Silicon (arm64) -> downloads VerseView-Detector-Mac-Silicon-App.zip
-                          replaces updatable Python files only
-  Windows             -> opens browser to release page
-                          (cannot replace a running .exe in-place)
-"""
-
 import sys
 import os
 import platform

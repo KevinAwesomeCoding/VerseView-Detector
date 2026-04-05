@@ -21,6 +21,20 @@ except ImportError:
 
 APP_VERSION = "1.2.0"
 
+def _read_build_version() -> str:
+    """Read the build tag from version.txt bundled by CI, or fall back to APP_VERSION."""
+    try:
+        import sys, os
+        base = sys._MEIPASS if hasattr(sys, "_MEIPASS") else os.path.dirname(os.path.abspath(__file__))
+        path = os.path.join(base, "version.txt")
+        with open(path, encoding="utf-8") as f:
+            v = f.read().strip()
+        return v if v and v != "dev" else APP_VERSION
+    except Exception:
+        return APP_VERSION
+
+BUILD_VERSION = _read_build_version()
+
 ctk.set_appearance_mode("dark")
 
 ctk.set_default_color_theme("blue")
@@ -41,7 +55,7 @@ class GUILogHandler(logging.Handler):
 class VerseViewApp(ctk.CTk):
     def __init__(self):
         super().__init__()
-        self.title(f"VerseView Detector  v{APP_VERSION}")
+        self.title(f"VerseView Detector  v{APP_VERSION}  [{BUILD_VERSION}]")
         self.geometry("1060x700")
         self.minsize(800, 500)
 
@@ -132,15 +146,16 @@ class VerseViewApp(ctk.CTk):
         )
         self.btn_worship.pack(side="right", padx=(16, 0))
 
-        # Update button — hidden until a newer release is found
+        # Update / check-for-update button — always visible
         self._update_info = None
         self.btn_update = ctk.CTkButton(
-            top, text="🔄 Update Available", width=150,
-            fg_color="#7a5a00", hover_color="#5c4400",
-            font=ctk.CTkFont(size=13, weight="bold"),
-            command=self._show_update_dialog
+            top, text="⟳ Check for Update", width=160,
+            fg_color="transparent", border_color=("gray60", "gray40"), border_width=1,
+            text_color=("gray40", "gray70"), hover_color=("gray85", "gray25"),
+            font=ctk.CTkFont(size=12),
+            command=self._manual_check_update
         )
-        # Not packed yet — only shown when update is found
+        self.btn_update.pack(side="right", padx=(8, 0))
 
 
         # ── SPLIT FRAME FOR LOGS AND HISTORY ──
@@ -461,7 +476,7 @@ class VerseViewApp(ctk.CTk):
 
         # Version label
         ctk.CTkLabel(
-            self.tab_vv, text=f"v{APP_VERSION}",
+            self.tab_vv, text=f"v{APP_VERSION}  •  build: {BUILD_VERSION}",
             text_color=("gray50", "gray50"),
             font=ctk.CTkFont(size=10)
         ).grid(row=1, column=0, columnspan=2, pady=(0, 4), sticky="e", padx=12)
@@ -1281,7 +1296,7 @@ class VerseViewApp(ctk.CTk):
     # ── AUTO-UPDATE ───────────────────────────────────────────────────────────
 
     def _check_for_update_bg(self):
-        """Run the GitHub release check in a background thread."""
+        """Silent background update check 15s after startup."""
         if _updater is None:
             return
         def _run():
@@ -1291,9 +1306,40 @@ class VerseViewApp(ctk.CTk):
                 self.after(0, self._show_update_badge)
         threading.Thread(target=_run, daemon=True).start()
 
+    def _manual_check_update(self):
+        """Triggered by the always-visible check button."""
+        if self._update_info:
+            # Already found an update — go straight to dialog
+            self._show_update_dialog()
+            return
+        if _updater is None:
+            mb.showinfo("Updater", "Updater module not available in this build.")
+            return
+        self.btn_update.configure(text="⟳ Checking...", state="disabled")
+        def _run():
+            info = _updater.check_for_update()
+            if info:
+                self._update_info = info
+                self.after(0, self._show_update_badge)
+                self.after(0, self._show_update_dialog)
+            else:
+                self.after(0, lambda: self.btn_update.configure(
+                    text="✅ Up to date", state="normal"))
+                # Reset label after 4s
+                self.after(4000, lambda: self.btn_update.configure(
+                    text="⟳ Check for Update"))
+        threading.Thread(target=_run, daemon=True).start()
+
     def _show_update_badge(self):
-        """Make the update button visible in the toolbar."""
-        self.btn_update.pack(side="right", padx=(8, 0))
+        """Highlight the update button to show an update is available."""
+        self.btn_update.configure(
+            text="🔄 Update Available",
+            fg_color="#7a5a00", hover_color="#5c4400",
+            border_width=0,
+            text_color="white",
+            state="normal",
+            command=self._show_update_dialog
+        )
 
     def _show_update_dialog(self):
         """Show update details and let the user apply or skip."""
