@@ -5,21 +5,16 @@ from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs
 
 block_cipher = None
 
-# Collect customtkinter assets explicitly — collect_data_files alone misplaces
-# the theme JSON files on Windows, causing blue.json not found at runtime.
+# Use Tree() to include the ENTIRE customtkinter package directory verbatim.
+# collect_data_files() misplaces the assets/ subfolder on Windows, causing
+# the blue.json theme to not be found at runtime.
 import customtkinter as _ctk
 _ctk_dir = os.path.dirname(_ctk.__file__)
-datas = [(os.path.join(_ctk_dir, 'assets'), 'customtkinter/assets')]
-# Also collect the rest of customtkinter data (fonts, images etc.)
-datas += collect_data_files('customtkinter')
-# Remove duplicates while preserving order
-_seen = set()
-_dedup = []
-for item in datas:
-    if item not in _seen:
-        _seen.add(item)
-        _dedup.append(item)
-datas = _dedup
+
+# Tree() is available in .spec context — it walks the directory and preserves
+# the full folder structure so customtkinter/assets/themes/blue.json lands
+# exactly where customtkinter looks for it.
+datas = [Tree(_ctk_dir, prefix='customtkinter', excludes=['__pycache__'])]
 
 datas += collect_data_files('tkinter')
 datas += [
