@@ -27,11 +27,17 @@ jobs:
           pip install pyaudio
           pip install pyinstaller customtkinter selenium webdriver-manager certifi requests websockets charset-normalizer sarvamai pynput deepgram-sdk PyATEMMax zeroconf
 
+      - name: Verify tkinter
+        run: python -c "import tkinter; print('tkinter OK')"
+
       - name: Write version
         shell: pwsh
         run: echo "build-$($env:GITHUB_SHA.Substring(0,7))-${{ github.run_number }}" | Out-File -FilePath version.txt -Encoding utf8 -NoNewline
 
       - name: Build EXE
+        env:
+          TCL_LIBRARY: ${{ env.pythonLocation }}\tcl\tcl8.6
+          TK_LIBRARY: ${{ env.pythonLocation }}\tcl\tk8.6
         run: pyinstaller --clean verseview.spec
 
       - name: Upload Windows artifact

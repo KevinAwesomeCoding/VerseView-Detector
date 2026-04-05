@@ -5,7 +5,10 @@ from PyInstaller.utils.hooks import collect_data_files
 block_cipher = None
 
 
+from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs
+
 datas = collect_data_files('customtkinter')
+datas += collect_data_files('tkinter')
 datas += [
     ('settings.py', '.'),
     ('bible_fetcher.py', '.'),
@@ -16,6 +19,21 @@ datas += [
     ('version.txt', '.'),
 ]
 
+
+if sys.platform == 'win32':
+    # Explicitly bundle tkinter DLLs — PyInstaller misses them on some Windows setups
+    import glob, sysconfig
+    _stdlib = sysconfig.get_path('stdlib')
+    _dlls   = os.path.join(os.path.dirname(sys.executable), 'DLLs')
+    for _pat, _dest in [
+        (os.path.join(_dlls, 'tcl*.dll'),     '.'),
+        (os.path.join(_dlls, 'tk*.dll'),      '.'),
+        (os.path.join(_dlls, '_tkinter*.pyd'), '.'),
+        (os.path.join(sys.exec_prefix, 'tcl', 'tcl8*', '*.tcl'), 'tcl'),
+        (os.path.join(sys.exec_prefix, 'tcl', 'tk8*',  '*.tcl'), 'tk'),
+    ]:
+        for _f in glob.glob(_pat):
+            datas.append((_f, _dest))
 
 if sys.platform == 'darwin':
     tcl_lib = '/usr/local/opt/tcl-tk/lib/tcl8.6'
@@ -29,7 +47,12 @@ a = Analysis(
     binaries=[],
     datas=datas,
     hiddenimports=[
-        'customtkinter', 
+        'customtkinter',
+        'tkinter',
+        'tkinter.ttk',
+        'tkinter.messagebox',
+        '_tkinter',
+        
         'pyaudio', 
         'websockets.legacy.client', 
         'selenium',
