@@ -281,3 +281,6 @@ def restart_app():
         import subprocess
         subprocess.Popen([sys.executable] + sys.argv)
         sys.exit(0)
+
+
+# update check
