@@ -14,6 +14,10 @@ import sys
 import settings as cfg  # type: ignore
 import vv_streaming_master as engine  # type: ignore
 from live_points_app import LivePointsController  # type: ignore
+try:
+    import updater as _updater  # type: ignore
+except ImportError:
+    _updater = None
 
 APP_VERSION = "1.2.0"
 
@@ -60,6 +64,8 @@ class VerseViewApp(ctk.CTk):
         self._last_history_len = 0
         self.after(1000, self._update_history_loop)
         self.after(1500, self._update_chapter_browser_loop)
+        # Silent update check — runs 15s after startup so it never delays launch
+        self.after(15000, self._check_for_update_bg)
 
 
     # ─────────────────────────────────────────────────
@@ -124,6 +130,16 @@ class VerseViewApp(ctk.CTk):
             command=self._toggle_worship_mode
         )
         self.btn_worship.pack(side="right", padx=(16, 0))
+
+        # Update button — hidden until a newer release is found
+        self._update_info = None
+        self.btn_update = ctk.CTkButton(
+            top, text="🔄 Update Available", width=150,
+            fg_color="#7a5a00", hover_color="#5c4400",
+            font=ctk.CTkFont(size=13, weight="bold"),
+            command=self._show_update_dialog
+        )
+        # Not packed yet — only shown when update is found
 
 
         # ── SPLIT FRAME FOR LOGS AND HISTORY ──
@@ -1256,6 +1272,112 @@ class VerseViewApp(ctk.CTk):
             self._notes_saved = False
             self._append_log("🗑️ Sermon memory wiped clean for the next service.")
 
+
+    # ── AUTO-UPDATE ───────────────────────────────────────────────────────────
+
+    def _check_for_update_bg(self):
+        """Run the GitHub release check in a background thread."""
+        if _updater is None:
+            return
+        def _run():
+            info = _updater.check_for_update()
+            if info:
+                self._update_info = info
+                self.after(0, self._show_update_badge)
+        threading.Thread(target=_run, daemon=True).start()
+
+    def _show_update_badge(self):
+        """Make the update button visible in the toolbar."""
+        self.btn_update.pack(side="right", padx=(8, 0))
+
+    def _show_update_dialog(self):
+        """Show update details and let the user apply or skip."""
+        info = self._update_info
+        if not info:
+            return
+
+        win = ctk.CTkToplevel(self)
+        win.title("Update Available")
+        win.geometry("420x260")
+        win.resizable(False, False)
+        win.attributes("-topmost", True)
+        self.after(200, lambda: win.attributes("-topmost", False))
+
+        ctk.CTkLabel(
+            win, text="🔄  VerseView Update Available",
+            font=ctk.CTkFont(size=15, weight="bold")
+        ).pack(pady=(20, 6))
+
+        ctk.CTkLabel(
+            win, text=f"New version: {info['tag_name']}",
+            font=ctk.CTkFont(size=12),
+            text_color=("gray40", "gray70")
+        ).pack(pady=(0, 4))
+
+        if info.get("is_windows"):
+            desc = "Windows: your browser will open the\nrelease page to download manually."
+        elif info.get("is_mac_intel"):
+            desc = "Full update: all _internal/ files will be\nreplaced. A restart is required."
+        else:
+            desc = "Updated Python files will be installed\nautomatically. A restart is required."
+        ctk.CTkLabel(
+            win, text=desc,
+            font=ctk.CTkFont(size=12),
+            text_color=("gray40", "gray70")
+        ).pack(pady=(0, 12))
+
+        self._upd_progress = ctk.CTkProgressBar(win, width=340)
+        self._upd_progress.pack(pady=(0, 8))
+        self._upd_progress.set(0)
+
+        self._upd_status = ctk.CTkLabel(win, text="", font=ctk.CTkFont(size=11))
+        self._upd_status.pack()
+
+        btn_frame = ctk.CTkFrame(win, fg_color="transparent")
+        btn_frame.pack(pady=12)
+
+        apply_btn = ctk.CTkButton(
+            btn_frame, text="Install Update",
+            fg_color="#7a5a00", hover_color="#5c4400",
+            command=lambda: self._apply_update(win, apply_btn, info)
+        )
+        apply_btn.pack(side="left", padx=8)
+
+        ctk.CTkButton(
+            btn_frame, text="Later",
+            fg_color="#4a4a4a", hover_color="#333333",
+            command=win.destroy
+        ).pack(side="left", padx=8)
+
+    def _apply_update(self, win, apply_btn, info):
+        if _updater is None or not info.get("download_url"):
+            import webbrowser
+            webbrowser.open(info.get("release_url", ""))
+            win.destroy()
+            return
+
+        apply_btn.configure(state="disabled", text="Downloading...")
+
+        def on_progress(pct):
+            self.after(0, lambda: self._upd_progress.set(pct / 100))
+            self.after(0, lambda: self._upd_status.configure(text=f"Downloading... {pct}%"))
+
+        def on_done():
+            self.after(0, lambda: self._upd_status.configure(text="✅ Done — restarting..."))
+            self.after(0, lambda: self._upd_progress.set(1.0))
+            self.after(1500, _updater.restart_app)
+
+        def on_error(msg):
+            self.after(0, lambda: self._upd_status.configure(
+                text=f"❌ {msg[:80]}", text_color="#cc4444"))
+            self.after(0, lambda: apply_btn.configure(state="normal", text="Retry"))
+
+        _updater.download_and_apply(
+            info["download_url"],
+            on_progress=on_progress,
+            on_done=on_done,
+            on_error=on_error,
+        )
 
     def _scan_atem_ip(self):
         """Run ATEM auto-discovery in the background and fill the IP field if found."""

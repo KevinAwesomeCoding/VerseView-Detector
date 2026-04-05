@@ -12,6 +12,8 @@ datas += [
     ('parse_reference_eng.py', '.'),
     ('parse_reference_hindi.py', '.'),
     ('parse_reference_ml.py', '.'),
+    ('updater.py', '.'),
+    ('version.txt', '.'),
 ]
 
 
