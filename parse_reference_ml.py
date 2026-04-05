@@ -479,6 +479,72 @@ BOOKS_ML = {
     "വെളിപാടു": "Revelation", "വെളിപ്പാട്": "Revelation",
     "വെളിപാടുപുസ്തകം": "Revelation", "വെളിപാടു പുസ്തകം": "Revelation",
     "വെളിപ്പാടു": "Revelation", "വെളി": "Revelation",
+
+    # ── Sarvam ASR Transliterations ──────────────────────────────────────────
+    # When a Malayalam preacher code-switches into English, Sarvam transcribes
+    # the spoken English book name in Malayalam script.  These entries ensure
+    # parse_ml (now the PRIMARY_PARSER for Sarvam mode) can resolve them.
+    # e.g. "ജോൺ ചാപ്റ്റർ 12:27"  →  John 12:27
+
+    # Matthew
+    "മത്ത": "Matthew", "മാത്യൂ": "Matthew",
+
+    # Mark
+    "മാർക്ക്": "Mark",
+
+    # Luke
+    "ലൂക്ക്": "Luke",
+
+    # John
+    "ജോൺ": "John", "ജോഹ്ൻ": "John",
+
+    # Acts
+    "ആക്ട്സ്": "Acts", "ആക്ട്": "Acts",
+
+    # Romans
+    "റോമൻ": "Romans", "റോമൻസ്": "Romans",
+
+    # 1 Corinthians (transliterated)
+    "1 കൊരിന്ത്യൻ": "1 Corinthians", "1കൊരിന്ത്യൻ": "1 Corinthians",
+    "ഒന്ന് കൊരിന്ത്യൻ": "1 Corinthians",
+
+    # 2 Corinthians (transliterated)
+    "2 കൊരിന്ത്യൻ": "2 Corinthians", "2കൊരിന്ത്യൻ": "2 Corinthians",
+    "രണ്ട് കൊരിന്ത്യൻ": "2 Corinthians",
+
+    # Ephesians
+    "എഫേഷ്യൻ": "Ephesians", "എഫേഷ്യൻസ്": "Ephesians",
+
+    # Philippians
+    "ഫിലിപ്പ്യൻ": "Philippians", "ഫിലിപ്പ്യൻസ്": "Philippians",
+
+    # Hebrews
+    "ഹീബ്രൂ": "Hebrews", "ഹീബ്രൂസ്": "Hebrews",
+
+    # 1 Peter (transliterated)
+    "1 പീറ്റർ": "1 Peter", "ഒന്ന് പീറ്റർ": "1 Peter",
+
+    # 2 Peter (transliterated)
+    "2 പീറ്റർ": "2 Peter", "രണ്ട് പീറ്റർ": "2 Peter",
+
+    # Revelation (multiple Sarvam spellings seen in sermons)
+    "റവലേഷൻ": "Revelation", "റെവലേഷൻ": "Revelation",
+    "റെവല്യൂഷൻ": "Revelation", "റിവലേഷൻ": "Revelation",
+
+    # Isaiah
+    "ഐസ്സയ": "Isaiah", "ഐസ്സയ്യ": "Isaiah",
+
+    # Daniel
+    "ദാനിയൽ": "Daniel",
+
+    # Nehemiah
+    "നഹീമ്യ": "Nehemiah",
+
+    # Genesis
+    "ജനസിസ്": "Genesis",
+
+    # Exodus
+    "എക്സോഡസ്": "Exodus",
 }
 
 ML_DIGITS = str.maketrans({

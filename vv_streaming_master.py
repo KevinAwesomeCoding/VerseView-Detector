@@ -1122,8 +1122,12 @@ def configure(
     elif language == "ml":
         USE_SARVAM             = True
         SARVAM_LANGUAGE        = "ml-IN"
-        PRIMARY_PARSER         = parse_eng
-        normalize_numbers_only = norm_eng
+        # Must use parse_ml here — parse_eng strips all non-ASCII chars and
+        # therefore destroys every Malayalam character before matching. parse_ml
+        # handles both Malayalam book names AND English code-switching (e.g.
+        # "ജോൺ ചാപ്റ്റർ 12:27" or "John chapter 12 verse 5").
+        PRIMARY_PARSER         = parse_ml
+        normalize_numbers_only = norm_ml
     else:
         USE_SARVAM             = False
         DEEPGRAM_LANGUAGE      = "multi"
@@ -2425,9 +2429,18 @@ def detect_verse_hybrid(text, controller, confidence=1.0) -> bool:
                 _nospace    = len(text.replace(' ', ''))
                 _is_ml_ctx  = _nospace > 0 and (_ml_chars / _nospace) > 0.40
                 if _is_ml_ctx:
-                    # Malayalam-dominant context — "revelation" is transliteration noise
-                    logger.debug(f"🚫 Revelation detection skipped: >40% Malayalam context in '{text[:60]}'")
-                    is_blocked = True
+                    # Malayalam-dominant context — allow ONLY when "revelation" appears
+                    # explicitly as an English word followed by a chapter number.
+                    # This lets the preacher say "Revelation 13:8" in a Malayalam
+                    # sermon without being blocked.  Generic transliteration noise
+                    # ("വെളിപ്പാട്" etc.) will still be blocked.
+                    _has_explicit_rev = bool(
+                        re.search(r'\brevelation\s+\d+\b', text, re.IGNORECASE) or
+                        re.search(r'\bbook\s+of\s+revelation\b', text, re.IGNORECASE)
+                    )
+                    if not _has_explicit_rev:
+                        logger.debug(f"🚫 Revelation detection skipped: >40% Malayalam context in '{text[:60]}'")
+                        is_blocked = True
                 elif not re.search(r'\brevelation\b', text, re.IGNORECASE):
                     # "Revelation" does not appear as an isolated English word at all
                     if _dedup_blocked(text, "revelation"):
@@ -2514,7 +2527,6 @@ def detect_verse_hybrid(text, controller, confidence=1.0) -> bool:
                     is_blocked = True
 
             if not is_blocked:
-                logger.info(f"🔍 PARSER: {verse} ({int(confidence*100)}% Acc)")
                 chap_num = verse.split()[-1]
                 blockers = [
                     "days", "weeks", "months", "years", "minutes", "hours",
@@ -2810,6 +2822,38 @@ def trigger_onwards_if_needed_standalone(ref_string: str, original_text: str):
                     bk = current_book
                     ch = current_chapter
             _start_onwards(bk, ch, vs)
+
+
+def _detect_from_translation(english_text: str, controller) -> bool:
+    """Bug 1 Fix: When Sarvam auto-translates Malayalam → English it may produce
+    colon-notation references (e.g. "John 12:27", "Matthew 3:5") that are not
+    present in the raw Malayalam blob.  This helper runs parse_eng on the
+    translated text and delivers ONLY high-confidence chapter:verse hits
+    (colon required) to avoid false positives from hallucinated book names.
+    It is called in addition to — not instead of — the Malayalam processing.
+    """
+    if not english_text or not english_text.strip():
+        return False
+    if not USE_SARVAM:
+        return False
+    try:
+        refs = parse_eng(english_text)
+    except Exception:
+        return False
+    for ref in refs:
+        if ":" not in ref:
+            continue  # chapter-only guesses from translated text are too risky
+        if _is_book_count_number(english_text, ref.split()[-1].split(":")[0]):
+            continue
+        if _reject_verse_out_of_range(ref):
+            continue
+        if "John" in ref and (_is_john_the_baptist(english_text) or _is_john_surname(english_text)):
+            continue
+        logger.info(f"⚡ TRANSLATION-PATH ref: {ref}")
+        deliver_verse(ref, controller, bypass_cooldown=True, confidence=1.0, source="TRANSLATION-PATH")
+        trigger_onwards_if_needed_standalone(ref, english_text)
+        return True
+    return False
 
 
 def _process_transcript_blob(sentence: str, partial_context_ref: list, controller):
@@ -3120,6 +3164,11 @@ async def stream_audio_sarvam(controller):
                                     # Sarvam's English translation, which can hallucinate names
                                     # like "John the Baptist" from Malayalam context words.
                                     _process_transcript_blob(malayalam_text, partial_context, controller)
+                                    # Bug 1 Fix: Also detect colon-notation references that only
+                                    # appear in the auto-translation (e.g. "Matthew 3:5", "John 12:27").
+                                    # _detect_from_translation uses parse_eng and requires a colon
+                                    # so false positives from hallucinated names are minimal.
+                                    _detect_from_translation(english_text, controller)
                                         
                                 except Exception as e:
                                     logger.error(f"Sarvam message processing error: {e}")
