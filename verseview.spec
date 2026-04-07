@@ -5,18 +5,10 @@ from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs
 
 block_cipher = None
 
-# Use Tree() to include the ENTIRE customtkinter package directory verbatim.
-# collect_data_files() misplaces the assets/ subfolder on Windows, causing
-# the blue.json theme to not be found at runtime.
-import customtkinter as _ctk
-_ctk_dir = os.path.dirname(_ctk.__file__)
+# collect_data_files() returns proper 2-tuples (src, dest) that Analysis() expects.
+# Tree() returns 3-tuple TOC objects which cause "too many values to unpack".
+datas = collect_data_files('customtkinter')
 
-# Tree() is available in .spec context — it walks the directory and preserves
-# the full folder structure so customtkinter/assets/themes/blue.json lands
-# exactly where customtkinter looks for it.
-datas = [Tree(_ctk_dir, prefix='customtkinter', excludes=['__pycache__'])]
-
-datas += collect_data_files('tkinter')
 datas += [
     ('settings.py', '.'),
     ('bible_fetcher.py', '.'),

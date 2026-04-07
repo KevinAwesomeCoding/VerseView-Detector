@@ -1347,9 +1347,11 @@ class VerseViewApp(ctk.CTk):
         if not info:
             return
 
+        is_windows = info.get("is_windows", False)
+
         win = ctk.CTkToplevel(self)
         win.title("Update Available")
-        win.geometry("420x260")
+        win.geometry("420x240" if is_windows else "420x260")
         win.resizable(False, False)
         win.attributes("-topmost", True)
         self.after(200, lambda: win.attributes("-topmost", False))
@@ -1365,8 +1367,8 @@ class VerseViewApp(ctk.CTk):
             text_color=("gray40", "gray70")
         ).pack(pady=(0, 4))
 
-        if info.get("is_windows"):
-            desc = "Windows: your browser will open the\nrelease page to download manually."
+        if is_windows:
+            desc = "Click below to open the GitHub releases page\nand download the latest Windows build."
         elif info.get("is_mac_intel"):
             desc = "Full update: all _internal/ files will be\nreplaced. A restart is required."
         else:
@@ -1377,22 +1379,36 @@ class VerseViewApp(ctk.CTk):
             text_color=("gray40", "gray70")
         ).pack(pady=(0, 12))
 
-        self._upd_progress = ctk.CTkProgressBar(win, width=340)
-        self._upd_progress.pack(pady=(0, 8))
-        self._upd_progress.set(0)
+        # Progress bar only shown for Mac (in-app update)
+        if not is_windows:
+            self._upd_progress = ctk.CTkProgressBar(win, width=340)
+            self._upd_progress.pack(pady=(0, 8))
+            self._upd_progress.set(0)
 
-        self._upd_status = ctk.CTkLabel(win, text="", font=ctk.CTkFont(size=11))
-        self._upd_status.pack()
+            self._upd_status = ctk.CTkLabel(win, text="", font=ctk.CTkFont(size=11))
+            self._upd_status.pack()
 
         btn_frame = ctk.CTkFrame(win, fg_color="transparent")
         btn_frame.pack(pady=12)
 
-        apply_btn = ctk.CTkButton(
-            btn_frame, text="Install Update",
-            fg_color="#7a5a00", hover_color="#5c4400",
-            command=lambda: self._apply_update(win, apply_btn, info)
-        )
-        apply_btn.pack(side="left", padx=8)
+        if is_windows:
+            # Windows: just open browser, no in-app download
+            def _open_github():
+                import webbrowser
+                webbrowser.open(info.get("release_url", ""))
+                win.destroy()
+            ctk.CTkButton(
+                btn_frame, text="⬇  Open GitHub Releases",
+                fg_color="#1a5a8a", hover_color="#144a72",
+                command=_open_github
+            ).pack(side="left", padx=8)
+        else:
+            apply_btn = ctk.CTkButton(
+                btn_frame, text="Install Update",
+                fg_color="#7a5a00", hover_color="#5c4400",
+                command=lambda: self._apply_update(win, apply_btn, info)
+            )
+            apply_btn.pack(side="left", padx=8)
 
         ctk.CTkButton(
             btn_frame, text="Later",
