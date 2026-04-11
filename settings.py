@@ -50,6 +50,8 @@ DEFAULTS = {
     "atem_enabled":               False,
     "atem_ip":                    "",
     "atem_key_duration":          5.0,
+    # ── Settings Sync ──
+    "settings_sync_url":          "",
 }
 
 
