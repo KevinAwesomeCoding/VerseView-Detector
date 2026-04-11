@@ -81,6 +81,8 @@ class VerseViewApp(ctk.CTk):
         self.after(1500, self._update_chapter_browser_loop)
         # Silent update check — runs 15s after startup so it never delays launch
         self.after(15000, self._check_for_update_bg)
+        # Settings sync — runs 3s after launch so UI is fully ready
+        self.after(3000, self._sync_settings_on_launch)
 
 
     # ─────────────────────────────────────────────────
@@ -695,6 +697,31 @@ class VerseViewApp(ctk.CTk):
             e.grid(row=n+2+j, column=1, padx=10, pady=4, sticky="ew")
             setattr(self, attr, e)
 
+        # ── Settings Sync ──
+        sync_row = n + 2 + len(key_fields)
+        ctk.CTkLabel(
+            self.adv_frame, text="─── Settings Sync ───", anchor="w",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            text_color=("gray30", "gray70")
+        ).grid(row=sync_row, column=0, columnspan=2, padx=10, pady=(14, 2), sticky="ew")
+
+        ctk.CTkLabel(self.adv_frame, text="Sync URL", anchor="w").grid(
+            row=sync_row+1, column=0, padx=10, pady=4, sticky="w"
+        )
+        self.sync_url_entry = ctk.CTkEntry(
+            self.adv_frame, width=200,
+            placeholder_text="Direct download URL (Google Drive, etc.)"
+        )
+        self.sync_url_entry.grid(row=sync_row+1, column=1, padx=10, pady=4, sticky="ew")
+
+        self.btn_sync_now = ctk.CTkButton(
+            self.adv_frame, text="⬇  Pull Now", height=28,
+            fg_color="#1a5a8a", hover_color="#144a72",
+            command=self._sync_settings_now
+        )
+        self.btn_sync_now.grid(row=sync_row+2, column=0, columnspan=2,
+                               padx=10, pady=(0, 8), sticky="ew")
+
 
     def _toggle_advanced(self):
         self._adv_open = not self._adv_open
@@ -852,6 +879,9 @@ class VerseViewApp(ctk.CTk):
             e.delete(0, "end")
             e.insert(0, s.get(key, ""))
 
+        self.sync_url_entry.delete(0, "end")
+        self.sync_url_entry.insert(0, s.get("settings_sync_url", ""))
+
 
     def _collect_settings(self) -> dict:
         return {
@@ -892,8 +922,83 @@ class VerseViewApp(ctk.CTk):
             "atem_enabled":               self.atem_var.get(),
             "atem_ip":                    self.atem_ip_entry.get().strip(),
             "atem_key_duration":          self._safe_float(self.atem_dur_entry, 5.0),
+            "settings_sync_url":          self.sync_url_entry.get().strip(),
         }
 
+
+    # ─────────────────────────────────────────────────
+    # SETTINGS SYNC
+    # ─────────────────────────────────────────────────
+    # Keys that sync is allowed to update. Settings (language, mics, etc.)
+    # are intentionally excluded — only credentials and webhooks are synced.
+    _SYNC_ALLOWED_KEYS = {
+        "deepgram_api_key", "groq_api_key", "gemini_api_key",
+        "cerebras_api_key", "mistral_api_key", "sarvam_api_key",
+        "discord_webhook_url", "discord_log_webhook_url", "discord_notes_webhook_url",
+    }
+
+    def _sync_settings_on_launch(self):
+        """Silent sync on launch — only runs if a URL is configured."""
+        url = self._s.get("settings_sync_url", "").strip()
+        if url:
+            threading.Thread(
+                target=self._do_settings_sync, args=(url, False), daemon=True
+            ).start()
+
+    def _sync_settings_now(self):
+        """Manual pull triggered by the Pull Now button."""
+        url = self.sync_url_entry.get().strip()
+        if not url:
+            mb.showwarning("No URL", "Paste a direct-download URL in the Sync URL field first.")
+            return
+        # Save the URL immediately so it persists
+        self._s = self._collect_settings()
+        cfg.save(self._s)
+        self.btn_sync_now.configure(state="disabled", text="Pulling...")
+        threading.Thread(
+            target=self._do_settings_sync, args=(url, True), daemon=True
+        ).start()
+
+    def _do_settings_sync(self, url: str, manual: bool):
+        """Download JSON from url, merge allowed keys into local settings."""
+        try:
+            import requests as _req, certifi as _cert, json as _json
+            r = _req.get(url, timeout=10, verify=_cert.where())
+            r.raise_for_status()
+            remote = _json.loads(r.text)
+
+            if not isinstance(remote, dict):
+                raise ValueError("Downloaded file is not a JSON object.")
+
+            # Only merge the allowed keys — never touch settings keys
+            merged = dict(self._s)
+            updated = []
+            for k in self._SYNC_ALLOWED_KEYS:
+                if k in remote and remote[k] != merged.get(k, ""):
+                    merged[k] = remote[k]
+                    updated.append(k)
+
+            if updated:
+                cfg.save(merged)
+                self._s = merged
+                self.after(0, self._load_into_ui)
+                msg = f"✅ Settings synced — {len(updated)} key(s) updated."
+            else:
+                msg = "✅ Settings sync — already up to date."
+
+            self._append_log(f"🔄 {msg}")
+            if manual:
+                self.after(0, lambda: mb.showinfo("Sync Complete", msg))
+
+        except Exception as e:
+            err = f"Settings sync failed: {e}"
+            self._append_log(f"⚠️ {err}")
+            if manual:
+                self.after(0, lambda: mb.showerror("Sync Failed", err))
+        finally:
+            if manual:
+                self.after(0, lambda: self.btn_sync_now.configure(
+                    state="normal", text="⬇  Pull Now"))
 
     def _save_settings(self):
         self._s = self._collect_settings()
@@ -1347,11 +1452,9 @@ class VerseViewApp(ctk.CTk):
         if not info:
             return
 
-        is_windows = info.get("is_windows", False)
-
         win = ctk.CTkToplevel(self)
         win.title("Update Available")
-        win.geometry("420x240" if is_windows else "420x260")
+        win.geometry("420x260")
         win.resizable(False, False)
         win.attributes("-topmost", True)
         self.after(200, lambda: win.attributes("-topmost", False))
@@ -1367,8 +1470,8 @@ class VerseViewApp(ctk.CTk):
             text_color=("gray40", "gray70")
         ).pack(pady=(0, 4))
 
-        if is_windows:
-            desc = "Click below to open the GitHub releases page\nand download the latest Windows build."
+        if info.get("is_windows"):
+            desc = "Windows: your browser will open the\nrelease page to download manually."
         elif info.get("is_mac_intel"):
             desc = "Full update: all _internal/ files will be\nreplaced. A restart is required."
         else:
@@ -1379,36 +1482,22 @@ class VerseViewApp(ctk.CTk):
             text_color=("gray40", "gray70")
         ).pack(pady=(0, 12))
 
-        # Progress bar only shown for Mac (in-app update)
-        if not is_windows:
-            self._upd_progress = ctk.CTkProgressBar(win, width=340)
-            self._upd_progress.pack(pady=(0, 8))
-            self._upd_progress.set(0)
+        self._upd_progress = ctk.CTkProgressBar(win, width=340)
+        self._upd_progress.pack(pady=(0, 8))
+        self._upd_progress.set(0)
 
-            self._upd_status = ctk.CTkLabel(win, text="", font=ctk.CTkFont(size=11))
-            self._upd_status.pack()
+        self._upd_status = ctk.CTkLabel(win, text="", font=ctk.CTkFont(size=11))
+        self._upd_status.pack()
 
         btn_frame = ctk.CTkFrame(win, fg_color="transparent")
         btn_frame.pack(pady=12)
 
-        if is_windows:
-            # Windows: just open browser, no in-app download
-            def _open_github():
-                import webbrowser
-                webbrowser.open(info.get("release_url", ""))
-                win.destroy()
-            ctk.CTkButton(
-                btn_frame, text="⬇  Open GitHub Releases",
-                fg_color="#1a5a8a", hover_color="#144a72",
-                command=_open_github
-            ).pack(side="left", padx=8)
-        else:
-            apply_btn = ctk.CTkButton(
-                btn_frame, text="Install Update",
-                fg_color="#7a5a00", hover_color="#5c4400",
-                command=lambda: self._apply_update(win, apply_btn, info)
-            )
-            apply_btn.pack(side="left", padx=8)
+        apply_btn = ctk.CTkButton(
+            btn_frame, text="Install Update",
+            fg_color="#7a5a00", hover_color="#5c4400",
+            command=lambda: self._apply_update(win, apply_btn, info)
+        )
+        apply_btn.pack(side="left", padx=8)
 
         ctk.CTkButton(
             btn_frame, text="Later",
