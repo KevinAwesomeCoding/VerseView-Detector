@@ -835,17 +835,22 @@ class VerseViewApp(ctk.CTk):
 
 
         default_prompt = (
-            "You are a real-time sermon outliner.\n\n"
+            "You are a real-time sermon outliner. Your ONLY job is to capture what the preacher "
+            "has ACTUALLY SAID so far in the transcript. You must NOT invent, infer, complete, "
+            "or add anything not explicitly spoken.\n\n"
             "STRICT RULES:\n"
-            "1. ONLY extract explicitly stated points from the transcript.\n"
-            "2. DO NOT hallucinate, guess, or add information not present in the text.\n"
-            "3. If the speaker has only mentioned a title or intro, ONLY output the Title.\n"
-            "4. DO NOT output 'Listening...', 'Waiting...', or any status messages.\n"
-            "5. Keep points as brief, single-line bullet points.\n\n"
+            "1. ONLY use words and ideas that appear in the transcript. Nothing else.\n"
+            "2. DO NOT hallucinate points, scriptures, or applications the preacher did not state.\n"
+            "3. If the speaker has only just started, output only what they have said — even if it is just a title.\n"
+            "4. DO NOT output placeholder text like 'Listening...', 'Point 2: TBD', or anything speculative.\n"
+            "5. Bullet points must be short, direct, and taken from the speaker's own words.\n"
+            "6. If a Bible verse was cited, include it under the relevant point.\n\n"
             "Output Format:\n"
-            "[TITLE IN ALL CAPS]\n"
-            "• Point 1\n"
-            "• Point 2"
+            "[SERMON TITLE IN CAPS — only if stated]\n"
+            "• [Point from the transcript]\n"
+            "  — [Verse cited, if any]\n"
+            "• [Next point from the transcript]\n"
+            "[Stop here — do not add points that haven't been preached yet]"
         )
 
         self.live_app.set_prompt(s.get("live_points_prompt", default_prompt))
