@@ -206,7 +206,9 @@ def download_and_apply(
             if not zipfile.is_zipfile(tmp_path):
                 raise ValueError("Downloaded file is not a valid zip archive.")
 
-            # ── 3. Mac Intel — full _internal/ replacement + executable ──────
+            # ── 3. Mac Intel — atomic whole _internal/ folder swap ────────────
+            # Extract the new _internal/ from the zip into _internal.new/ sibling,
+            # then do an atomic rename swap so the old folder is never half-deleted.
             if _is_mac_intel():
                 with zipfile.ZipFile(tmp_path, "r") as zf:
                     all_names = zf.namelist()
@@ -222,49 +224,52 @@ def download_and_apply(
                         f"Expected path prefix: {_INTEL_INTERNAL_PREFIX}"
                     )
 
-                exe_dir  = _exe_dir()
-                replaced = 0
+                exe_dir      = _exe_dir()
+                internal     = _internal_dir()          # .../VerseView Detector (Raw Executable)/_internal
+                new_internal = internal + ".new"        # staging dir
+                old_internal = internal + ".old"        # backup dir
+
+                # Clean up any leftovers from a previous failed/interrupted update
+                if os.path.exists(new_internal):
+                    shutil.rmtree(new_internal, ignore_errors=True)
+                if os.path.exists(old_internal):
+                    shutil.rmtree(old_internal, ignore_errors=True)
+
                 total_files = len(entries_in_internal) + 1  # +1 for the exe
 
+                # ── 3a. Extract entire new _internal/ into _internal.new/ ────
                 with zipfile.ZipFile(tmp_path, "r") as zf:
-                    # ── 3a. Replace every file inside _internal/ ───────────────
                     for i, entry in enumerate(entries_in_internal):
                         rel = entry[len(_INTEL_INTERNAL_PREFIX):]
                         if not rel:
                             continue
-                        dest = os.path.join(internal, rel)
+                        dest = os.path.join(new_internal, rel)
                         os.makedirs(os.path.dirname(dest), exist_ok=True)
-                        dest_tmp = dest + ".new"
-                        with zf.open(entry) as src, open(dest_tmp, "wb") as dst:
+                        with zf.open(entry) as src, open(dest, "wb") as dst:
                             shutil.copyfileobj(src, dst)
-                        os.replace(dest_tmp, dest)
-                        replaced += 1
                         if on_progress:
-                            on_progress(82 + int(i / total_files * 14))
+                            on_progress(82 + int(i / total_files * 10))
 
-                    # ── 3b. Replace the raw executable (contains compiled vv_gui.py)
+                    # ── 3b. Replace the raw executable (vv_gui.py is compiled in) ──
                     if _INTEL_EXE_ZIP_PATH in all_names:
                         dest_exe     = os.path.join(exe_dir, _INTEL_EXE_NAME)
                         dest_exe_tmp = dest_exe + ".new"
                         with zf.open(_INTEL_EXE_ZIP_PATH) as src, \
                              open(dest_exe_tmp, "wb") as dst:
                             shutil.copyfileobj(src, dst)
-                        # Preserve executable permission bits
                         import stat
                         os.chmod(dest_exe_tmp,
-                                 os.stat(dest_exe_tmp).st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+                                 os.stat(dest_exe_tmp).st_mode
+                                 | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
                         os.replace(dest_exe_tmp, dest_exe)
-                        replaced += 1
                         logger.info(f"✅ Mac Intel: replaced executable '{_INTEL_EXE_NAME}'")
                     else:
                         logger.warning(
-                            f"⚠️  Mac Intel: executable not found in zip at '{_INTEL_EXE_ZIP_PATH}' — "
-                            f"vv_gui.py changes will NOT take effect until the next full reinstall."
+                            f"⚠️  Mac Intel: executable not found in zip at "
+                            f"'{_INTEL_EXE_ZIP_PATH}'"
                         )
 
-                    # ── 3c. Write version.txt next to the exe as well (belt-and-suspenders)
-                    #        so _current_version() always reads the latest tag regardless
-                    #        of how sys._MEIPASS behaves on this Mac.
+                    # ── 3c. Also write version.txt next to the exe ───────────
                     ver_zip_path = _INTEL_INTERNAL_PREFIX + "version.txt"
                     if ver_zip_path in all_names:
                         ver_dest = os.path.join(exe_dir, "version.txt")
@@ -274,9 +279,22 @@ def download_and_apply(
                         os.replace(ver_tmp, ver_dest)
 
                 if on_progress:
+                    on_progress(93)
+
+                # ── 3d. Atomic swap: _internal → _internal.old, .new → _internal ──
+                # os.rename is atomic on the same filesystem (APFS/HFS+).
+                # If the rename fails we still have the new copy in .new so we can retry.
+                os.rename(internal, old_internal)       # current → .old  (instant)
+                os.rename(new_internal, internal)       # .new    → current (instant)
+                shutil.rmtree(old_internal, ignore_errors=True)  # delete old
+
+                if on_progress:
                     on_progress(96)
 
-                logger.info(f"✅ Mac Intel full update: replaced {replaced} files in _internal/ + executable")
+                logger.info(
+                    f"✅ Mac Intel full update: swapped _internal/ "
+                    f"({len(entries_in_internal)} files) + executable"
+                )
 
             # ── 4. Mac Silicon — Python files only ────────────────────────────
             else:
