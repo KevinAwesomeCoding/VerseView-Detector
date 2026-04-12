@@ -144,6 +144,9 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
@@ -153,6 +156,14 @@ jobs:
         id: sha
         run: echo "short=$(echo $GITHUB_SHA | cut -c1-7)" >> $GITHUB_OUTPUT
 
+      - name: Get commit message
+        id: commit
+        run: |
+          MSG=$(git log -1 --pretty=%B | head -20)
+          echo "message<<EOF" >> $GITHUB_OUTPUT
+          echo "$MSG" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
@@ -160,7 +171,11 @@ jobs:
           tag_name: build-${{ steps.sha.outputs.short }}-${{ github.run_number }}
           name: VerseView Detector Build ${{ steps.sha.outputs.short }}
           body: |
-            Automated build from commit `${{ github.sha }}`
+            ## 📝 What's Changed
+            ${{ steps.commit.outputs.message }}
+
+            ---
+            **Commit:** `${{ github.sha }}`
 
             **Standard Downloads:**
             - `VerseView_Detector.exe` → Windows
@@ -176,3 +191,4 @@ jobs:
             ./artifacts/VerseView-Detector-Mac-Silicon-CrashDebug/VerseView-Detector-Mac-Silicon-CrashDebug.zip
           draft: false
           prerelease: false
+

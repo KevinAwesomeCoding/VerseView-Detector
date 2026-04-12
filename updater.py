@@ -141,12 +141,13 @@ def check_for_update() -> dict | None:
                 break
 
         return {
-            "tag_name":     latest_tag,
-            "asset_name":   name,
-            "download_url": url,
-            "release_url":  data.get("html_url", GITHUB_REL_PAGE),
-            "is_windows":   sys.platform == "win32",
-            "is_mac_intel": _is_mac_intel(),
+            "tag_name":      latest_tag,
+            "asset_name":    name,
+            "download_url":  url,
+            "release_url":   data.get("html_url", GITHUB_REL_PAGE),
+            "release_notes": data.get("body", "").strip(),
+            "is_windows":    sys.platform == "win32",
+            "is_mac_intel":  _is_mac_intel(),
         }
     except Exception as e:
         logger.debug(f"Update check failed: {e}")

@@ -3056,10 +3056,34 @@ async def stream_audio(controller):
         else:
             logger.error(f"Deepgram WebSocket error: {e}")
     finally:
+        # On macOS/Intel the CoreAudio callback runs in a separate PortAudio thread.
+        # Calling stop_stream() while run_in_executor(read_audio) is still in-flight
+        # causes a SIGSEGV (zsh: segmentation fault). Fix:
+        #   1. Wait one CHUNK period so the in-flight blocking read() can return.
+        #   2. Use abort_stream() on macOS — it kills the stream immediately without
+        #      waiting to drain the buffer, which prevents the re-entrancy crash.
+        #   3. Sleep between each PortAudio call to let the OS callback thread settle.
+        import time as _pa_t
+        _chunk_secs = CHUNK / max(RATE, 1)
+        _pa_t.sleep(_chunk_secs + 0.05)   # let in-flight executor read() return
         if stream:
-            stream.stop_stream()
-            stream.close()
-        audio.terminate()
+            try:
+                if sys.platform == "darwin":
+                    stream.abort_stream()   # immediate — no drain wait
+                else:
+                    stream.stop_stream()
+            except Exception:
+                pass
+            _pa_t.sleep(0.05)
+            try:
+                stream.close()
+            except Exception:
+                pass
+        _pa_t.sleep(0.1)  # give PortAudio callback thread time to exit
+        try:
+            audio.terminate()
+        except Exception:
+            pass
 
 
 # ── SARVAM STREAMING ──────────────────────────────────────────────────────────
@@ -3206,10 +3230,27 @@ async def stream_audio_sarvam(controller):
                 logger.error(f"Sarvam error: {e} — retrying in 5s...")
                 await asyncio.sleep(5)
     finally:
+        import time as _pa_t
+        _chunk_secs = CHUNK / max(RATE, 1)
+        _pa_t.sleep(_chunk_secs + 0.05)   # let in-flight executor read() return
         if stream:
-            stream.stop_stream()
-            stream.close()
-        audio.terminate()
+            try:
+                if sys.platform == "darwin":
+                    stream.abort_stream()   # immediate — no drain wait
+                else:
+                    stream.stop_stream()
+            except Exception:
+                pass
+            _pa_t.sleep(0.05)
+            try:
+                stream.close()
+            except Exception:
+                pass
+        _pa_t.sleep(0.1)
+        try:
+            audio.terminate()
+        except Exception:
+            pass
 
 
 # ── SILENCE WATCHDOG (Feature 6) ──────────────────────────────────────────────

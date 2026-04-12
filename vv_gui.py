@@ -475,14 +475,21 @@ class VerseViewApp(ctk.CTk):
             command=self._import_settings
         ).grid(row=row + 12, column=0, sticky="ew", padx=14, pady=(0, 8))
 
-
-        # Version label
+        # Version badge — 🏷 icon + app version + build tag, bottom-right of settings tab
+        ver_frame = ctk.CTkFrame(self.tab_vv, fg_color="transparent")
+        ver_frame.grid(row=1, column=0, columnspan=2, pady=(0, 6), sticky="e", padx=14)
         ctk.CTkLabel(
-            self.tab_vv, text=f"v{APP_VERSION}  •  build: {BUILD_VERSION}",
-            text_color=("gray50", "gray50"),
-            font=ctk.CTkFont(size=10)
-        ).grid(row=1, column=0, columnspan=2, pady=(0, 4), sticky="e", padx=12)
-
+            ver_frame,
+            text=f"🏷  v{APP_VERSION}",
+            font=ctk.CTkFont(size=10, weight="bold"),
+            text_color=("gray45", "gray60")
+        ).pack(side="left", padx=(0, 4))
+        ctk.CTkLabel(
+            ver_frame,
+            text=f"build: {BUILD_VERSION}",
+            font=ctk.CTkFont(size=10),
+            text_color=("gray55", "gray45")
+        ).pack(side="left")
 
         # ── Initialize the Live Points Controller ──
         self.live_app = LivePointsController(self.tab_live)
@@ -1457,45 +1464,88 @@ class VerseViewApp(ctk.CTk):
         if not info:
             return
 
+        # Determine if we have real release notes to show
+        notes_raw = info.get("release_notes", "").strip()
+        # Strip markdown headers/dividers to keep it clean in the compact textbox
+        import re as _re
+        notes_clean = _re.sub(r'^#{1,6}\s*', '', notes_raw, flags=_re.MULTILINE)  # remove ## headers
+        notes_clean = _re.sub(r'^---+\s*$', '', notes_clean, flags=_re.MULTILINE)  # remove --- dividers
+        notes_clean = notes_clean.strip()
+
+        has_notes = bool(notes_clean)
+        win_h = 420 if has_notes else 280
+
         win = ctk.CTkToplevel(self)
         win.title("Update Available")
-        win.geometry("420x260")
+        win.geometry(f"440x{win_h}")
         win.resizable(False, False)
         win.attributes("-topmost", True)
         self.after(200, lambda: win.attributes("-topmost", False))
 
+        # ── Header ────────────────────────────────────────────────────────────
         ctk.CTkLabel(
             win, text="🔄  VerseView Update Available",
             font=ctk.CTkFont(size=15, weight="bold")
-        ).pack(pady=(20, 6))
+        ).pack(pady=(18, 4))
 
+        # ── Version badge ──────────────────────────────────────────────────────
+        badge_frame = ctk.CTkFrame(
+            win, fg_color="#7a5a00", corner_radius=8
+        )
+        badge_frame.pack(pady=(0, 8))
         ctk.CTkLabel(
-            win, text=f"New version: {info['tag_name']}",
-            font=ctk.CTkFont(size=12),
-            text_color=("gray40", "gray70")
-        ).pack(pady=(0, 4))
+            badge_frame,
+            text=f"  🏷  {info['tag_name']}  ",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            text_color="white"
+        ).pack(padx=8, pady=4)
 
+        # ── Platform description ───────────────────────────────────────────────
         if info.get("is_windows"):
-            desc = "Windows: your browser will open the\nrelease page to download manually."
+            desc = "Your browser will open the GitHub releases page."
         elif info.get("is_mac_intel"):
-            desc = "Full update: all _internal/ files will be\nreplaced. A restart is required."
+            desc = "Full update: executable + all _internal/ files replaced. Restart required."
         else:
-            desc = "Updated Python files will be installed\nautomatically. A restart is required."
+            desc = "Python files updated automatically. Restart required."
         ctk.CTkLabel(
             win, text=desc,
-            font=ctk.CTkFont(size=12),
-            text_color=("gray40", "gray70")
-        ).pack(pady=(0, 12))
+            font=ctk.CTkFont(size=11),
+            text_color=("gray40", "gray70"),
+            wraplength=400
+        ).pack(pady=(0, 8), padx=16)
 
-        self._upd_progress = ctk.CTkProgressBar(win, width=340)
-        self._upd_progress.pack(pady=(0, 8))
+        # ── Release notes (commit message) ─────────────────────────────────────
+        if has_notes:
+            notes_frame = ctk.CTkFrame(win, fg_color=("gray90", "gray17"), corner_radius=8)
+            notes_frame.pack(fill="x", padx=16, pady=(0, 8))
+            ctk.CTkLabel(
+                notes_frame,
+                text="📝 What's Changed",
+                font=ctk.CTkFont(size=11, weight="bold"),
+                text_color=("gray30", "gray80")
+            ).pack(anchor="w", padx=10, pady=(6, 2))
+            notes_box = ctk.CTkTextbox(
+                notes_frame,
+                height=100,
+                font=ctk.CTkFont(size=11),
+                wrap="word",
+                activate_scrollbars=True
+            )
+            notes_box.pack(fill="x", padx=8, pady=(0, 8))
+            notes_box.insert("1.0", notes_clean)
+            notes_box.configure(state="disabled")
+
+        # ── Progress bar + status ──────────────────────────────────────────────
+        self._upd_progress = ctk.CTkProgressBar(win, width=360)
+        self._upd_progress.pack(pady=(0, 4))
         self._upd_progress.set(0)
 
         self._upd_status = ctk.CTkLabel(win, text="", font=ctk.CTkFont(size=11))
         self._upd_status.pack()
 
+        # ── Buttons ────────────────────────────────────────────────────────────
         btn_frame = ctk.CTkFrame(win, fg_color="transparent")
-        btn_frame.pack(pady=12)
+        btn_frame.pack(pady=10)
 
         apply_btn = ctk.CTkButton(
             btn_frame, text="Install Update",
