@@ -2945,7 +2945,7 @@ async def stream_audio(controller):
         "James", "Peter", "Jude", "Revelation",
     ]
     _kw_params = "".join(
-        f"&keywords={kw}%3A5" for kw in _BIBLE_KEYWORDS
+        f"&keyterm={kw}" for kw in _BIBLE_KEYWORDS
     ) if DEEPGRAM_LANGUAGE == "hi" else ""
 
     url = (
