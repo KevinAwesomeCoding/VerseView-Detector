@@ -618,7 +618,7 @@ class VerseViewApp(ctk.CTk):
         else:
             self.panic_btn = None
             ctk.CTkLabel(
-                f, text="⌨️  Panic Key: Shift + Escape (fixed on macOS)",
+                f, text="⌨️  Panic Key: Shift + Escape (fixed on macOS but still not working)",
                 text_color=["#666666", "#888888"],
                 font=ctk.CTkFont(size=12)
             ).grid(row=r, column=0, sticky="ew", padx=10, pady=(0, 8))

@@ -45,6 +45,12 @@ UPDATABLE_FILES = {
 # Zip path prefix for Mac Intel _internal/ contents
 _INTEL_INTERNAL_PREFIX = "VerseView-Mac-Intel-Release/VerseView Detector (Raw Executable)/_internal/"
 
+# Zip path for the Mac Intel raw executable itself (vv_gui.py is compiled into it)
+_INTEL_EXE_ZIP_PATH   = "VerseView-Mac-Intel-Release/VerseView Detector (Raw Executable)/VerseView Detector"
+
+# Name of the raw executable on disk (same as sys.executable basename)
+_INTEL_EXE_NAME       = "VerseView Detector"
+
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -55,13 +61,30 @@ def _internal_dir() -> str:
     return os.path.dirname(os.path.abspath(__file__))
 
 
+def _exe_dir() -> str:
+    """Directory that contains the running executable (one level above _internal on Mac)."""
+    if getattr(sys, "frozen", False):
+        return os.path.dirname(os.path.abspath(sys.executable))
+    return os.path.dirname(os.path.abspath(__file__))
+
+
 def _current_version() -> str:
-    path = os.path.join(_internal_dir(), "version.txt")
-    try:
-        with open(path, encoding="utf-8") as f:
-            return f.read().strip()
-    except Exception:
-        return ""
+    # On Mac Intel the updater also writes version.txt next to the exe (step 3c).
+    # Check that location first so a fresh restart always sees the correct new tag.
+    candidates = []
+    if _is_mac_intel() and getattr(sys, "frozen", False):
+        candidates.append(os.path.join(_exe_dir(), "version.txt"))
+    candidates.append(os.path.join(_internal_dir(), "version.txt"))
+
+    for path in candidates:
+        try:
+            with open(path, encoding="utf-8") as f:
+                v = f.read().strip()
+            if v:
+                return v
+        except Exception:
+            continue
+    return ""
 
 
 def _run_number(tag: str) -> int:
@@ -182,10 +205,13 @@ def download_and_apply(
             if not zipfile.is_zipfile(tmp_path):
                 raise ValueError("Downloaded file is not a valid zip archive.")
 
-            # ── 3. Mac Intel — full _internal/ replacement ────────────────────
+            # ── 3. Mac Intel — full _internal/ replacement + executable ──────
             if _is_mac_intel():
+                with zipfile.ZipFile(tmp_path, "r") as zf:
+                    all_names = zf.namelist()
+
                 entries_in_internal = [
-                    e for e in zipfile.ZipFile(tmp_path).namelist()
+                    e for e in all_names
                     if e.startswith(_INTEL_INTERNAL_PREFIX) and not e.endswith("/")
                 ]
 
@@ -195,16 +221,17 @@ def download_and_apply(
                         f"Expected path prefix: {_INTEL_INTERNAL_PREFIX}"
                     )
 
+                exe_dir  = _exe_dir()
                 replaced = 0
-                total_files = len(entries_in_internal)
+                total_files = len(entries_in_internal) + 1  # +1 for the exe
+
                 with zipfile.ZipFile(tmp_path, "r") as zf:
+                    # ── 3a. Replace every file inside _internal/ ───────────────
                     for i, entry in enumerate(entries_in_internal):
-                        # Strip the zip prefix to get just the filename/subpath
                         rel = entry[len(_INTEL_INTERNAL_PREFIX):]
                         if not rel:
                             continue
                         dest = os.path.join(internal, rel)
-                        # Create subdirectories if needed
                         os.makedirs(os.path.dirname(dest), exist_ok=True)
                         dest_tmp = dest + ".new"
                         with zf.open(entry) as src, open(dest_tmp, "wb") as dst:
@@ -212,9 +239,43 @@ def download_and_apply(
                         os.replace(dest_tmp, dest)
                         replaced += 1
                         if on_progress:
-                            on_progress(82 + int(i / total_files * 16))
+                            on_progress(82 + int(i / total_files * 14))
 
-                logger.info(f"✅ Mac Intel full update: replaced {replaced} files in _internal/")
+                    # ── 3b. Replace the raw executable (contains compiled vv_gui.py)
+                    if _INTEL_EXE_ZIP_PATH in all_names:
+                        dest_exe     = os.path.join(exe_dir, _INTEL_EXE_NAME)
+                        dest_exe_tmp = dest_exe + ".new"
+                        with zf.open(_INTEL_EXE_ZIP_PATH) as src, \
+                             open(dest_exe_tmp, "wb") as dst:
+                            shutil.copyfileobj(src, dst)
+                        # Preserve executable permission bits
+                        import stat
+                        os.chmod(dest_exe_tmp,
+                                 os.stat(dest_exe_tmp).st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+                        os.replace(dest_exe_tmp, dest_exe)
+                        replaced += 1
+                        logger.info(f"✅ Mac Intel: replaced executable '{_INTEL_EXE_NAME}'")
+                    else:
+                        logger.warning(
+                            f"⚠️  Mac Intel: executable not found in zip at '{_INTEL_EXE_ZIP_PATH}' — "
+                            f"vv_gui.py changes will NOT take effect until the next full reinstall."
+                        )
+
+                    # ── 3c. Write version.txt next to the exe as well (belt-and-suspenders)
+                    #        so _current_version() always reads the latest tag regardless
+                    #        of how sys._MEIPASS behaves on this Mac.
+                    ver_zip_path = _INTEL_INTERNAL_PREFIX + "version.txt"
+                    if ver_zip_path in all_names:
+                        ver_dest = os.path.join(exe_dir, "version.txt")
+                        ver_tmp  = ver_dest + ".new"
+                        with zf.open(ver_zip_path) as src, open(ver_tmp, "wb") as dst:
+                            shutil.copyfileobj(src, dst)
+                        os.replace(ver_tmp, ver_dest)
+
+                if on_progress:
+                    on_progress(96)
+
+                logger.info(f"✅ Mac Intel full update: replaced {replaced} files in _internal/ + executable")
 
             # ── 4. Mac Silicon — Python files only ────────────────────────────
             else:
