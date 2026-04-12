@@ -403,14 +403,14 @@ class VerseViewApp(ctk.CTk):
         ctk.CTkLabel(ctx_frame, text="Verse",   anchor="center", font=ctk.CTkFont(size=11)).grid(row=0, column=2, padx=2)
 
 
-        self.ctx_book    = ctk.CTkEntry(ctx_frame, placeholder_text="e.g. John", width=80)
-        self.ctx_chapter = ctk.CTkEntry(ctx_frame, placeholder_text="e.g. 3",    width=50)
-        self.ctx_verse   = ctk.CTkEntry(ctx_frame, placeholder_text="e.g. 16",   width=50)
+        self.ctx_book    = ctk.CTkEntry(ctx_frame, placeholder_text="e.g. John")
+        self.ctx_chapter = ctk.CTkEntry(ctx_frame, placeholder_text="e.g. 3")
+        self.ctx_verse   = ctk.CTkEntry(ctx_frame, placeholder_text="e.g. 16")
 
 
-        self.ctx_book.grid(row=1,    column=0, padx=2, pady=2)
-        self.ctx_chapter.grid(row=1, column=1, padx=2, pady=2)
-        self.ctx_verse.grid(row=1,   column=2, padx=2, pady=2)
+        self.ctx_book.grid(row=1,    column=0, padx=2, pady=2, sticky="ew")
+        self.ctx_chapter.grid(row=1, column=1, padx=2, pady=2, sticky="ew")
+        self.ctx_verse.grid(row=1,   column=2, padx=2, pady=2, sticky="ew")
 
 
         ctk.CTkButton(
@@ -578,7 +578,7 @@ class VerseViewApp(ctk.CTk):
 
         ctk.CTkLabel(atem_sub, text="ATEM IP", anchor="w", width=70).grid(
             row=0, column=0, padx=(0, 6), pady=2, sticky="w")
-        self.atem_ip_entry = ctk.CTkEntry(atem_sub, placeholder_text="Auto (or enter IP)", width=110)
+        self.atem_ip_entry = ctk.CTkEntry(atem_sub, placeholder_text="Auto (or enter IP)")
         self.atem_ip_entry.grid(row=0, column=1, sticky="ew", pady=2)
         self.atem_scan_btn = ctk.CTkButton(
             atem_sub, text="🔍", width=28,
@@ -589,8 +589,8 @@ class VerseViewApp(ctk.CTk):
 
         ctk.CTkLabel(atem_sub, text="Key On (s)", anchor="w", width=70).grid(
             row=1, column=0, padx=(0, 6), pady=2, sticky="w")
-        self.atem_dur_entry = ctk.CTkEntry(atem_sub, placeholder_text="5.0", width=60)
-        self.atem_dur_entry.grid(row=1, column=1, sticky="w", pady=2)
+        self.atem_dur_entry = ctk.CTkEntry(atem_sub, placeholder_text="5.0")
+        self.atem_dur_entry.grid(row=1, column=1, sticky="ew", pady=2)
 
         # ATEM manual test toggle
         self._atem_sw       = None
