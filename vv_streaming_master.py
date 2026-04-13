@@ -2553,9 +2553,22 @@ def detect_verse_hybrid(text, controller, confidence=1.0) -> bool:
                     check_and_queue_range(text, verse, controller)
                 return True
 
+        # Fix 12: Verse range → capture first verse ("verses 7 8 9" or "verse 7 to 9")
+        m_range_first = re.search(
+            r'\\bverse[s]?\\s+(\\d{1,3})(?:\\s+(?:to|through|thru|and)\\s+\\d+|(?:\\s+\\d+){1,4})',
+            num_norm, re.IGNORECASE
+        )
+        if m_range_first and current_book and current_chapter:
+            first_v = m_range_first.group(1)
+            ref = f"{current_book} {current_chapter}:{first_v}"
+            logger.info(f"\U0001f50d VERSE-RANGE-FIRST: {ref} (first verse of range)")
+            deliver_verse(ref, controller, bypass_cooldown=False,
+                          confidence=confidence, source="VERSE-RANGE-FIRST")
+            return True
+
         # VERSE-OF-CHAPTER (e.g. "verse 13 of 25")
         m_vof = re.search(
-            r'\bverse\s+(\d{1,3})\s+of\s+(?:chapter\s+)?(\d{1,3})\b',
+            r'\\bverse\\s+(\\d{1,3})\\s+of\\s+(?:chapter\\s+)?(\\d{1,3})\\b',
             num_norm, re.IGNORECASE
         )
         if m_vof and current_book:

@@ -37,6 +37,10 @@ BOOKS_ENG = {
     "job": "Job",
     "psalm": "Psalm", "psalms": "Psalm",
     "sams": "Psalm", "sam s": "Psalm", "sam's": "Psalm",
+    "saams": "Psalm", "saam": "Psalm",  # Fix 7: Indian-accent variants
+    "songs": "Psalm",  # Fix 9: Indian-accent "songs" for Psalms (standalone only — "song of" still hits SoS first due to sort-longest-first in _get_book_keys_re)
+
+
     "proverbs": "Proverbs", "provberbs": "Proverbs",
     "ecclesiastes": "Ecclesiastes", "ecclesiast": "Ecclesiastes", "ecclesiates": "Ecclesiastes",
     "song of solomon": "Song of Solomon", "songs of solomon": "Song of Solomon",
@@ -65,15 +69,17 @@ BOOKS_ENG = {
     "luke": "Luke", "luk": "Luke", "lukes": "Luke",
     "john": "John", "jon": "John",
     "acts": "Acts",
-    "romans": "Romans", "romens": "Romans", "romanss": "Romans",
+    "romans": "Romans", "romens": "Romans", "romanss": "Romans", "roma-ns": "Romans",
     "1 corinthians": "1 Corinthians", "first corinthians": "1 Corinthians", "one corinthians": "1 Corinthians",
     "2 corinthians": "2 Corinthians", "second corinthians": "2 Corinthians", "two corinthians": "2 Corinthians",
     "corinthians": "1 Corinthians", "corinthans": "1 Corinthians", "corithians": "1 Corinthians",
     "corenthians": "1 Corinthians", "corenthains": "1 Corinthians",
-    "galatians": "Galatians", "galations": "Galatians", "galatans": "Galatians",
+    "galatians": "Galatians", "galations": "Galatians", "galatans": "Galatians", "gala-tians": "Galatians",
     "ephesians": "Ephesians", "ephesans": "Ephesians", "efesians": "Ephesians", "ephesian": "Ephesians",
     "philippians": "Philippians", "phillipians": "Philippians", "philipians": "Philippians", "phillippians": "Philippians",
     "colossians": "Colossians", "colosians": "Colossians", "collosians": "Colossians",
+    "collisians": "Colossians", "colossions": "Colossians",  # Fix 7: new fuzzy variants
+
     "collosions": "Colossians", "colosions": "Colossians", "colloshans": "Colossians", "coloshians": "Colossians",
     "colossions": "Colossians",
     "1 thessalonians": "1 Thessalonians", "first thessalonians": "1 Thessalonians", "one thessalonians": "1 Thessalonians",
@@ -152,11 +158,26 @@ def convert_word_numbers(text: str) -> str:
                 result.append(str(base))
                 i += 2
             continue
-        # "one fifty" / "one twenty three" → 150, 123 (hundreds when 1–9 + twenty|thirty|...|ninety)
+        # "one fifty" / "one twenty" → 150, 120 (hundreds when 1–9 + tens-word)
+        # FIX 1: Do NOT fire when the following pattern is ones+tens+ones,
+        # because "three twenty three" means chapter 3 verse 23, not 323.
+        # Detect: if prev token in result was a non-number word (book name),
+        # skip the hundreds combination so "collisians three twenty three" → "collisians 3 20 3"
+        # then the colon-insertion in _insert_chapter_verse_colon handles it.
         if i + 1 < len(words) and w in NUMBER_MAP and words[i + 1] in NUMBER_MAP:
             fv = int(NUMBER_MAP[w])
             sv = int(NUMBER_MAP[words[i + 1]])
             if 1 <= fv <= 9 and sv >= 20 and sv % 10 == 0:
+                # FIX 1: If preceded by a non-number word AND followed by a ones-word,
+                # this is chapter(fv) + tens_verse + ones_verse — don't collapse to hundreds.
+                prev_is_word = bool(result) and not result[-1].isdigit()
+                next_is_ones = (i + 2 < len(words) and words[i + 2] in NUMBER_MAP
+                                and 1 <= int(NUMBER_MAP[words[i + 2]]) <= 9)
+                if prev_is_word and next_is_ones:
+                    # Treat as separate: chapter digit + verse tens + verse ones
+                    result.append(str(fv))
+                    i += 1
+                    continue
                 combined = fv * 100 + sv
                 if i + 2 < len(words) and words[i + 2] in NUMBER_MAP:
                     third = int(NUMBER_MAP[words[i + 2]])
@@ -295,6 +316,10 @@ def normalize_text(s: str) -> str:
     # Only replace "first/second/third" — NOT one/two/three (would break "twenty two" etc.)
     for word, num in ORDINAL_WORDS.items():
         s = re.sub(rf"\b{word}\b", num, s)
+    # FIX 1: Protect verse/verses/versus with a colon placeholder BEFORE number conversion
+    # so "three verse twenty three" becomes "3 : 23" not "3 20 3" → 323.
+    # Using ':' directly is perfect — the regex that captures chapter:verse already expects it.
+    s = re.sub(r'\b(verses?|versus)\b', ':', s, flags=re.IGNORECASE)
     # Strip punctuation/special chars → space (but preserve colons for verse numbers)
     s = re.sub(r"[^a-z0-9: ]", " ", s)
     # Convert spoken numbers to digits
@@ -305,6 +330,9 @@ def normalize_text(s: str) -> str:
         s = _insert_chapter_verse_colon(s)
     # Bug 6: Recognize 'X and Y' as chapter:verse before noise filter strips 'and'
     s = re.sub(r'\b(\d+)\s+and\s+(\d+)\b', r'\1:\2', s)
+    # FIX 1: Collapse spaced colons "3 : 23" → "3:23" so REF_RE can match
+    s = re.sub(r'(\d)\s*:\s*(\d)', r'\1:\2', s)
+
     # Bug 6: "X and Y" → "X:Y" — recognize spoken 'chapter and verse' pattern
     # e.g. "twenty and twenty three" → "20:23", "5 and 6" → "5:6"
     # Apply before noise stripping so that 'and' is still present.

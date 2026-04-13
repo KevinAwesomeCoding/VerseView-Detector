@@ -298,9 +298,43 @@ def normalize_numbers_only(s: str) -> str:
     return " ".join(s.split())
 
 # ------------------- Main Code-Switched Parser -------------------
+# ── Fix 6: Hindi/Devanagari word corrections ─────────────────────────────────
+# These correct common Deepgram/Sarvam mis-transcriptions of Hindi Bible words.
+# Each rule is independent so individual ones can be toggled easily.
+
+_HINDI_CORRECTIONS = [
+    # 6a: "लूस" → "क्रूस" (kroos = cross) when followed by "चढ़ाया"
+    # Deepgram drops the "क्र" prefix, leaving only "ूस" → "लूस"
+    (re.compile(r'लूस\s+चढ़ाया', re.UNICODE), 'क्रूस चढ़ाया'),
+    (re.compile(r'लूस', re.UNICODE), 'क्रूस'),
+
+    # 6b: "प्रयास" → "प्रार्थना" (prayer) in prayer context
+    # "प्रयास" = effort/attempt; speaker meant prayers = प्रार्थना
+    (re.compile(r'ask\s+for\s+your\s+प्रयास', re.IGNORECASE | re.UNICODE), 'ask for your प्रार्थना'),
+    (re.compile(r'my\s+प्रयास', re.IGNORECASE | re.UNICODE), 'my प्रार्थना'),
+    (re.compile(r'your\s+प्रयास', re.IGNORECASE | re.UNICODE), 'your प्रार्थना'),
+
+    # 6c: "सुलेखा से" → "विश्वास से" (by faith) in Galatians 2:20 context
+    # "सुलेखा" is a female name with no biblical meaning here
+    (re.compile(r'सुलेखा\s+से', re.UNICODE), 'विश्वास से'),
+
+    # 6d: "प्यार होंगे" → "विचार होंगे" (thoughts/intentions)
+    # "प्यार" = love/affection; context implies विचार (thoughts)
+    (re.compile(r'हमारी\s+भी\s+बहुत\s+प्यार\s+होंगे', re.UNICODE), 'हमारी भी बहुत विचार होंगे'),
+]
+
+def _apply_hindi_corrections(text: str) -> str:
+    """Apply Hindi word-level corrections for known Deepgram mis-transcriptions."""
+    for pattern, replacement in _HINDI_CORRECTIONS:
+        text = pattern.sub(replacement, text)
+    return text
+
+
 def parse_references(text: str):
     if not text:
         return []
+    # Fix 6: Apply Hindi word corrections before any parsing
+    text = _apply_hindi_corrections(text)
     # Workaround 2: correct phonetic mis-transcriptions of English book names
     # (e.g. Nova-3 Hindi "Corintens" → "Corinthians") before any parsing
     text = fuzzy_correct_book_names(text)
