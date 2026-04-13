@@ -11,6 +11,8 @@ import re
 import os
 import sys
 
+import json
+import subprocess
 import settings as cfg  # type: ignore
 import vv_streaming_master as engine  # type: ignore
 from live_points_app import LivePointsController  # type: ignore
@@ -96,7 +98,10 @@ class VerseViewApp(ctk.CTk):
         # Add the two tabs
         self.tab_vv   = self.tabview.add("VerseView Detector")
         self.tab_live = self.tabview.add("Live Points")
+        self.tab_bot  = self.tabview.add("🤖 Discord Bot")
 
+
+        self._build_bot_tab()
 
         self.tab_vv.grid_columnconfigure(0, weight=3)
         self.tab_vv.grid_columnconfigure(1, weight=2)
@@ -497,6 +502,195 @@ class VerseViewApp(ctk.CTk):
 
         self.after(2000, self._refresh_context)
 
+
+    # ── DISCORD BOT TAB ───────────────────────────────────────────────────────
+
+    _BOT_CONFIG_FILE = "discord_bot_config.json"
+    _bot_process: subprocess.Popen | None = None
+
+    def _build_bot_tab(self):
+        tab = self.tab_bot
+        tab.grid_columnconfigure(0, weight=1)
+        tab.grid_rowconfigure(3, weight=1)
+
+        # ── Header ────────────────────────────────────────────────────────────
+        ctk.CTkLabel(
+            tab, text="Discord Bot Control",
+            font=ctk.CTkFont(size=15, weight="bold")
+        ).grid(row=0, column=0, sticky="w", padx=16, pady=(14, 4))
+
+        # ── Config fields ─────────────────────────────────────────────────────
+        fields_frame = ctk.CTkFrame(tab)
+        fields_frame.grid(row=1, column=0, sticky="ew", padx=14, pady=(0, 8))
+        fields_frame.grid_columnconfigure(1, weight=1)
+
+        def field_row(parent, row, label, placeholder, show=None):
+            ctk.CTkLabel(parent, text=label, width=90, anchor="w").grid(
+                row=row, column=0, padx=(10, 6), pady=5, sticky="w")
+            e = ctk.CTkEntry(parent, placeholder_text=placeholder, show=show or "")
+            e.grid(row=row, column=1, sticky="ew", padx=(0, 10), pady=5)
+            return e
+
+        # Token row with show/hide toggle
+        ctk.CTkLabel(fields_frame, text="Bot Token", width=90, anchor="w").grid(
+            row=0, column=0, padx=(10, 6), pady=5, sticky="w")
+        token_row = ctk.CTkFrame(fields_frame, fg_color="transparent")
+        token_row.grid(row=0, column=1, sticky="ew", padx=(0, 10), pady=5)
+        token_row.grid_columnconfigure(0, weight=1)
+
+        self._bot_token_shown = False
+        self.bot_token_entry  = ctk.CTkEntry(token_row, placeholder_text="Bot token", show="*")
+        self.bot_token_entry.grid(row=0, column=0, sticky="ew")
+
+        def _toggle_token_vis():
+            self._bot_token_shown = not self._bot_token_shown
+            self.bot_token_entry.configure(show="" if self._bot_token_shown else "*")
+            self.bot_token_eye_btn.configure(text="🙈" if self._bot_token_shown else "👁")
+
+        self.bot_token_eye_btn = ctk.CTkButton(
+            token_row, text="👁", width=32,
+            fg_color="transparent", hover_color=("gray80", "gray30"),
+            command=_toggle_token_vis
+        )
+        self.bot_token_eye_btn.grid(row=0, column=1, padx=(4, 0))
+
+        self.bot_host_entry = field_row(fields_frame, 1, "VV Host", "127.0.0.1")
+        self.bot_port_entry = field_row(fields_frame, 2, "VV Port", "12345")
+
+        # ── Start / Stop buttons ──────────────────────────────────────────────
+        btn_row = ctk.CTkFrame(tab, fg_color="transparent")
+        btn_row.grid(row=2, column=0, sticky="ew", padx=14, pady=(0, 8))
+
+        self.bot_status_lbl = ctk.CTkLabel(
+            btn_row, text="● Stopped",
+            text_color="#cc4444",
+            font=ctk.CTkFont(size=13, weight="bold")
+        )
+        self.bot_status_lbl.pack(side="left", padx=(0, 16))
+
+        self.bot_start_btn = ctk.CTkButton(
+            btn_row, text="▶  Start Bot", width=120,
+            fg_color="#2a7a2a", hover_color="#1f5c1f",
+            command=self._start_bot
+        )
+        self.bot_start_btn.pack(side="left", padx=(0, 8))
+
+        self.bot_stop_btn = ctk.CTkButton(
+            btn_row, text="⏹  Stop Bot", width=120,
+            fg_color="#7a2a2a", hover_color="#5c1f1f",
+            state="disabled",
+            command=self._stop_bot
+        )
+        self.bot_stop_btn.pack(side="left")
+
+        # ── Log box ───────────────────────────────────────────────────────────
+        self.bot_log = ctk.CTkTextbox(
+            tab, state="disabled",
+            font=("Courier", 11), wrap="word"
+        )
+        self.bot_log.grid(row=3, column=0, sticky="nsew", padx=14, pady=(0, 14))
+
+        # Load saved config
+        self._load_bot_config()
+
+    def _load_bot_config(self):
+        try:
+            with open(self._BOT_CONFIG_FILE, encoding="utf-8") as f:
+                cfg_data = json.load(f)
+            if cfg_data.get("token"):
+                self.bot_token_entry.insert(0, cfg_data["token"])
+            self.bot_host_entry.delete(0, "end")
+            self.bot_host_entry.insert(0, cfg_data.get("host", "127.0.0.1"))
+            self.bot_port_entry.delete(0, "end")
+            self.bot_port_entry.insert(0, cfg_data.get("port", "12345"))
+        except Exception:
+            self.bot_host_entry.insert(0, "127.0.0.1")
+            self.bot_port_entry.insert(0, "12345")
+
+    def _save_bot_config(self):
+        token = self.bot_token_entry.get().strip()
+        data  = {
+            "host": self.bot_host_entry.get().strip() or "127.0.0.1",
+            "port": self.bot_port_entry.get().strip() or "12345",
+        }
+        if token:
+            data["token"] = token
+        try:
+            with open(self._BOT_CONFIG_FILE, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2)
+        except Exception as e:
+            self._bot_log(f"⚠️ Could not save config: {e}")
+
+    def _bot_log(self, text: str):
+        def _append():
+            self.bot_log.configure(state="normal")
+            self.bot_log.insert("end", text.rstrip() + "\n")
+            self.bot_log.see("end")
+            self.bot_log.configure(state="disabled")
+        self.after(0, _append)
+
+    def _start_bot(self):
+        token = self.bot_token_entry.get().strip()
+        host  = self.bot_host_entry.get().strip() or "127.0.0.1"
+        port  = self.bot_port_entry.get().strip()  or "12345"
+
+        if not token:
+            mb.showerror("Missing Token", "Please enter a Discord Bot Token.")
+            return
+
+        self._save_bot_config()
+
+        # Find verseview_bot.py next to this script or in _MEIPASS
+        import sys as _sys
+        base = _sys._MEIPASS if hasattr(_sys, "_MEIPASS") else os.path.dirname(os.path.abspath(__file__))
+        bot_script = os.path.join(base, "verseview_bot.py")
+        if not os.path.exists(bot_script):
+            mb.showerror("Not Found", f"verseview_bot.py not found at:\n{bot_script}")
+            return
+
+        env = os.environ.copy()
+        env["VV_BOT_TOKEN"] = token
+        env["VV_HOST"]      = host
+        env["VV_PORT"]      = port
+
+        try:
+            self._bot_process = subprocess.Popen(
+                [_sys.executable, bot_script],
+                env=env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+            )
+        except Exception as e:
+            mb.showerror("Launch Error", str(e))
+            return
+
+        self.bot_start_btn.configure(state="disabled")
+        self.bot_stop_btn.configure(state="normal")
+        self.bot_status_lbl.configure(text="● Running", text_color="#2a7a2a")
+        self._bot_log("▶ Bot started.")
+
+        # Stream stdout to log box
+        def _stream():
+            for line in self._bot_process.stdout:
+                self._bot_log(line)
+            self.after(0, self._on_bot_stopped)
+
+        threading.Thread(target=_stream, daemon=True).start()
+
+    def _stop_bot(self):
+        if self._bot_process and self._bot_process.poll() is None:
+            self._bot_process.terminate()
+            self._bot_log("⏹ Stop requested.")
+        self.bot_stop_btn.configure(state="disabled")
+
+    def _on_bot_stopped(self):
+        self._bot_log("⏹ Bot stopped.")
+        self.bot_start_btn.configure(state="normal")
+        self.bot_stop_btn.configure(state="disabled")
+        self.bot_status_lbl.configure(text="● Stopped", text_color="#cc4444")
+        self._bot_process = None
 
     def _build_options(self):
         f = self.opts_frame
