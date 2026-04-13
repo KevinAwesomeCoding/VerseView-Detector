@@ -52,6 +52,10 @@ DEFAULTS = {
     "atem_key_duration":          5.0,
     # ── Settings Sync ──
     "settings_sync_url":          "",
+    # ── Discord Bot ──
+    "discord_bot_token":          "",
+    "vv_host":                    "127.0.0.1",
+    "vv_port":                    "12345",
 }
 
 

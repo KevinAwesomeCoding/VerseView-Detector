@@ -17,6 +17,7 @@ datas += [
     ('parse_reference_ml.py', '.'),
     ('updater.py', '.'),
     ('version.txt', '.'),
+    ('verseview_bot.py', '.'),
 ]
 
 
@@ -69,6 +70,8 @@ a = Analysis(
         'zeroconf',
         'zeroconf._utils',
         'zeroconf._dns',
+        'discord',
+        'aiohttp',
     ],
     hookspath=[],
     runtime_hooks=[],

@@ -85,6 +85,8 @@ class VerseViewApp(ctk.CTk):
         self.after(15000, self._check_for_update_bg)
         # Settings sync — runs 3s after launch so UI is fully ready
         self.after(3000, self._sync_settings_on_launch)
+        # Auto-start Discord bot if token is saved
+        self.after(600, self._auto_start_bot)
 
 
     # ─────────────────────────────────────────────────
@@ -594,32 +596,23 @@ class VerseViewApp(ctk.CTk):
         self._load_bot_config()
 
     def _load_bot_config(self):
-        try:
-            with open(self._BOT_CONFIG_FILE, encoding="utf-8") as f:
-                cfg_data = json.load(f)
-            if cfg_data.get("token"):
-                self.bot_token_entry.insert(0, cfg_data["token"])
-            self.bot_host_entry.delete(0, "end")
-            self.bot_host_entry.insert(0, cfg_data.get("host", "127.0.0.1"))
-            self.bot_port_entry.delete(0, "end")
-            self.bot_port_entry.insert(0, cfg_data.get("port", "12345"))
-        except Exception:
-            self.bot_host_entry.insert(0, "127.0.0.1")
-            self.bot_port_entry.insert(0, "12345")
+        s = self._s
+        if s.get("discord_bot_token"):
+            self.bot_token_entry.delete(0, "end")
+            self.bot_token_entry.insert(0, s["discord_bot_token"])
+        self.bot_host_entry.delete(0, "end")
+        self.bot_host_entry.insert(0, s.get("vv_host", "127.0.0.1"))
+        self.bot_port_entry.delete(0, "end")
+        self.bot_port_entry.insert(0, s.get("vv_port", "12345"))
 
     def _save_bot_config(self):
+        self._s = self._collect_settings()
+        cfg.save(self._s)
+
+    def _auto_start_bot(self):
         token = self.bot_token_entry.get().strip()
-        data  = {
-            "host": self.bot_host_entry.get().strip() or "127.0.0.1",
-            "port": self.bot_port_entry.get().strip() or "12345",
-        }
         if token:
-            data["token"] = token
-        try:
-            with open(self._BOT_CONFIG_FILE, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2)
-        except Exception as e:
-            self._bot_log(f"⚠️ Could not save config: {e}")
+            self._start_bot()
 
     def _bot_log(self, text: str):
         def _append():
@@ -1129,6 +1122,10 @@ class VerseViewApp(ctk.CTk):
             "atem_ip":                    self.atem_ip_entry.get().strip(),
             "atem_key_duration":          self._safe_float(self.atem_dur_entry, 5.0),
             "settings_sync_url":          self.sync_url_entry.get().strip(),
+            # ── Discord Bot ──
+            "discord_bot_token":          self.bot_token_entry.get().strip(),
+            "vv_host":                    self.bot_host_entry.get().strip(),
+            "vv_port":                    self.bot_port_entry.get().strip(),
         }
 
 
@@ -1141,6 +1138,7 @@ class VerseViewApp(ctk.CTk):
         "deepgram_api_key", "groq_api_key", "gemini_api_key",
         "cerebras_api_key", "mistral_api_key", "sarvam_api_key",
         "discord_webhook_url", "discord_log_webhook_url", "discord_notes_webhook_url",
+        "discord_bot_token",
     }
 
     def _sync_settings_on_launch(self):
