@@ -30,6 +30,11 @@ except Exception:
 
 # ── Config (env vars → fallback constants) ──────────────────────────────────────────
 BOT_TOKEN   = os.environ.get("VV_BOT_TOKEN", "YOUR_BOT_TOKEN_HERE")
+
+# Fix 2: Guild-scoped commands for instant sync during development.
+# Switch back to tree.sync() (no guild arg) when publishing to other servers.
+TEST_GUILD_ID = 1416626761805992028
+TEST_GUILD    = discord.Object(id=TEST_GUILD_ID)
 VV_HOST     = os.environ.get("VV_HOST",      "127.0.0.1")
 VV_PORT     = os.environ.get("VV_PORT",      "50011")   # ← bridge port
 VV_BASE     = f"http://{VV_HOST}:{VV_PORT}"
@@ -244,42 +249,65 @@ async def on_ready():
     log.info(f"Logged in as {bot.user} ({bot.user.id})")
 
     try:
-        synced = await tree.sync()
-        log.info(f"Synced {len(synced)} global slash commands: {[c.name for c in synced]}")
+        synced = await tree.sync(guild=TEST_GUILD)
+        log.info(f"Synced {len(synced)} guild commands: {[c.name for c in synced]}")
     except Exception as e:
         log.warning(f"Slash command sync failed: {e}")
 
+    bot.add_view(VVControlView())
     update_presence.start()
-    log.info("Bot ready.")
+    asyncio.create_task(_setup_control_panel())
     asyncio.create_task(_send_startup_embed())
+    log.info("Bot ready.")
+
+
+async def _setup_control_panel():
+    await asyncio.sleep(1)
+    for guild in bot.guilds:
+        channel = discord.utils.get(guild.text_channels, name="verse-modifier")
+        if not channel:
+            log.warning(f"[setup] No channel named 'verse-modifier' in {guild.name}")
+            continue
+        # Delete previous bot messages in this channel
+        try:
+            async for msg in channel.history(limit=50):
+                if msg.author == bot.user:
+                    await msg.delete()
+                    await asyncio.sleep(0.3)  # avoid rate limit
+        except Exception as e:
+            log.warning(f"[setup] Could not purge verse-modifier: {e}")
+        # Post fresh control panel
+        embed = discord.Embed(
+            title="📺 VerseView Control Panel",
+            description="Use the buttons below to control VerseView.",
+            color=discord.Color.blurple()
+        )
+        await channel.send(embed=embed, view=VVControlView())
+        log.info(f"[setup] Control panel posted in #{channel.name}")
 
 
 async def _send_startup_embed():
     await asyncio.sleep(1)
-    channel = None
     for guild in bot.guilds:
-        for ch in guild.text_channels:
-            if ch.permissions_for(guild.me).send_messages:
-                channel = ch
-                break
-        if channel:
-            break
-    if not channel:
-        return
-    internet_ok = await ping_internet(_http_session)
-    vv_ok       = await ping_verseview(_http_session)
-    embed = discord.Embed(
-        title="🎬 VerseView Bot Online",
-        color=discord.Color.green(),
-        timestamp=datetime.datetime.now(datetime.timezone.utc)
-    )
-    embed.add_field(name="💻 Machine",   value=detect_platform(), inline=True)
-    embed.add_field(name="🖥 Hostname",  value=_HOSTNAME, inline=True)
-    embed.add_field(name="🐍 Python",    value=platform.python_version(), inline=True)
-    embed.add_field(name="🌐 Internet",  value="✅ Online" if internet_ok else "❌ Offline", inline=True)
-    embed.add_field(name="📡 VerseView", value="✅ Connected" if vv_ok else "❌ Not reachable", inline=True)
-    embed.set_footer(text=f"Started at {datetime.datetime.now().strftime('%H:%M:%S')}")
-    await channel.send(embed=embed)
+        channel = discord.utils.get(guild.text_channels, name="verseview-status")
+        if not channel:
+            log.warning(f"[startup] No channel named 'verseview-status' in {guild.name}")
+            continue
+        internet_ok = await ping_internet(_http_session)
+        vv_ok       = await ping_verseview(_http_session)
+        embed = discord.Embed(
+            title="🎬 VerseView Bot Online",
+            color=discord.Color.green(),
+            timestamp=datetime.datetime.now(datetime.timezone.utc)
+        )
+        embed.add_field(name="💻 Machine",   value=detect_platform(), inline=True)
+        embed.add_field(name="🖥 Hostname",  value=_HOSTNAME, inline=True)
+        embed.add_field(name="🐍 Python",    value=platform.python_version(), inline=True)
+        embed.add_field(name="🌐 Internet",  value="✅ Online" if internet_ok else "❌ Offline", inline=True)
+        embed.add_field(name="📡 VerseView", value="✅ Connected" if vv_ok else "❌ Not reachable", inline=True)
+        embed.set_footer(text=f"Started at {datetime.datetime.now().strftime('%H:%M:%S')}")
+        await channel.send(embed=embed)
+        log.info(f"[startup] Online embed posted in #{channel.name}")
 
 
 @bot.event
@@ -310,7 +338,7 @@ async def update_presence():
     await bot.change_presence(status=status, activity=activity)
 
 
-# ── /vv control panel ──────────────────────────────────────────────────────────
+# ── Control panel views & modals ───────────────────────────────────────────────
 
 class TypeVerseModal(discord.ui.Modal, title="Type a Verse Reference"):
     verse_input = discord.ui.TextInput(
@@ -323,7 +351,7 @@ class TypeVerseModal(discord.ui.Modal, title="Type a Verse Reference"):
     async def on_submit(self, interaction: discord.Interaction):
         if _is_duplicate(interaction):
             return
-        await interaction.response.defer(ephemeral=False, thinking=False)
+        await interaction.response.defer(ephemeral=False)
         raw   = self.verse_input.value.strip()
         ref   = parse_verse_ref(raw.split())
         if not ref:
@@ -353,7 +381,7 @@ class VVControlView(discord.ui.View):
     async def go_back(self, interaction: discord.Interaction, button: discord.ui.Button):
         if _is_duplicate(interaction):
             return
-        await interaction.response.defer(ephemeral=False, thinking=False)
+        await interaction.response.defer(ephemeral=False)
         ok = await vv_request(_http_session, ENDPOINT_BACK)
         await interaction.followup.send("◀ Back" if ok else "⚠️ Failed", ephemeral=True)
 
@@ -361,7 +389,7 @@ class VVControlView(discord.ui.View):
     async def go_forward(self, interaction: discord.Interaction, button: discord.ui.Button):
         if _is_duplicate(interaction):
             return
-        await interaction.response.defer(ephemeral=False, thinking=False)
+        await interaction.response.defer(ephemeral=False)
         ok = await vv_request(_http_session, ENDPOINT_FORWARD)
         await interaction.followup.send("▶ Forward" if ok else "⚠️ Failed", ephemeral=True)
 
@@ -369,7 +397,7 @@ class VVControlView(discord.ui.View):
     async def present(self, interaction: discord.Interaction, button: discord.ui.Button):
         if _is_duplicate(interaction):
             return
-        await interaction.response.defer(ephemeral=False, thinking=False)
+        await interaction.response.defer(ephemeral=False)
         ok = await vv_request(_http_session, ENDPOINT_PRESENT)
         await interaction.followup.send("🎬 Presented" if ok else "⚠️ Failed", ephemeral=True)
 
@@ -377,22 +405,9 @@ class VVControlView(discord.ui.View):
     async def close_verse(self, interaction: discord.Interaction, button: discord.ui.Button):
         if _is_duplicate(interaction):
             return
-        await interaction.response.defer(ephemeral=False, thinking=False)
+        await interaction.response.defer(ephemeral=False)
         ok = await vv_request(_http_session, ENDPOINT_CLOSE)
         await interaction.followup.send("✕ Closed" if ok else "⚠️ Failed", ephemeral=True)
-
-
-@tree.command(name="vv", description="Open the VerseView control panel")
-async def vv_panel(interaction: discord.Interaction):
-    if _is_duplicate(interaction):
-        return
-    await interaction.response.defer(ephemeral=False, thinking=False)
-    embed = discord.Embed(
-        title="📺 VerseView Control Panel",
-        description="Use the buttons below to control VerseView.",
-        color=discord.Color.blurple()
-    )
-    await interaction.followup.send(embed=embed, view=VVControlView(), ephemeral=True)
 
 
 # ── /verse ─────────────────────────────────────────────────────────────────────
@@ -402,7 +417,7 @@ async def vv_panel(interaction: discord.Interaction):
 async def verse_cmd(interaction: discord.Interaction, reference: str):
     if _is_duplicate(interaction):
         return
-    await interaction.response.defer(ephemeral=False, thinking=False)
+    await interaction.response.defer(ephemeral=True)
     parts = reference.strip().split()
     ref   = parse_verse_ref(parts)
     if not ref:
@@ -427,7 +442,7 @@ async def verse_cmd(interaction: discord.Interaction, reference: str):
 async def vv_status(interaction: discord.Interaction):
     if _is_duplicate(interaction):
         return
-    await interaction.response.defer(ephemeral=False, thinking=False)
+    await interaction.response.defer(ephemeral=False)
     internet_ok = await ping_internet(_http_session)
     vv_ok       = await ping_verseview(_http_session)
     embed = discord.Embed(title="📡 VerseView Status", color=discord.Color.blurple())
