@@ -13,6 +13,12 @@ import threading
 import datetime as _dt
 import json
 
+# ── Bot Bridge (Discord → Selenium) ──────────────────────────────────────────
+try:
+    from vv_bot_bridge import start_bot_bridge as _start_bot_bridge
+except ImportError:
+    _start_bot_bridge = None
+
 from parse_reference_eng import parse_references as parse_eng, normalize_numbers_only as norm_eng, resolve_book as resolve_book_eng, set_spoken_numeral_mode
 from parse_reference_hindi import parse_references as parse_hindi, normalize_numbers_only as norm_hindi
 from parse_reference_ml import parse_references as parse_ml, normalize_numbers_only as norm_ml
@@ -981,6 +987,8 @@ def configure(
     live_points_prompt="", live_points_callback=None, live_points_get_current_cb=None,
     live_points_enabled=False, silence_timeout=60,
     atem_enabled=False, atem_ip="192.168.1.240", atem_key_duration=5.0,
+    gui_app=None,
+    bridge_ready_callback=None,
 ):
     global DEEPGRAM_API_KEY, GROQ_API_KEY, GEMINI_API_KEY, CEREBRAS_API_KEY, MISTRAL_API_KEY, SARVAM_API_KEY
     global DISCORD_WEBHOOK_URL, DISCORD_LOG_WEBHOOK_URL, DISCORD_NOTES_WEBHOOK_URL
@@ -996,13 +1004,16 @@ def configure(
     global normalize_numbers_only
     global VERSE_INTERRUPT_ENABLED, SPOKEN_NUMERAL_MODE, WORSHIP_MODE, _verse_history
     global ATEM_ENABLED, ATEM_IP, ATEM_KEY_DURATION
-    global current_book, current_chapter, current_verse
+    global current_book, current_chapter, current_verse, _gui_app
+    global BRIDGE_READY_CALLBACK
     WORSHIP_MODE = False
     _verse_history.clear()
     # Reset context so stale chapter from previous session never bleeds in
     current_book    = None
     current_chapter = None
     current_verse   = None
+    _gui_app               = gui_app
+    BRIDGE_READY_CALLBACK  = bridge_ready_callback
     logger.info("📌 Context reset for new session")
     _cancel_vtc()
 
@@ -1147,6 +1158,8 @@ def configure(
 current_book    = None
 current_chapter = None
 current_verse   = None
+_gui_app               = None   # injected by configure(); used by bot bridge for GUI refresh
+BRIDGE_READY_CALLBACK  = None   # called once the bot bridge starts successfully
 
 
 def get_context() -> dict:
@@ -3329,6 +3342,16 @@ async def main():
     if not connected:
         logger.error("Could not connect to VerseView after 5 attempts.")
         return
+
+    # ── Start Discord-bot bridge (port 50011) ─────────────────────────────────
+    if _start_bot_bridge is not None:
+        try:
+            _start_bot_bridge(_controller, port=50011, gui_app=_gui_app)
+            logger.info("Bot bridge started — controller injected")
+            if BRIDGE_READY_CALLBACK:
+                BRIDGE_READY_CALLBACK()
+        except Exception as _bridge_err:
+            logger.warning(f"⚠️ Bot bridge failed to start: {_bridge_err}")
 
     logger.info("=" * 60)
     logger.info("🚀 VerseView Live Started")

@@ -14,24 +14,35 @@ import platform
 import socket
 import datetime
 import logging
+import urllib.parse
 
 import aiohttp
 import discord
 from discord.ext import commands, tasks
 from discord import app_commands
 
-# ── Config (env vars → fallback constants) ─────────────────────────────────────
+# Cache hostname at import time
+import socket as _socket
+try:
+    _HOSTNAME = _socket.gethostname()
+except Exception:
+    _HOSTNAME = "unknown"
+
+# ── Config (env vars → fallback constants) ──────────────────────────────────────────
 BOT_TOKEN   = os.environ.get("VV_BOT_TOKEN", "YOUR_BOT_TOKEN_HERE")
 VV_HOST     = os.environ.get("VV_HOST",      "127.0.0.1")
-VV_PORT     = os.environ.get("VV_PORT",      "12345")
+VV_PORT     = os.environ.get("VV_PORT",      "50011")   # ← bridge port
 VV_BASE     = f"http://{VV_HOST}:{VV_PORT}"
+VV_CONTROL_URL = f"http://{VV_HOST}:50010/control.html"  # VerseView's own UI
 
-# ── VerseView HTTP endpoint paths — fill in after inspecting Network tab ───────
-ENDPOINT_GOTO    = "/goto"        # POST  body: {"ref": "John 3:16"}
-ENDPOINT_FORWARD = "/forward"     # POST
-ENDPOINT_BACK    = "/back"        # POST
-ENDPOINT_PRESENT = "/present"     # POST
-ENDPOINT_CLOSE   = "/close"       # POST
+
+# ── VerseView HTTP endpoint paths ────────────────────────────────────────────
+ENDPOINT_GOTO    = "/goto"     # GET  ?ref=John+3:16
+ENDPOINT_FORWARD = "/next"     # GET
+ENDPOINT_BACK    = "/prev"     # GET
+ENDPOINT_PRESENT = "/present"  # GET
+ENDPOINT_CLOSE   = "/close"    # GET
+ENDPOINT_STATUS  = "/status"   # GET
 
 # ── Logging ────────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -133,7 +144,7 @@ def detect_platform() -> str:
 
 async def ping_internet(session: aiohttp.ClientSession) -> bool:
     try:
-        async with session.get("https://www.google.com", timeout=aiohttp.ClientTimeout(total=5)) as r:
+        async with session.get("https://www.google.com", timeout=aiohttp.ClientTimeout(total=2)) as r:
             return r.status < 400
     except Exception:
         return False
@@ -141,19 +152,23 @@ async def ping_internet(session: aiohttp.ClientSession) -> bool:
 
 async def ping_verseview(session: aiohttp.ClientSession) -> bool:
     try:
-        async with session.get(VV_BASE, timeout=aiohttp.ClientTimeout(total=3)) as r:
+        async with session.get(VV_BASE + ENDPOINT_STATUS, timeout=aiohttp.ClientTimeout(total=1)) as r:
             return r.status < 500
     except Exception:
         return False
 
 
-async def vv_post(session: aiohttp.ClientSession, endpoint: str, body: dict | None = None) -> bool:
+async def vv_request(session: aiohttp.ClientSession, endpoint: str, ref: str | None = None) -> bool:
+    """
+    Send a GET request to the local bot bridge.
+    For /goto, pass the verse reference as ?ref=<verse>.
+    All other endpoints take no query parameters.
+    """
     try:
-        async with session.post(
-            VV_BASE + endpoint,
-            json=body or {},
-            timeout=aiohttp.ClientTimeout(total=5)
-        ) as r:
+        url = VV_BASE + endpoint
+        if ref:
+            url += "?" + urllib.parse.urlencode({"ref": ref})
+        async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as r:
             return r.status < 400
     except Exception:
         return False
@@ -203,6 +218,21 @@ bot             = commands.Bot(command_prefix="!", intents=intents)
 tree            = bot.tree
 _http_session: aiohttp.ClientSession | None = None
 
+# ── Interaction deduplication ──────────────────────────────────────────────────
+# Discord can re-deliver the same interaction ID if the bot is slow to ACK or
+# when webhooks are rate-limited. We track IDs for 60s to silently drop dupes.
+# IDs expire via call_later so the set never grows unbounded.
+_seen_interaction_ids: set[int] = set()
+
+def _is_duplicate(interaction: discord.Interaction) -> bool:
+    iid = interaction.id
+    if iid in _seen_interaction_ids:
+        log.warning(f"Duplicate interaction dropped: {iid}")
+        return True
+    _seen_interaction_ids.add(iid)
+    asyncio.get_event_loop().call_later(60, lambda: _seen_interaction_ids.discard(iid))
+    return False
+
 
 # ── Startup embed ──────────────────────────────────────────────────────────────
 
@@ -215,11 +245,17 @@ async def on_ready():
 
     try:
         synced = await tree.sync()
-        log.info(f"Synced {len(synced)} slash command(s)")
+        log.info(f"Synced {len(synced)} global slash commands: {[c.name for c in synced]}")
     except Exception as e:
         log.warning(f"Slash command sync failed: {e}")
 
-    # Post startup embed to first available text channel
+    update_presence.start()
+    log.info("Bot ready.")
+    asyncio.create_task(_send_startup_embed())
+
+
+async def _send_startup_embed():
+    await asyncio.sleep(1)
     channel = None
     for guild in bot.guilds:
         for ch in guild.text_channels:
@@ -228,25 +264,22 @@ async def on_ready():
                 break
         if channel:
             break
-
-    if channel:
-        internet_ok = await ping_internet(_http_session)
-        vv_ok       = await ping_verseview(_http_session)
-        embed = discord.Embed(
-            title="🎬 VerseView Bot Online",
-            color=discord.Color.green(),
-            timestamp=datetime.datetime.now(datetime.timezone.utc)
-        )
-        embed.add_field(name="💻 Machine",   value=detect_platform(), inline=True)
-        embed.add_field(name="🖥 Hostname",  value=socket.gethostname(), inline=True)
-        embed.add_field(name="🐍 Python",    value=platform.python_version(), inline=True)
-        embed.add_field(name="🌐 Internet",  value="✅ Online" if internet_ok else "❌ Offline", inline=True)
-        embed.add_field(name="📡 VerseView", value="✅ Connected" if vv_ok else "❌ Not reachable", inline=True)
-        embed.set_footer(text=f"Started at {datetime.datetime.now().strftime('%H:%M:%S')}")
-        await channel.send(embed=embed)
-
-    update_presence.start()
-    log.info("Bot ready.")
+    if not channel:
+        return
+    internet_ok = await ping_internet(_http_session)
+    vv_ok       = await ping_verseview(_http_session)
+    embed = discord.Embed(
+        title="🎬 VerseView Bot Online",
+        color=discord.Color.green(),
+        timestamp=datetime.datetime.now(datetime.timezone.utc)
+    )
+    embed.add_field(name="💻 Machine",   value=detect_platform(), inline=True)
+    embed.add_field(name="🖥 Hostname",  value=_HOSTNAME, inline=True)
+    embed.add_field(name="🐍 Python",    value=platform.python_version(), inline=True)
+    embed.add_field(name="🌐 Internet",  value="✅ Online" if internet_ok else "❌ Offline", inline=True)
+    embed.add_field(name="📡 VerseView", value="✅ Connected" if vv_ok else "❌ Not reachable", inline=True)
+    embed.set_footer(text=f"Started at {datetime.datetime.now().strftime('%H:%M:%S')}")
+    await channel.send(embed=embed)
 
 
 @bot.event
@@ -257,7 +290,7 @@ async def on_close():
 
 # ── Presence loop ──────────────────────────────────────────────────────────────
 
-@tasks.loop(seconds=20)
+@tasks.loop(seconds=60)
 async def update_presence():
     if not _http_session:
         return
@@ -288,17 +321,19 @@ class TypeVerseModal(discord.ui.Modal, title="Type a Verse Reference"):
     )
 
     async def on_submit(self, interaction: discord.Interaction):
-        raw    = self.verse_input.value.strip()
-        parts  = raw.split()
-        ref    = parse_verse_ref(parts)
+        if _is_duplicate(interaction):
+            return
+        await interaction.response.defer(ephemeral=False, thinking=False)
+        raw   = self.verse_input.value.strip()
+        ref   = parse_verse_ref(raw.split())
         if not ref:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 f"❌ Could not parse `{raw}` — try `John 3:16` or `gen 5 2`",
                 ephemeral=True
             )
             return
-        ok = await vv_post(_http_session, ENDPOINT_GOTO, {"ref": ref})
-        await interaction.response.send_message(
+        ok = await vv_request(_http_session, ENDPOINT_GOTO, ref=ref)
+        await interaction.followup.send(
             f"{'📖 Sent' if ok else '⚠️ Failed'}: **{ref}**",
             ephemeral=True
         )
@@ -310,37 +345,54 @@ class VVControlView(discord.ui.View):
 
     @discord.ui.button(label="📖 Type Verse", style=discord.ButtonStyle.primary, custom_id="vv_type_verse")
     async def type_verse(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if _is_duplicate(interaction):
+            return
         await interaction.response.send_modal(TypeVerseModal())
 
     @discord.ui.button(label="◀ Back", style=discord.ButtonStyle.secondary, custom_id="vv_back")
     async def go_back(self, interaction: discord.Interaction, button: discord.ui.Button):
-        ok = await vv_post(_http_session, ENDPOINT_BACK)
-        await interaction.response.send_message("◀ Back" if ok else "⚠️ Failed", ephemeral=True)
+        if _is_duplicate(interaction):
+            return
+        await interaction.response.defer(ephemeral=False, thinking=False)
+        ok = await vv_request(_http_session, ENDPOINT_BACK)
+        await interaction.followup.send("◀ Back" if ok else "⚠️ Failed", ephemeral=True)
 
     @discord.ui.button(label="▶ Forward", style=discord.ButtonStyle.secondary, custom_id="vv_forward")
     async def go_forward(self, interaction: discord.Interaction, button: discord.ui.Button):
-        ok = await vv_post(_http_session, ENDPOINT_FORWARD)
-        await interaction.response.send_message("▶ Forward" if ok else "⚠️ Failed", ephemeral=True)
+        if _is_duplicate(interaction):
+            return
+        await interaction.response.defer(ephemeral=False, thinking=False)
+        ok = await vv_request(_http_session, ENDPOINT_FORWARD)
+        await interaction.followup.send("▶ Forward" if ok else "⚠️ Failed", ephemeral=True)
 
     @discord.ui.button(label="🎬 Present", style=discord.ButtonStyle.success, custom_id="vv_present")
     async def present(self, interaction: discord.Interaction, button: discord.ui.Button):
-        ok = await vv_post(_http_session, ENDPOINT_PRESENT)
-        await interaction.response.send_message("🎬 Presented" if ok else "⚠️ Failed", ephemeral=True)
+        if _is_duplicate(interaction):
+            return
+        await interaction.response.defer(ephemeral=False, thinking=False)
+        ok = await vv_request(_http_session, ENDPOINT_PRESENT)
+        await interaction.followup.send("🎬 Presented" if ok else "⚠️ Failed", ephemeral=True)
 
     @discord.ui.button(label="✕ Close", style=discord.ButtonStyle.danger, custom_id="vv_close")
     async def close_verse(self, interaction: discord.Interaction, button: discord.ui.Button):
-        ok = await vv_post(_http_session, ENDPOINT_CLOSE)
-        await interaction.response.send_message("✕ Closed" if ok else "⚠️ Failed", ephemeral=True)
+        if _is_duplicate(interaction):
+            return
+        await interaction.response.defer(ephemeral=False, thinking=False)
+        ok = await vv_request(_http_session, ENDPOINT_CLOSE)
+        await interaction.followup.send("✕ Closed" if ok else "⚠️ Failed", ephemeral=True)
 
 
 @tree.command(name="vv", description="Open the VerseView control panel")
 async def vv_panel(interaction: discord.Interaction):
+    if _is_duplicate(interaction):
+        return
+    await interaction.response.defer(ephemeral=False, thinking=False)
     embed = discord.Embed(
         title="📺 VerseView Control Panel",
         description="Use the buttons below to control VerseView.",
         color=discord.Color.blurple()
     )
-    await interaction.response.send_message(embed=embed, view=VVControlView())
+    await interaction.followup.send(embed=embed, view=VVControlView(), ephemeral=True)
 
 
 # ── /verse ─────────────────────────────────────────────────────────────────────
@@ -348,37 +400,42 @@ async def vv_panel(interaction: discord.Interaction):
 @tree.command(name="verse", description="Jump to a verse — e.g. /verse gen 5 2 or /verse 1 cor 13 4")
 @app_commands.describe(reference="Book chapter verse — e.g. john 3 16 or 1 cor 13 4")
 async def verse_cmd(interaction: discord.Interaction, reference: str):
+    if _is_duplicate(interaction):
+        return
+    await interaction.response.defer(ephemeral=False, thinking=False)
     parts = reference.strip().split()
     ref   = parse_verse_ref(parts)
     if not ref:
-        await interaction.response.send_message(
+        await interaction.followup.send(
             f"❌ Could not parse `{reference}`.\nTry: `john 3 16` or `1 cor 13 4`",
             ephemeral=True
         )
         return
-    ok = await vv_post(_http_session, ENDPOINT_GOTO, {"ref": ref})
+    ok = await vv_request(_http_session, ENDPOINT_GOTO, ref=ref)
     color = discord.Color.green() if ok else discord.Color.red()
     embed = discord.Embed(
         title="📖 " + ref,
         description="Sent to VerseView ✅" if ok else "⚠️ VerseView not reachable",
         color=color
     )
-    await interaction.response.send_message(embed=embed)
+    await interaction.followup.send(embed=embed, ephemeral=True)
 
 
 # ── /vv_status ─────────────────────────────────────────────────────────────────
 
 @tree.command(name="vv_status", description="Check VerseView and internet connectivity")
 async def vv_status(interaction: discord.Interaction):
-    await interaction.response.defer(ephemeral=True)
+    if _is_duplicate(interaction):
+        return
+    await interaction.response.defer(ephemeral=False, thinking=False)
     internet_ok = await ping_internet(_http_session)
     vv_ok       = await ping_verseview(_http_session)
     embed = discord.Embed(title="📡 VerseView Status", color=discord.Color.blurple())
     embed.add_field(name="💻 Machine",   value=detect_platform(), inline=True)
-    embed.add_field(name="🖥 Hostname",  value=socket.gethostname(), inline=True)
+    embed.add_field(name="🖥 Hostname",  value=_HOSTNAME, inline=True)
     embed.add_field(name="🌐 Internet",  value="✅ Online"  if internet_ok else "❌ Offline", inline=True)
     embed.add_field(name="📡 VerseView", value="✅ Connected" if vv_ok else "❌ Not reachable", inline=True)
-    embed.add_field(name="🔗 VV URL",    value=VV_BASE, inline=False)
+    embed.add_field(name="🔗 VV URL",    value=VV_CONTROL_URL, inline=False)
     await interaction.followup.send(embed=embed, ephemeral=True)
 
 

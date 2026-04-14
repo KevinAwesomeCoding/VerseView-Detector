@@ -85,8 +85,7 @@ class VerseViewApp(ctk.CTk):
         self.after(15000, self._check_for_update_bg)
         # Settings sync — runs 3s after launch so UI is fully ready
         self.after(3000, self._sync_settings_on_launch)
-        # Auto-start Discord bot if token is saved
-        self.after(600, self._auto_start_bot)
+        # Auto-start Discord bot fires via _on_bridge_ready once bridge is live
 
 
     # ─────────────────────────────────────────────────
@@ -603,7 +602,7 @@ class VerseViewApp(ctk.CTk):
         self.bot_host_entry.delete(0, "end")
         self.bot_host_entry.insert(0, s.get("vv_host", "127.0.0.1"))
         self.bot_port_entry.delete(0, "end")
-        self.bot_port_entry.insert(0, s.get("vv_port", "12345"))
+        self.bot_port_entry.insert(0, s.get("vv_port", "50011"))
 
     def _save_bot_config(self):
         self._s = self._collect_settings()
@@ -614,6 +613,15 @@ class VerseViewApp(ctk.CTk):
         if token:
             self._start_bot()
 
+    def _on_bridge_ready(self):
+        """Called by engine via BRIDGE_READY_CALLBACK once bridge is live."""
+        def _update():
+            self.bot_status_lbl.configure(text="● Ready", text_color="#a07a00")
+            self.bot_start_btn.configure(state="normal")
+            self._bot_log("✅ Bridge ready — engine connected.")
+            self._auto_start_bot()   # auto-start if token is saved
+        self.after(0, _update)       # always schedule onto the tkinter thread
+
     def _bot_log(self, text: str):
         def _append():
             self.bot_log.configure(state="normal")
@@ -623,9 +631,15 @@ class VerseViewApp(ctk.CTk):
         self.after(0, _append)
 
     def _start_bot(self):
+        if not self._running:
+            mb.showwarning(
+                "Engine Not Running",
+                "Please start the VerseView engine first before starting the bot."
+            )
+            return
         token = self.bot_token_entry.get().strip()
         host  = self.bot_host_entry.get().strip() or "127.0.0.1"
-        port  = self.bot_port_entry.get().strip()  or "12345"
+        port  = self.bot_port_entry.get().strip() or "50011"
 
         if not token:
             mb.showerror("Missing Token", "Please enter a Discord Bot Token.")
@@ -680,9 +694,12 @@ class VerseViewApp(ctk.CTk):
 
     def _on_bot_stopped(self):
         self._bot_log("⏹ Bot stopped.")
-        self.bot_start_btn.configure(state="normal")
+        self.bot_start_btn.configure(state="normal" if self._running else "disabled")
         self.bot_stop_btn.configure(state="disabled")
-        self.bot_status_lbl.configure(text="● Stopped", text_color="#cc4444")
+        if self._running:
+            self.bot_status_lbl.configure(text="● Ready", text_color="#a07a00")
+        else:
+            self.bot_status_lbl.configure(text="⏸ Waiting for engine…", text_color="#888888")
         self._bot_process = None
 
     def _build_options(self):
@@ -1470,6 +1487,8 @@ class VerseViewApp(ctk.CTk):
                 atem_enabled               = s.get("atem_enabled", False),
                 atem_ip                    = s.get("atem_ip", ""),
                 atem_key_duration          = s.get("atem_key_duration", 5.0),
+                gui_app                    = self,
+                bridge_ready_callback      = self._on_bridge_ready,
             )
 
 
@@ -1512,6 +1531,12 @@ class VerseViewApp(ctk.CTk):
 
     def _on_stopped(self):
         self._running = False
+        # Stop the Discord bot — the bridge is dead, bot would be useless
+        if self._bot_process and self._bot_process.poll() is None:
+            self._bot_process.terminate()
+        self.bot_start_btn.configure(state="disabled")
+        self.bot_stop_btn.configure(state="disabled")
+        self.bot_status_lbl.configure(text="⏸ Waiting for engine…", text_color="#888888")
         self.btn_stop.configure(state="disabled")
         self.lbl_status.configure(text="● Stopped", text_color="#666666")
         self.lang_menu.configure(state="normal")
