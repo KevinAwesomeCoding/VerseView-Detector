@@ -619,7 +619,13 @@ class VerseViewApp(ctk.CTk):
             self.bot_status_lbl.configure(text="● Ready", text_color="#a07a00")
             self.bot_start_btn.configure(state="normal")
             self._bot_log("✅ Bridge ready — engine connected.")
-            self._auto_start_bot()   # auto-start if token is saved
+            # Only auto-start if the bot subprocess isn't already running.
+            # On engine restart the bridge re-injects its controller but the
+            # bot subprocess is still alive — don't launch a second copy.
+            if self._bot_process is None or self._bot_process.poll() is not None:
+                self._auto_start_bot()   # auto-start if token is saved
+            else:
+                self._bot_log("ℹ️ Bot already running — skipping auto-start.")
         self.after(0, _update)       # always schedule onto the tkinter thread
 
     def _bot_log(self, text: str):

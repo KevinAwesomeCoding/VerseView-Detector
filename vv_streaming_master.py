@@ -2674,6 +2674,46 @@ def detect_verse_hybrid(text, controller, confidence=1.0) -> bool:
                 except ValueError:
                     pass
 
+        # Layer 5b — "read-intent" range/single verse without explicit verse keyword.
+        # Catches "let's read four and five", "read from verse four", "reading three and four"
+        # when we have chapter context but no current verse yet.
+        # This fires BEFORE Layer 6 so the strict "no current_verse" guard there doesn't block it.
+        _READ_INTENT_RE = re.compile(
+            r'\b(?:read|reading|let\s*['\u2019]?s\s+read|we\s+read|let\s+us\s+read|from)\b',
+            re.IGNORECASE,
+        )
+        if current_book and current_chapter and not current_verse:
+            if _READ_INTENT_RE.search(text):
+                num_norm_ri = normalize_numbers_only(text)
+                # Multi-verse: "read four and five" / "read three to seven"
+                range_ri = RANGE_RE.search(num_norm_ri)
+                if range_ri:
+                    start_ri = int(range_ri.group("start"))
+                    end_ri   = int(range_ri.group("end"))
+                    if 1 <= start_ri < end_ri <= start_ri + 30:
+                        ref_start = f"{current_book} {current_chapter}:{start_ri}"
+                        logger.info(
+                            f"🔍 READ-INTENT RANGE: {current_book} {current_chapter}:{start_ri}→{end_ri} "
+                            f"({int(confidence*100)}% Acc)"
+                        )
+                        deliver_verse(ref_start, controller, bypass_cooldown=False,
+                                      confidence=confidence, source="READ-INTENT-RANGE")
+                        queue_verse_range(current_book, current_chapter, start_ri, end_ri, controller)
+                        trigger_onwards_if_needed(ref_start, text)
+                        return True
+                # Single verse: "let's read verse four" / "read from four"
+                m_single_ri = re.search(r'\b(\d{1,3})\b', num_norm_ri)
+                if m_single_ri:
+                    candidate_ri = m_single_ri.group(1)
+                    ref_ri = f"{current_book} {current_chapter}:{candidate_ri}"
+                    logger.info(
+                        f"🔍 READ-INTENT: {ref_ri} ({int(confidence*100)}% Acc)"
+                    )
+                    deliver_verse(ref_ri, controller, bypass_cooldown=False,
+                                  confidence=confidence, source="READ-INTENT")
+                    trigger_onwards_if_needed(ref_ri, text)
+                    return True
+
         # Layer 6 — range without explicit verse
         if current_book and current_chapter:
             range_m = RANGE_RE.search(num_norm)
