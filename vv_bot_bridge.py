@@ -39,6 +39,7 @@ logger = logging.getLogger(__name__)
 # Module-level references injected by start_bot_bridge()
 _controller = None
 _gui_app    = None
+_server: "HTTPServer | None" = None   # kept so we never try to bind twice
 
 
 # ── Handler ────────────────────────────────────────────────────────────────────
@@ -298,6 +299,11 @@ def start_bot_bridge(controller, port: int = 50011, gui_app=None):
     """
     Start the HTTP bridge server in a background daemon thread.
 
+    If the server is already running (e.g. engine restarted after a stop),
+    the existing socket is reused and only the controller reference is updated.
+    This prevents [Errno 48] / [Errno 10048] address-already-in-use errors
+    on engine restart.
+
     Parameters
     ----------
     controller : VerseController
@@ -307,19 +313,25 @@ def start_bot_bridge(controller, port: int = 50011, gui_app=None):
     gui_app : VerseViewApp | None
         Optional reference to the tkinter GUI app for thread-safe context field updates.
     """
-    global _controller, _gui_app
+    global _controller, _gui_app, _server
+
     _controller = controller
     _gui_app    = gui_app
 
-    server = HTTPServer(("127.0.0.1", port), _BridgeHandler)
+    if _server is not None:
+        # Bridge already bound — just update the controller reference and return.
+        logger.info("[bridge] Bot bridge already running — controller re-injected")
+        return _server
+
+    _server = HTTPServer(("127.0.0.1", port), _BridgeHandler)
 
     def _serve():
         logger.info(f"[bridge] Bot bridge listening on http://127.0.0.1:{port}")
         try:
-            server.serve_forever()
+            _server.serve_forever()
         except Exception as exc:
             logger.error(f"[bridge] Server stopped unexpectedly: {exc}")
 
     thread = threading.Thread(target=_serve, name="vv-bot-bridge", daemon=True)
     thread.start()
-    return server
+    return _server
