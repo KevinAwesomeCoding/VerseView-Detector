@@ -655,12 +655,12 @@ class VerseViewApp(ctk.CTk):
 
         self._save_bot_config()
 
-        # Find verseview_bot.py next to this script or in _MEIPASS
+        # Find vv_discord_bot.py next to this script or in _MEIPASS
         import sys as _sys
         base = _sys._MEIPASS if hasattr(_sys, "_MEIPASS") else os.path.dirname(os.path.abspath(__file__))
-        bot_script = os.path.join(base, "verseview_bot.py")
+        bot_script = os.path.join(base, "vv_discord_bot.py")
         if not os.path.exists(bot_script):
-            mb.showerror("Not Found", f"verseview_bot.py not found at:\n{bot_script}")
+            mb.showerror("Not Found", f"vv_discord_bot.py not found at:\n{bot_script}")
             return
 
         env = os.environ.copy()
