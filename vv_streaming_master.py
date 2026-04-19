@@ -2679,7 +2679,7 @@ def detect_verse_hybrid(text, controller, confidence=1.0) -> bool:
         # when we have chapter context but no current verse yet.
         # This fires BEFORE Layer 6 so the strict "no current_verse" guard there doesn't block it.
         _READ_INTENT_RE = re.compile(
-            r'\b(?:read|reading|let\s*['\u2019]?s\s+read|we\s+read|let\s+us\s+read|from)\b',
+            r"\b(?:read|reading|let\s*['\u2019]?s\s+read|we\s+read|let\s+us\s+read|from)\b",
             re.IGNORECASE,
         )
         if current_book and current_chapter and not current_verse:
