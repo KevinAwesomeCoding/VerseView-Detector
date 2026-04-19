@@ -18,6 +18,7 @@ datas += [
     ('updater.py', '.'),
     ('version.txt', '.'),
     ('verseview_bot.py', '.'),
+    ('vv_discord_bot.py', '.'),
 ]
 
 
