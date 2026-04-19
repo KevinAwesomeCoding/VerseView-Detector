@@ -126,6 +126,20 @@ BOOK_CHAPTER_COUNTS = {
 #       below and adding them here breaks compound numbers like "twenty two".
 ORDINAL_WORDS = {"first": "1", "second": "2", "third": "3"}
 
+# Bug EN-1 fix: these book names are also common English words or proper names.
+# A bare occurrence ("Ruth joined us", "Mark my words", "the Acts of kindness")
+# must NOT fire a reference — we require at least one co-signal (a chapter/verse
+# number, the word "chapter"/"verse", or "the book of") within ±60 characters.
+AMBIGUOUS_BOOK_NAMES: set = {
+    "Ruth", "Mark", "James", "Numbers", "Acts", "Job", "Amos",
+    "Lamentations", "Obadiah",
+}
+# Matches any chapter/verse indicator or a digit (sufficient co-signal)
+_COSIGNAL_RE = re.compile(
+    r'\b(?:chapter|chap|ch|verse|verses|the\s+book\s+of)\b|\d',
+    re.IGNORECASE
+)
+
 # ── Number words → digits ──
 NUMBER_MAP = {
     "zero": 0, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
@@ -436,6 +450,16 @@ def parse_references(text: str):
     for m in REF_RE.finditer(t):
         eng = resolve_book(m.group("book"))
         if eng:
+            # Bug EN-1 fix: books whose names are also common English words/names
+            # require a chapter/verse co-signal nearby before triggering a reference.
+            # Check a ±60-char window in the *original* text (pre-normalisation) so
+            # numbers stripped by normalize_text don't hide their own co-signal.
+            if eng in AMBIGUOUS_BOOK_NAMES:
+                raw_start = max(0, m.start() - 60)
+                raw_end   = min(len(text), m.end() + 60)
+                window    = text[raw_start:raw_end]
+                if not _COSIGNAL_RE.search(window):
+                    continue  # bare "Ruth" / "Mark" / "Acts" in narrative — skip
             chap_int  = int(m.group("chap"))
             max_chap  = BOOK_CHAPTER_COUNTS.get(eng, 999)
             if chap_int > max_chap:

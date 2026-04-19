@@ -455,6 +455,11 @@ mistral_client  = None   # sermon summary primary           (Mistral mistral-lar
 # Bug 4: track highest verse presented per chapter this session so returning to
 # a chapter resumes from the last known verse instead of re-presenting bare chapter.
 _session_verse_high_water: dict = {}  # "Book chapter" → highest verse int seen this session
+
+# Bug ML-3 fix: track last-presented verse number so contextual detection can
+# reject backward jumps (e.g. jumping back to v1 when sermon is at v17).
+_last_presented_verse_num: int = 0        # ordinal of last verse sent to display
+_last_presented_verse_book_chap: str = "" # "Book chapter" key matching the above
 LIVE_POINTS_ENABLED  = False   # Bug 8: guard — True only when LLM outline is enabled
 SILENCE_TIMEOUT      = 60      # Feature 6: auto-stop after N seconds without a transcript line
 _last_transcript_time = 0.0    # Feature 6: timestamp of last received transcript line
@@ -1248,7 +1253,10 @@ onwards_target_text = None
 
 # Counter for consecutive NO matches — abort ONWARDS if clearly in wrong chapter
 _onwards_consecutive_no = 0
-_ONWARDS_MISMATCH_LIMIT = 5  # abort after this many straight NO results
+# Bug EN-2 fix: raised from 5 → 12. Pastors who paraphrase/explain rather than
+# reading verbatim would hit 5 NOs quickly even while still in the same chapter.
+# 12 consecutive semantic mismatches gives more headroom before aborting.
+_ONWARDS_MISMATCH_LIMIT = 12  # abort after this many straight NO results
 
 
 def _stop_onwards():
@@ -1711,10 +1719,23 @@ def extract_verse_with_llm(text):
 
     context_hint = ""
     if current_book and current_chapter:
+        # Bug ML-1 fix: include how far through the chapter the sermon has progressed.
+        # Without this, the LLM has no memory of verse position and can jump back to
+        # verse 1 (or any early verse) even when the sermon is near verse 17+.
+        _hw_key   = f"{current_book} {current_chapter}"
+        _hw_verse = _session_verse_high_water.get(_hw_key, 0)
         context_hint = (
             f"\nContext: The speaker is currently reading from "
             f"{current_book} chapter {current_chapter}."
         )
+        if _hw_verse > 0:
+            _floor = max(1, _hw_verse - 2)
+            context_hint += (
+                f" The sermon has already covered up to at least verse {_hw_verse} of this chapter. "
+                f"Do NOT suggest any verse earlier than verse {_floor} unless the transcript "
+                f"explicitly states the speaker is going back (e.g. 'let's return to verse 1', "
+                f"'going back to the beginning'). Strongly prefer verses {_hw_verse} or later."
+            )
 
     try:
         LLM_CALL_COUNT += 1
@@ -2089,6 +2110,12 @@ class VerseController:
                     _verse_num  = int(_hwp[-1].split(":")[1])
                     if _verse_num > _session_verse_high_water.get(_chap_key, 0):
                         _session_verse_high_water[_chap_key] = _verse_num
+                    # Bug ML-3 fix: always track last-presented verse position (not just
+                    # the high-water). This lets contextual detection reject backward jumps
+                    # even when the sermon re-reads a lower verse that was the chapter max.
+                    global _last_presented_verse_num, _last_presented_verse_book_chap
+                    _last_presented_verse_num       = _verse_num
+                    _last_presented_verse_book_chap = _chap_key
 
             if len(self.history) > 20:
                 oldest = min(self.history.items(), key=lambda x: x[1])
@@ -2338,6 +2365,33 @@ def detect_verse_hybrid(text, controller, confidence=1.0) -> bool:
     }
     for pattern, replacement in fixes.items():
         text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
+
+    # Bug ML-2 fix: Sarvam STT (Malayalam) often emits English number words mid-transcript,
+    # e.g. "verse Eight disobedient people" instead of "verse 8".
+    # SPOKEN_NUMERAL_MODE handles Malayalam numeral words but not English ones.
+    # Replace English cardinal/ordinal words with digits before any parser sees the text.
+    if SPOKEN_NUMERAL_MODE and USE_SARVAM:
+        _ML2_EN_NUMS = {
+            "zero":"0","one":"1","two":"2","three":"3","four":"4","five":"5",
+            "six":"6","seven":"7","eight":"8","nine":"9","ten":"10",
+            "eleven":"11","twelve":"12","thirteen":"13","fourteen":"14",
+            "fifteen":"15","sixteen":"16","seventeen":"17","eighteen":"18",
+            "nineteen":"19","twenty":"20","twenty one":"21","twenty two":"22",
+            "twenty three":"23","twenty four":"24","twenty five":"25",
+            "twenty six":"26","twenty seven":"27","twenty eight":"28",
+            "twenty nine":"29","thirty":"30",
+            # ordinal forms that Sarvam/Deepgram sometimes emits
+            "first":"1","second":"2","third":"3","fourth":"4","fifth":"5",
+            "sixth":"6","seventh":"7","eighth":"8","ninth":"9","tenth":"10",
+            "eleventh":"11","twelfth":"12","thirteenth":"13","fourteenth":"14",
+            "fifteenth":"15","sixteenth":"16","seventeenth":"17","eighteenth":"18",
+            "nineteenth":"19","twentieth":"20",
+        }
+        _ml2_re = re.compile(
+            r'\b(' + '|'.join(re.escape(k) for k in sorted(_ML2_EN_NUMS, key=len, reverse=True)) + r')\b',
+            re.IGNORECASE
+        )
+        text = _ml2_re.sub(lambda m: _ML2_EN_NUMS[m.group(1).lower()], text)
 
     def trigger_onwards_if_needed(ref_string, original_text):
         if any(kw in original_text.lower() for kw in ONWARDS_KEYWORDS):
@@ -2611,6 +2665,25 @@ def detect_verse_hybrid(text, controller, confidence=1.0) -> bool:
             
             if m_vkw:
                 candidate = m_vkw.group(1)
+                # Bug ML-3 fix: reject backward jumps > 5 verses unless the speaker
+                # explicitly signals going back (e.g. "let's go back to verse 1").
+                # This prevents the LLM/contextual path from jumping to Hosea 4:1
+                # when the sermon has already progressed to verse 17+.
+                _ctx_key = f"{current_book} {current_chapter}"
+                _explicit_backward = bool(re.search(
+                    r'\b(?:go(?:ing)?\s+back|let\s*[\'s]*\s*(?:go\s+)?back|return\s+to|'
+                    r'back\s+to\s+verse|revisit|re-?read|again\s+from)\b',
+                    text_lower))
+                if (not _explicit_backward
+                        and _last_presented_verse_book_chap == _ctx_key
+                        and _last_presented_verse_num > 0
+                        and int(candidate) < _last_presented_verse_num - 5):
+                    logger.info(
+                        f"🚫 CONTEXTUAL FLOOR (ML-3): {current_book} {current_chapter}:{candidate} "
+                        f"rejected — too far back (last presented v{_last_presented_verse_num}, "
+                        f"floor is v{_last_presented_verse_num - 5})"
+                    )
+                    return False
                 ref = f"{current_book} {current_chapter}:{candidate}"
                 logger.info(f"🔍 CONTEXTUAL: {ref} ({int(confidence*100)}% Acc)")
                 deliver_verse(ref, controller, bypass_cooldown=False, confidence=confidence, source="CONTEXTUAL")
@@ -2634,6 +2707,22 @@ def detect_verse_hybrid(text, controller, confidence=1.0) -> bool:
                 elif any(kw in text_lower for kw in ["വാക്യം", "വചനം", "വചന", "वचन", "पद"]):
                     is_valid = True
                 if is_valid:
+                    # Bug ML-3 fix: apply the same backward-jump floor to bare-digit path.
+                    # Bare digits are the most likely to produce spurious low verse numbers.
+                    _ctx_key2 = f"{current_book} {current_chapter}"
+                    _explicit_bwd2 = bool(re.search(
+                        r'\b(?:go(?:ing)?\s+back|let\s*[\'s]*\s*(?:go\s+)?back|return\s+to|'
+                        r'back\s+to\s+verse|revisit|re-?read|again\s+from)\b',
+                        text_lower))
+                    if (not _explicit_bwd2
+                            and _last_presented_verse_book_chap == _ctx_key2
+                            and _last_presented_verse_num > 0
+                            and int(candidate) < _last_presented_verse_num - 5):
+                        logger.info(
+                            f"🚫 CONTEXTUAL FLOOR (ML-3 bare): {current_book} {current_chapter}:{candidate} "
+                            f"rejected — too far back (last presented v{_last_presented_verse_num})"
+                        )
+                        return False
                     ref = f"{current_book} {current_chapter}:{candidate}"
                     logger.info(f"🔍 CONTEXTUAL: {ref} ({int(confidence*100)}% Acc)")
                     deliver_verse(ref, controller, bypass_cooldown=False, confidence=confidence, source="CONTEXTUAL")
@@ -2880,6 +2969,28 @@ def _detect_explicit_reference(sentence: str, controller) -> bool:
             deliver_verse(ref, controller, bypass_cooldown=True, confidence=1.0, source="FAST-PATH")
             trigger_onwards_if_needed_standalone(ref, sentence)
             return True
+
+    # Bug EN-3 fix: catch "chapter N ... [verse] X and Y" patterns where the parser
+    # either missed it or only returned a chapter-only ref.
+    # Example: "Second Corinthians chapter ten... let's read four and five"
+    # The parser returns "2 Corinthians 10" (no verse). We extract the first verse
+    # from "X and Y" using current context, then queue the second.
+    if current_book and current_chapter:
+        m_and = re.search(r'\b(?:verse[s]?\s+)?(\d+)\s+and\s+(\d+)\b', clean, re.IGNORECASE)
+        if m_and:
+            first_v  = m_and.group(1)
+            second_v = m_and.group(2)
+            ref_first = f"{current_book} {current_chapter}:{first_v}"
+            if not _reject_verse_out_of_range(ref_first):
+                logger.info(f"⚡ FAST-PATH (X-and-Y): {ref_first} (plus v{second_v} queued)")
+                deliver_verse(ref_first, controller, bypass_cooldown=True, confidence=1.0, source="FAST-PATH")
+                trigger_onwards_if_needed_standalone(ref_first, sentence)
+                # Queue the second verse so it auto-advances
+                ref_second = f"{current_book} {current_chapter}:{second_v}"
+                if not _reject_verse_out_of_range(ref_second):
+                    check_and_queue_range(clean, ref_second, controller)
+                return True
+
     return False
 
 
