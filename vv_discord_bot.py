@@ -28,8 +28,22 @@ import logging
 import urllib.parse
 import urllib.request
 
+# Force UTF-8 on Windows BEFORE logging is configured.
+# cp1252 (Windows default pipe encoding) cannot encode emoji and will crash.
+if __import__('sys').stdout and hasattr(__import__('sys').stdout, "reconfigure"):
+    try:
+        __import__('sys').stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+if __import__('sys').stderr and hasattr(__import__('sys').stderr, "reconfigure"):
+    try:
+        __import__('sys').stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 import discord
 from discord import app_commands
+from typing import Optional, Tuple
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -40,19 +54,24 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ── Config from env ───────────────────────────────────────────────────────────
-TOKEN = os.environ.get("VV_BOT_TOKEN", "").strip()
-HOST  = os.environ.get("VV_HOST", "127.0.0.1").strip()
-PORT  = int(os.environ.get("VV_PORT", "50011"))
+TOKEN    = os.environ.get("VV_BOT_TOKEN", "").strip()
+HOST     = os.environ.get("VV_HOST", "127.0.0.1").strip()
+PORT     = int(os.environ.get("VV_PORT", "50011"))
+# VV_GUILD_ID: set this to your Discord Server ID for INSTANT slash command sync.
+# Without it, commands use global sync which can take up to 1 hour to appear.
+# Get your server ID: Discord → Server Settings → enable Developer Mode → right-click server → Copy ID
+GUILD_ID = os.environ.get("VV_GUILD_ID", "").strip()
 
 if not TOKEN:
     logger.error("VV_BOT_TOKEN is not set — cannot start Discord bot.")
     sys.exit(1)
 
 BRIDGE_BASE = f"http://{HOST}:{PORT}"
+_GUILD_OBJ  = discord.Object(id=int(GUILD_ID)) if GUILD_ID else None
 
 # ── Bridge helper ─────────────────────────────────────────────────────────────
 
-def _bridge(endpoint: str, params: dict | None = None, timeout: int = 8) -> tuple[int, str]:
+def _bridge(endpoint: str, params: Optional[dict] = None, timeout: int = 8) -> Tuple[int, str]:
     """
     Call a vv_bot_bridge endpoint synchronously.
     Returns (http_status_code, body_text).
@@ -93,7 +112,7 @@ def _reply(status: int, body: str) -> str:
 @app_commands.describe(ref="Bible reference, e.g. John 3:16 or 1 Cor 13:4")
 async def cmd_verse(interaction: discord.Interaction, ref: str):
     await interaction.response.defer(ephemeral=False)
-    status, body = await asyncio.get_event_loop().run_in_executor(
+    status, body = await asyncio.get_running_loop().run_in_executor(
         None, lambda: _bridge("/goto", {"ref": ref})
     )
     await interaction.followup.send(_reply(status, body or f"Presented {ref}"))
@@ -102,7 +121,7 @@ async def cmd_verse(interaction: discord.Interaction, ref: str):
 @tree.command(name="present", description="Re-present the current verse")
 async def cmd_present(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=False)
-    status, body = await asyncio.get_event_loop().run_in_executor(
+    status, body = await asyncio.get_running_loop().run_in_executor(
         None, lambda: _bridge("/present")
     )
     await interaction.followup.send(_reply(status, body or "Presented"))
@@ -111,7 +130,7 @@ async def cmd_present(interaction: discord.Interaction):
 @tree.command(name="next", description="Go to the next verse")
 async def cmd_next(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=False)
-    status, body = await asyncio.get_event_loop().run_in_executor(
+    status, body = await asyncio.get_running_loop().run_in_executor(
         None, lambda: _bridge("/next")
     )
     await interaction.followup.send(_reply(status, body or "Next"))
@@ -120,7 +139,7 @@ async def cmd_next(interaction: discord.Interaction):
 @tree.command(name="prev", description="Go to the previous verse")
 async def cmd_prev(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=False)
-    status, body = await asyncio.get_event_loop().run_in_executor(
+    status, body = await asyncio.get_running_loop().run_in_executor(
         None, lambda: _bridge("/prev")
     )
     await interaction.followup.send(_reply(status, body or "Previous"))
@@ -129,7 +148,7 @@ async def cmd_prev(interaction: discord.Interaction):
 @tree.command(name="close", description="Close the current presentation")
 async def cmd_close(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=False)
-    status, body = await asyncio.get_event_loop().run_in_executor(
+    status, body = await asyncio.get_running_loop().run_in_executor(
         None, lambda: _bridge("/close")
     )
     await interaction.followup.send(_reply(status, body or "Closed"))
@@ -138,7 +157,7 @@ async def cmd_close(interaction: discord.Interaction):
 @tree.command(name="status", description="Check whether VerseView is connected")
 async def cmd_status(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
-    status, body = await asyncio.get_event_loop().run_in_executor(
+    status, body = await asyncio.get_running_loop().run_in_executor(
         None, lambda: _bridge("/status")
     )
     await interaction.followup.send(_reply(status, body or "Connected"), ephemeral=True)
@@ -146,10 +165,24 @@ async def cmd_status(interaction: discord.Interaction):
 
 @client.event
 async def on_ready():
-    await tree.sync()
-    logger.info(f"Discord bot ready — logged in as {client.user} (id={client.user.id})")
+    if _GUILD_OBJ:
+        # Guild sync = instant (commands appear within seconds)
+        tree.copy_global_to(guild=_GUILD_OBJ)
+        await tree.sync(guild=_GUILD_OBJ)
+        logger.info(f"Slash commands synced to guild {GUILD_ID} (instant)")
+        print(f"[OK] Slash commands synced instantly to guild {GUILD_ID}", flush=True)
+    else:
+        # Global sync can take up to 1 hour to propagate
+        await tree.sync()
+        logger.warning(
+            "Slash commands synced GLOBALLY — may take up to 1 hour to appear in Discord. "
+            "Set VV_GUILD_ID env var for instant sync."
+        )
+        print("[OK] Slash commands synced globally (may take up to 60 min to appear -- set VV_GUILD_ID for instant sync)", flush=True)
+
+    logger.info(f"Discord bot ready -- logged in as {client.user} (id={client.user.id})")
     logger.info(f"Bridge target: {BRIDGE_BASE}")
-    print(f"✅ Discord bot online as {client.user}", flush=True)
+    print("[OK] Discord bot online as " + str(client.user), flush=True)
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────

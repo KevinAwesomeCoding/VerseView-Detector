@@ -557,8 +557,9 @@ class VerseViewApp(ctk.CTk):
         )
         self.bot_token_eye_btn.grid(row=0, column=1, padx=(4, 0))
 
-        self.bot_host_entry = field_row(fields_frame, 1, "VV Host", "127.0.0.1")
-        self.bot_port_entry = field_row(fields_frame, 2, "VV Port", "12345")
+        self.bot_host_entry  = field_row(fields_frame, 1, "VV Host", "127.0.0.1")
+        self.bot_port_entry  = field_row(fields_frame, 2, "VV Port", "50011")
+        self.bot_guild_entry = field_row(fields_frame, 3, "Guild ID (optional)", "")
 
         # ── Start / Stop buttons ──────────────────────────────────────────────
         btn_row = ctk.CTkFrame(tab, fg_color="transparent")
@@ -605,6 +606,8 @@ class VerseViewApp(ctk.CTk):
         self.bot_host_entry.insert(0, s.get("vv_host", "127.0.0.1"))
         self.bot_port_entry.delete(0, "end")
         self.bot_port_entry.insert(0, s.get("vv_port", "50011"))
+        self.bot_guild_entry.delete(0, "end")
+        self.bot_guild_entry.insert(0, s.get("vv_guild_id", ""))
 
     def _save_bot_config(self):
         self._s = self._collect_settings()
@@ -665,8 +668,11 @@ class VerseViewApp(ctk.CTk):
 
         env = os.environ.copy()
         env["VV_BOT_TOKEN"] = token
+        guild_id = self.bot_guild_entry.get().strip()
         env["VV_HOST"]      = host
         env["VV_PORT"]      = port
+        if guild_id:
+            env["VV_GUILD_ID"] = guild_id
 
         try:
             self._bot_process = subprocess.Popen(
@@ -675,6 +681,8 @@ class VerseViewApp(ctk.CTk):
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 bufsize=1,
             )
         except Exception as e:
@@ -1151,6 +1159,7 @@ class VerseViewApp(ctk.CTk):
             "discord_bot_token":          self.bot_token_entry.get().strip(),
             "vv_host":                    self.bot_host_entry.get().strip(),
             "vv_port":                    self.bot_port_entry.get().strip(),
+            "vv_guild_id":                self.bot_guild_entry.get().strip(),
         }
 
 
