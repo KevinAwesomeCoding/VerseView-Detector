@@ -13,6 +13,8 @@ import sys
 
 import json
 import subprocess
+import atexit
+import signal
 import settings as cfg  # type: ignore
 import vv_streaming_master as engine  # type: ignore
 from live_points_app import LivePointsController  # type: ignore
@@ -2223,6 +2225,50 @@ class VerseViewApp(ctk.CTk):
         finally:
             self.after(1000, self._update_history_loop)
 
+    # ── EMERGENCY SAVE (abrupt quit / signal / crash) ────────────────────────
+    def _emergency_save(self):
+        """
+        Synchronous, AI-free save triggered on abrupt exit.
+        Writes raw transcript + verse history + log dump to a timestamped file.
+        Safe to call from atexit or a signal handler — no tkinter calls.
+        """
+        try:
+            transcript = (engine.full_sermon_transcript or "").strip()
+            if len(transcript) < 50:
+                return  # Nothing worth saving
+
+            notes_folder = self._get_sermon_notes_dir()
+            os.makedirs(notes_folder, exist_ok=True)
+
+            date_str  = datetime.datetime.now().strftime("%B %d %Y %H-%M-%S")
+            filename  = f"Emergency Save {date_str}.txt"
+            filepath  = os.path.join(notes_folder, filename)
+
+            history = engine.get_verse_history()
+            verse_lines = "\n".join(
+                f"  [{v.get('time', '')}] {v.get('ref', '')}" for v in history
+            ) if history else "  (none)"
+
+            # Pull raw text from log_box if still accessible
+            try:
+                log_text = self.log_box.get("1.0", "end").strip()
+            except Exception:
+                log_text = "(log unavailable)"
+
+            output = (
+                f"=== VerseView Emergency Save ===\n"
+                f"Saved: {date_str}\n"
+                f"\n--- Verses Detected ---\n{verse_lines}\n"
+                f"\n--- Raw Transcript ---\n{transcript}\n"
+                f"\n--- Session Log ---\n{log_text}\n"
+            )
+
+            with open(filepath, "w", encoding="utf-8") as f:
+                f.write(output)
+            print(f"[VerseView] Emergency save written: {filepath}")
+        except Exception as e:
+            print(f"[VerseView] Emergency save failed: {e}")
+
     def on_closing(self):
         cfg.save(self._collect_settings())
 
@@ -2273,4 +2319,20 @@ class VerseViewApp(ctk.CTk):
 if __name__ == "__main__":
     app = VerseViewApp()
     app.protocol("WM_DELETE_WINDOW", app.on_closing)
+
+    # ── Abrupt-exit safety net ────────────────────────────────────────────────
+    # atexit fires on Cmd+Q, sys.exit(), and clean interpreter shutdown.
+    # Signal handlers catch SIGTERM (kill) and SIGINT (Ctrl+C).
+    atexit.register(app._emergency_save)
+
+    def _signal_handler(sig, frame):
+        app._emergency_save()
+        raise SystemExit(0)
+
+    try:
+        signal.signal(signal.SIGTERM, _signal_handler)
+        signal.signal(signal.SIGINT,  _signal_handler)
+    except (OSError, ValueError):
+        pass  # Can't set signals in non-main thread — skip silently
+
     app.mainloop()
