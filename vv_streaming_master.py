@@ -472,6 +472,15 @@ _last_presented_time = 0.0
 # Bug 3: track last processed sentence to detect repetitions
 _last_sentence = None
 
+# ── DUAL STT GLOBALS ──────────────────────────────────────────────────────────
+DUAL_STT_ENABLED              = False
+SECONDARY_LANGUAGE            = None   # "en" | "hi" | "ml"
+SECONDARY_PARSER              = None   # parse_eng / parse_hindi / parse_ml
+SECONDARY_DEEPGRAM_LANGUAGE   = "en"
+SECONDARY_DEEPGRAM_MODEL      = "nova-3"
+SECONDARY_USE_SARVAM          = False
+full_sermon_transcript_secondary = ""  # clean secondary-only buffer
+
 _sarvam_ignore_until = 0.0
 _blocked_context_hashes = {}
 _BLOCKED_DEDUP_SECS = 30.0
@@ -660,7 +669,7 @@ async def live_points_loop():
 
 # ── SERMON SUMMARY  (Mistral → Cerebras → Groq) ──────────────────────────────
 def generate_sermon_summary():
-    global full_sermon_transcript, verses_cited, LLM_ENABLED
+    global full_sermon_transcript, full_sermon_transcript_secondary, verses_cited, LLM_ENABLED
     global groq_client, cerebras_client, mistral_client
 
     if not LLM_ENABLED or (not mistral_client and not cerebras_client and not groq_client):
@@ -673,6 +682,21 @@ def generate_sermon_summary():
     today_str = datetime.datetime.now().strftime("%B %d, %Y  ·  %I:%M %p")
 
     verse_list = "\n".join([f"- {v}" for v in verses_cited]) if verses_cited else "None detected"
+
+    # ── Dual-transcript prompt ──────────────────────────────────────────────
+    has_secondary = bool(full_sermon_transcript_secondary.strip())
+    if has_secondary:
+        transcript_section = (
+            f"PRIMARY TRANSCRIPT ({DEEPGRAM_LANGUAGE.upper() if not USE_SARVAM else 'Malayalam/translated'}):\n"
+            f"{full_sermon_transcript}\n\n"
+            f"SECONDARY TRANSCRIPT ({SECONDARY_LANGUAGE.upper() if SECONDARY_LANGUAGE else 'secondary'}):\n"
+            f"{full_sermon_transcript_secondary}\n\n"
+            "Both transcripts are from the SAME sermon captured by two parallel STT engines. "
+            "Synthesize the most accurate notes by using the best of both transcripts — "
+            "prefer whichever transcript has clearer verse references or speech for each section."
+        )
+    else:
+        transcript_section = f"Transcript:\n{full_sermon_transcript}"
 
     prompt = (
         "You are a precise sermon note-taker. Your ONLY job is to document what was ACTUALLY SAID "
@@ -708,7 +732,7 @@ def generate_sermon_summary():
         "[Direct quotes or stories the preacher used — only if they appear in the transcript]\n"
         "• \n"
         "---\n\n"
-        f"Transcript:\n{full_sermon_transcript}\n"
+        f"{transcript_section}\n"
     )
 
     try:
@@ -996,6 +1020,7 @@ def configure(
     atem_enabled=False, atem_ip="192.168.1.240", atem_key_duration=5.0,
     gui_app=None,
     bridge_ready_callback=None,
+    dual_stt_enabled=False, secondary_language=None,
 ):
     global DEEPGRAM_API_KEY, GROQ_API_KEY, GEMINI_API_KEY, CEREBRAS_API_KEY, MISTRAL_API_KEY, SARVAM_API_KEY
     global DISCORD_WEBHOOK_URL, DISCORD_LOG_WEBHOOK_URL, DISCORD_NOTES_WEBHOOK_URL
@@ -1013,6 +1038,9 @@ def configure(
     global ATEM_ENABLED, ATEM_IP, ATEM_KEY_DURATION
     global current_book, current_chapter, current_verse, _gui_app
     global BRIDGE_READY_CALLBACK
+    global DUAL_STT_ENABLED, SECONDARY_LANGUAGE, SECONDARY_PARSER
+    global SECONDARY_DEEPGRAM_LANGUAGE, SECONDARY_DEEPGRAM_MODEL, SECONDARY_USE_SARVAM
+    global full_sermon_transcript_secondary
     WORSHIP_MODE = False
     _verse_history.clear()
     # Reset context so stale chapter from previous session never bleeds in
@@ -1159,6 +1187,36 @@ def configure(
         DEEPGRAM_MODEL         = "nova-3"
         PRIMARY_PARSER         = parse_eng
         normalize_numbers_only = norm_eng
+
+    # ── Dual STT — secondary stream configuration ──
+    DUAL_STT_ENABLED = dual_stt_enabled
+    SECONDARY_LANGUAGE = secondary_language
+    full_sermon_transcript_secondary = ""
+    if dual_stt_enabled and secondary_language:
+        if secondary_language == "en":
+            SECONDARY_USE_SARVAM           = False
+            SECONDARY_DEEPGRAM_LANGUAGE    = "en"
+            SECONDARY_DEEPGRAM_MODEL       = "nova-3"
+            SECONDARY_PARSER               = parse_eng
+        elif secondary_language == "hi":
+            SECONDARY_USE_SARVAM           = False
+            SECONDARY_DEEPGRAM_LANGUAGE    = "hi"
+            SECONDARY_DEEPGRAM_MODEL       = "nova-3"
+            SECONDARY_PARSER               = parse_hindi
+        elif secondary_language == "ml":
+            SECONDARY_USE_SARVAM           = True
+            SECONDARY_DEEPGRAM_LANGUAGE    = "en"   # unused — Sarvam handles ml
+            SECONDARY_DEEPGRAM_MODEL       = "nova-3"
+            SECONDARY_PARSER               = parse_ml
+        else:
+            SECONDARY_USE_SARVAM           = False
+            SECONDARY_DEEPGRAM_LANGUAGE    = "multi"
+            SECONDARY_DEEPGRAM_MODEL       = "nova-3"
+            SECONDARY_PARSER               = parse_eng
+        logger.info(f"🌐 Dual STT          : ON  (secondary={secondary_language})")
+    else:
+        SECONDARY_USE_SARVAM = False
+        SECONDARY_PARSER     = None
 
 
 # ── CONTEXT TRACKING ─────────────────────────────────────────────────────────
@@ -1851,6 +1909,7 @@ class VerseController:
         self.history       = {}
         self.pending_verse = None
         self.match_count   = 0
+        self._send_lock    = threading.Lock()  # protects send_verse against timer-thread races
 
     def connect(self):
         try:
@@ -1945,182 +2004,91 @@ class VerseController:
             logger.debug(f"Could not click close button (maybe already closed): {e}")
 
     def send_verse(self, ref, bypass_cooldown=False, confidence=1.0, source="UNKNOWN"):
-        global current_book, current_chapter, current_verse, verses_cited
-        global _session_verse_high_water
-        # Worship Mode is the master gate — detection ran and logged above, but
-        # nothing gets sent to the display (Selenium / VerseView) while worship is active.
-        if WORSHIP_MODE:
-            logger.info(f"🎵 [WORSHIP MODE] Detected but suppressed: {ref}")
-            return False
-        now = time.time()
-        logger.debug(f"VerseController.send_verse: ref={ref}, bypass={bypass_cooldown}")
+        with self._send_lock:
+            global current_book, current_chapter, current_verse, verses_cited
+            global _session_verse_high_water
+            # Worship Mode is the master gate — detection ran and logged above, but
+            # nothing gets sent to the display (Selenium / VerseView) while worship is active.
+            if WORSHIP_MODE:
+                logger.info(f"🎵 [WORSHIP MODE] Detected but suppressed: {ref}")
+                return False
+            now = time.time()
+            logger.debug(f"VerseController.send_verse: ref={ref}, bypass={bypass_cooldown}")
 
-        # ── CHAPTER-ONLY REF: update context + chapter browser, do NOT present ──
-        # When the speaker says "Matthew chapter 5" with no verse, we set context
-        # so the chapter browser auto-reloads and the parser has the right book/chapter.
-        # We do NOT send to Selenium — VerseView would default to verse 1 which is wrong.
-        if ":" not in ref:
-            _parts = ref.split()
-            if len(_parts) >= 2:
-                _hw = _session_verse_high_water.get(ref)
-                if _hw:
-                    # We've already been tracking verses in this chapter this session —
-                    # upgrade to the last known verse so display resumes correctly.
-                    # Validate first — if the upgraded ref is out of range, skip display
-                    # rather than sending a bad ref that will cause the browser to alert.
-                    _upgraded = f"{ref}:{_hw}"
-                    if _reject_verse_out_of_range(_upgraded):
-                        logger.warning(
-                            f"⚠️ Skipping chapter resume — hw verse {_hw} is out of range for {ref}"
-                        )
+            # ── CHAPTER-ONLY REF: update context + chapter browser, do NOT present ──
+            # When the speaker says "Matthew chapter 5" with no verse, we set context
+            # so the chapter browser auto-reloads and the parser has the right book/chapter.
+            # We do NOT send to Selenium — VerseView would default to verse 1 which is wrong.
+            if ":" not in ref:
+                _parts = ref.split()
+                if len(_parts) >= 2:
+                    _hw = _session_verse_high_water.get(ref)
+                    if _hw:
+                        # We've already been tracking verses in this chapter this session —
+                        # upgrade to the last known verse so display resumes correctly.
+                        # Validate first — if the upgraded ref is out of range, skip display
+                        # rather than sending a bad ref that will cause the browser to alert.
+                        _upgraded = f"{ref}:{_hw}"
+                        if _reject_verse_out_of_range(_upgraded):
+                            logger.warning(
+                                f"⚠️ Skipping chapter resume — hw verse {_hw} is out of range for {ref}"
+                            )
+                            new_book    = " ".join(_parts[:-1])
+                            new_chapter = _parts[-1]
+                            current_book    = new_book
+                            current_chapter = new_chapter
+                            current_verse   = None
+                            return True
+                        ref = _upgraded
+                        logger.info(f"📍 Resuming: chapter ref → {ref} (last known verse this session)")
+                    else:
+                        # Pure chapter-only: just update context, skip display
                         new_book    = " ".join(_parts[:-1])
                         new_chapter = _parts[-1]
                         current_book    = new_book
                         current_chapter = new_chapter
                         current_verse   = None
+                        logger.info(f"📌 Chapter context set (no display): {new_book} {new_chapter}")
                         return True
-                    ref = _upgraded
-                    logger.info(f"📍 Resuming: chapter ref → {ref} (last known verse this session)")
+
+            # ── MANUAL CONFIRMATION ──
+            if confidence < CONFIDENCE_THRESHOLD and not bypass_cooldown:
+                if REQUIRE_MANUAL_CONFIRM and CONFIRM_CALLBACK:
+                    def _ask_thread():
+                        logger.info(
+                            f"🤔 Holding for manual confirmation: {ref} "
+                            f"(Confidence: {int(confidence*100)}%)"
+                        )
+                        if CONFIRM_CALLBACK(ref, confidence):
+                            logger.info(f"✅ User manually approved: {ref}")
+                            self.send_verse(ref, bypass_cooldown=True, confidence=1.0, source=source)
+                        else:
+                            logger.info(f"❌ User rejected: {ref}")
+                    threading.Thread(target=_ask_thread, daemon=True).start()
+                    return False
                 else:
-                    # Pure chapter-only: just update context, skip display
-                    new_book    = " ".join(_parts[:-1])
-                    new_chapter = _parts[-1]
-                    current_book    = new_book
-                    current_chapter = new_chapter
-                    current_verse   = None
-                    logger.info(f"📌 Chapter context set (no display): {new_book} {new_chapter}")
-                    return True
-
-        # ── MANUAL CONFIRMATION ──
-        if confidence < CONFIDENCE_THRESHOLD and not bypass_cooldown:
-            if REQUIRE_MANUAL_CONFIRM and CONFIRM_CALLBACK:
-                def _ask_thread():
-                    logger.info(
-                        f"🤔 Holding for manual confirmation: {ref} "
-                        f"(Confidence: {int(confidence*100)}%)"
+                    logger.warning(
+                        f"⚠️ Blocked: {ref} (Confidence {int(confidence*100)}% "
+                        f"< Threshold {int(CONFIDENCE_THRESHOLD*100)}%)"
                     )
-                    if CONFIRM_CALLBACK(ref, confidence):
-                        logger.info(f"✅ User manually approved: {ref}")
-                        self.send_verse(ref, bypass_cooldown=True, confidence=1.0, source=source)
-                    else:
-                        logger.info(f"❌ User rejected: {ref}")
-                threading.Thread(target=_ask_thread, daemon=True).start()
-                return False
-            else:
-                logger.warning(
-                    f"⚠️ Blocked: {ref} (Confidence {int(confidence*100)}% "
-                    f"< Threshold {int(CONFIDENCE_THRESHOLD*100)}%)"
-                )
-                return False
-
-        # ── VERIFICATION (hear twice) ──
-        if REQUIRE_VERIFY and not bypass_cooldown:
-            if self.pending_verse == ref:
-                self.match_count += 1
-            else:
-                self.pending_verse = ref
-                self.match_count   = 1
-                logger.info(f"⏳ Verification pending for: {ref} (Heard once...)")
-                return False
-            if self.match_count < 2:
-                return False
-            self.pending_verse = None
-            self.match_count   = 0
-
-        # Bug 2: dedup same book+chapter within 10 seconds (unless verse changed)
-        global _last_presented_book_chapter, _last_presented_time
-        parts = ref.split()
-        if len(parts) >= 2:
-            book_chapter_key = " ".join(parts[:-1])
-            if ":" in parts[-1]:
-                book_chapter_key += " " + parts[-1].split(":")[0]
-            else:
-                book_chapter_key += " " + parts[-1]
-            
-            if (_last_presented_book_chapter == book_chapter_key and 
-                (now - _last_presented_time) < 10):
-                # Update the time even when blocking to prevent infinite blocking
-                _last_presented_time = now
-                logger.debug(f"Skipped duplicate chapter within 10s: {ref}")
-                return False
-
-        # Always update the time when presenting
-        _last_presented_book_chapter = book_chapter_key
-        _last_presented_time = now
-
-        # ── COOLDOWNS ──
-        # Bug 3: 20-second deduplication for exact verse matches (always applies)
-        if ref in self.history:
-            elapsed = now - self.history[ref]
-            if elapsed < 20:
-                logger.info(f"🔁 Suppressed duplicate: {ref} (within 20s window, {elapsed:.1f}s elapsed)")
-                return False
-        if ref in self.history and (now - self.history[ref]) < DEDUP_WINDOW:
-            logger.debug(f"Skipped duplicate: {ref}")
-            return False
-        if not bypass_cooldown and self.last_sent and (now - self.last_time) < COOLDOWN:
-            logger.debug(f"Cooldown active: {ref}")
-            return False
-
-        # ── SEND ──
-        try:
-            if not self.driver:
-                if not self.connect():
                     return False
 
-            # Dismiss any stale alert left open by a previous bad send (e.g. a
-            # chapter-only ref that the website rejected with an alert dialog).
-            # If we don't clear it first, the next execute_script throws
-            # "unexpected alert open" and the real verse never gets through.
-            try:
-                from selenium.webdriver.support.ui import WebDriverWait
-                from selenium.webdriver.support import expected_conditions as EC
-                alert = self.driver.switch_to.alert
-                alert_text = alert.text
-                logger.warning(f"⚠️ Stale browser alert detected — dismissing before send: \"{alert_text}\"")
-                alert.dismiss()
-            except Exception:
-                pass  # No alert present — proceed normally
-
-            self.driver.execute_script("arguments[0].value = arguments[1];", self.box, ref)
-            self.driver.execute_script("arguments[0].click();", self.btn)
-            logger.info(f"✅ PRESENTED: {ref}")
-            _trigger_atem_keyer()
-
-            _verse_history.append({
-                "ref": ref,
-                "time": _dt.datetime.now().strftime("%H:%M:%S"),
-                "layer": source
-            })
-
-            if ref not in verses_cited:
-                verses_cited.append(ref)
-
-            send_to_discord(ref)
-
-            parts = ref.split()
-            if len(parts) >= 2:
-                old_book_chapter = f"{current_book} {current_chapter}" if current_book and current_chapter else None
-                if ":" in parts[-1]:
-                    current_book    = " ".join(parts[:-1])
-                    current_chapter, current_verse = parts[-1].split(":")
+            # ── VERIFICATION (hear twice) ──
+            if REQUIRE_VERIFY and not bypass_cooldown:
+                if self.pending_verse == ref:
+                    self.match_count += 1
                 else:
-                    current_book    = " ".join(parts[:-1])
-                    current_chapter = parts[-1]
-                    current_verse   = None
-                
-            # Bug 1: Reset range latch when passage changes
-                new_book_chapter = f"{current_book} {current_chapter}"
-                if old_book_chapter != new_book_chapter:
-                    global _range_latch_active, _range_latch_ref
-                    _range_latch_active = False
-                    _range_latch_ref = None
+                    self.pending_verse = ref
+                    self.match_count   = 1
+                    logger.info(f"⏳ Verification pending for: {ref} (Heard once...)")
+                    return False
+                if self.match_count < 2:
+                    return False
+                self.pending_verse = None
+                self.match_count   = 0
 
-            self.history[ref] = now
-            self.last_sent    = ref
-            self.last_time    = now
-            
-            # Bug 2: update book+chapter tracking
+            # Bug 2: dedup same book+chapter within 10 seconds (unless verse changed)
+            global _last_presented_book_chapter, _last_presented_time
             parts = ref.split()
             if len(parts) >= 2:
                 book_chapter_key = " ".join(parts[:-1])
@@ -2128,37 +2096,129 @@ class VerseController:
                     book_chapter_key += " " + parts[-1].split(":")[0]
                 else:
                     book_chapter_key += " " + parts[-1]
-                _last_presented_book_chapter = book_chapter_key
-                _last_presented_time = now
+            
+                if (_last_presented_book_chapter == book_chapter_key and 
+                    (now - _last_presented_time) < 10):
+                    # Update the time even when blocking to prevent infinite blocking
+                    _last_presented_time = now
+                    logger.debug(f"Skipped duplicate chapter within 10s: {ref}")
+                    return False
 
-            # Bug 4: Update high-water mark for the chapter whenever a verse-level ref is sent
-            if ":" in ref:
-                _hwp = ref.split()
-                if len(_hwp) >= 2 and ":" in _hwp[-1]:
-                    _chap_key   = " ".join(_hwp[:-1]) + " " + _hwp[-1].split(":")[0]
-                    _verse_num  = int(_hwp[-1].split(":")[1])
-                    if _verse_num > _session_verse_high_water.get(_chap_key, 0):
-                        _session_verse_high_water[_chap_key] = _verse_num
-                    # Bug ML-3 fix: always track last-presented verse position (not just
-                    # the high-water). This lets contextual detection reject backward jumps
-                    # even when the sermon re-reads a lower verse that was the chapter max.
-                    global _last_presented_verse_num, _last_presented_verse_book_chap
-                    _last_presented_verse_num       = _verse_num
-                    _last_presented_verse_book_chap = _chap_key
+            # Always update the time when presenting
+            _last_presented_book_chapter = book_chapter_key
+            _last_presented_time = now
 
-            if len(self.history) > 20:
-                oldest = min(self.history.items(), key=lambda x: x[1])
-                del self.history[oldest[0]]
+            # ── COOLDOWNS ──
+            # Bug 3: 20-second deduplication for exact verse matches (always applies)
+            if ref in self.history:
+                elapsed = now - self.history[ref]
+                if elapsed < 20:
+                    logger.info(f"🔁 Suppressed duplicate: {ref} (within 20s window, {elapsed:.1f}s elapsed)")
+                    return False
+            if ref in self.history and (now - self.history[ref]) < DEDUP_WINDOW:
+                logger.debug(f"Skipped duplicate: {ref}")
+                return False
+            if not bypass_cooldown and self.last_sent and (now - self.last_time) < COOLDOWN:
+                logger.debug(f"Cooldown active: {ref}")
+                return False
 
-            return True
-        except Exception as e:
-            logger.error(f"Failed to send {ref}: {e}")
+            # ── SEND ──
             try:
-                self.driver.quit()
-            except Exception:
-                pass
-            self.driver = None
-            return False
+                if not self.driver:
+                    if not self.connect():
+                        return False
+
+                # Dismiss any stale alert left open by a previous bad send (e.g. a
+                # chapter-only ref that the website rejected with an alert dialog).
+                # If we don't clear it first, the next execute_script throws
+                # "unexpected alert open" and the real verse never gets through.
+                try:
+                    from selenium.webdriver.support.ui import WebDriverWait
+                    from selenium.webdriver.support import expected_conditions as EC
+                    alert = self.driver.switch_to.alert
+                    alert_text = alert.text
+                    logger.warning(f"⚠️ Stale browser alert detected — dismissing before send: \"{alert_text}\"")
+                    alert.dismiss()
+                except Exception:
+                    pass  # No alert present — proceed normally
+
+                self.driver.execute_script("arguments[0].value = arguments[1];", self.box, ref)
+                self.driver.execute_script("arguments[0].click();", self.btn)
+                logger.info(f"✅ PRESENTED: {ref}")
+                _trigger_atem_keyer()
+
+                _verse_history.append({
+                    "ref": ref,
+                    "time": _dt.datetime.now().strftime("%H:%M:%S"),
+                    "layer": source
+                })
+
+                if ref not in verses_cited:
+                    verses_cited.append(ref)
+
+                send_to_discord(ref)
+
+                parts = ref.split()
+                if len(parts) >= 2:
+                    old_book_chapter = f"{current_book} {current_chapter}" if current_book and current_chapter else None
+                    if ":" in parts[-1]:
+                        current_book    = " ".join(parts[:-1])
+                        current_chapter, current_verse = parts[-1].split(":")
+                    else:
+                        current_book    = " ".join(parts[:-1])
+                        current_chapter = parts[-1]
+                        current_verse   = None
+                
+                # Bug 1: Reset range latch when passage changes
+                    new_book_chapter = f"{current_book} {current_chapter}"
+                    if old_book_chapter != new_book_chapter:
+                        global _range_latch_active, _range_latch_ref
+                        _range_latch_active = False
+                        _range_latch_ref = None
+
+                self.history[ref] = now
+                self.last_sent    = ref
+                self.last_time    = now
+            
+                # Bug 2: update book+chapter tracking
+                parts = ref.split()
+                if len(parts) >= 2:
+                    book_chapter_key = " ".join(parts[:-1])
+                    if ":" in parts[-1]:
+                        book_chapter_key += " " + parts[-1].split(":")[0]
+                    else:
+                        book_chapter_key += " " + parts[-1]
+                    _last_presented_book_chapter = book_chapter_key
+                    _last_presented_time = now
+
+                # Bug 4: Update high-water mark for the chapter whenever a verse-level ref is sent
+                if ":" in ref:
+                    _hwp = ref.split()
+                    if len(_hwp) >= 2 and ":" in _hwp[-1]:
+                        _chap_key   = " ".join(_hwp[:-1]) + " " + _hwp[-1].split(":")[0]
+                        _verse_num  = int(_hwp[-1].split(":")[1])
+                        if _verse_num > _session_verse_high_water.get(_chap_key, 0):
+                            _session_verse_high_water[_chap_key] = _verse_num
+                        # Bug ML-3 fix: always track last-presented verse position (not just
+                        # the high-water). This lets contextual detection reject backward jumps
+                        # even when the sermon re-reads a lower verse that was the chapter max.
+                        global _last_presented_verse_num, _last_presented_verse_book_chap
+                        _last_presented_verse_num       = _verse_num
+                        _last_presented_verse_book_chap = _chap_key
+
+                if len(self.history) > 20:
+                    oldest = min(self.history.items(), key=lambda x: x[1])
+                    del self.history[oldest[0]]
+
+                return True
+            except Exception as e:
+                logger.error(f"Failed to send {ref}: {e}")
+                try:
+                    self.driver.quit()
+                except Exception:
+                    pass
+                self.driver = None
+                return False
 
     def cleanup(self):
         if self.driver:
@@ -2380,7 +2440,7 @@ def _is_john_surname(text: str) -> bool:
     else:
         controller.send_verse(ref, bypass_cooldown=bypass_cooldown, confidence=confidence, source=source)
 
-def detect_verse_hybrid(text, controller, confidence=1.0) -> bool:
+def detect_verse_hybrid(text, controller, confidence=1.0, parser=None) -> bool:
     # NOTE: WORSHIP_MODE does NOT bail here — detection runs fully for debug logging.
     # The display gate is inside send_verse / VerseController.send_verse.
     global current_book, current_chapter, current_verse, _last_explicit_ref_time
@@ -2521,7 +2581,8 @@ def detect_verse_hybrid(text, controller, confidence=1.0) -> bool:
 
         # Bug Fix 2B: strip ordinal-occasion phrases before re-parsing
         text_for_parser = _strip_ordinal_occasions(text)
-        refs = [] if is_multi_verse_list else PRIMARY_PARSER(text_for_parser)
+        _active_parser = parser or PRIMARY_PARSER
+        refs = [] if is_multi_verse_list else _active_parser(text_for_parser)
         if refs:
             verse      = refs[0]
             is_blocked = False
@@ -2592,7 +2653,7 @@ def detect_verse_hybrid(text, controller, confidence=1.0) -> bool:
                     book_kw_end = m_person.end(1)
                     text_without_name = text[:book_kw_start] + text[book_kw_end:]
                     
-                    if verse not in PRIMARY_PARSER(text_without_name):
+                    if verse not in _active_parser(text_without_name):
                         logger.info(f"🚫 BLOCKED Layer 1 False Positive: {verse} (Person Name Prefix: '{m_person.group(0).strip()}')")
                         is_blocked = True
                         break
@@ -3069,7 +3130,7 @@ def _detect_from_translation(english_text: str, controller) -> bool:
     return False
 
 
-def _process_transcript_blob(sentence: str, partial_context_ref: list, controller):
+def _process_transcript_blob(sentence: str, partial_context_ref: list, controller, parser=None):
     # NOTE: WORSHIP_MODE does NOT bail here — detection runs fully for debug logging.
     # The display gate is inside send_verse / VerseController.send_verse.
     # Bug 5: Self-correction detector — if the speaker says 'sorry' / 'I mean' / 'I meant',
@@ -3098,7 +3159,7 @@ def _process_transcript_blob(sentence: str, partial_context_ref: list, controlle
             break
         check_verse_queue(part, controller)
         partial_context += " " + part
-        found = detect_verse_hybrid(partial_context.strip(), controller, confidence=1.0)
+        found = detect_verse_hybrid(partial_context.strip(), controller, confidence=1.0, parser=parser)
         if found:
             partial_context = ""
             break
@@ -3110,10 +3171,22 @@ def _process_transcript_blob(sentence: str, partial_context_ref: list, controlle
 
 
 # ── DEEPGRAM STREAMING ────────────────────────────────────────────────────────
-async def stream_audio(controller):
-    global full_sermon_transcript
+async def stream_audio(controller, is_secondary=False):
+    global full_sermon_transcript, full_sermon_transcript_secondary
     import websockets
     import json
+
+    # Resolve which config to use based on primary vs secondary
+    if is_secondary:
+        _lang    = SECONDARY_DEEPGRAM_LANGUAGE
+        _model   = SECONDARY_DEEPGRAM_MODEL
+        _parser  = SECONDARY_PARSER
+        _tag     = "[SEC]"
+    else:
+        _lang    = DEEPGRAM_LANGUAGE
+        _model   = DEEPGRAM_MODEL
+        _parser  = None   # None → detect_verse_hybrid uses PRIMARY_PARSER
+        _tag     = "[PRI]"
 
     partial_context = [""]
 
@@ -3152,12 +3225,12 @@ async def stream_audio(controller):
     ]
     _kw_params = "".join(
         f"&keyterm={kw}" for kw in _BIBLE_KEYWORDS
-    ) if DEEPGRAM_LANGUAGE == "hi" else ""
+    ) if _lang == "hi" else ""
 
     url = (
         f"wss://api.deepgram.com/v1/listen"
-        f"?language={DEEPGRAM_LANGUAGE}"
-        f"&model={DEEPGRAM_MODEL}"
+        f"?language={_lang}"
+        f"&model={_model}"
         f"&punctuate=true"
         f"&smart_format=false"
         f"&interim_results=true"
@@ -3175,8 +3248,8 @@ async def stream_audio(controller):
 
     try:
         async with websockets.connect(url, additional_headers=headers) as ws:
-            logger.info(f"🎤 Language: {DEEPGRAM_LANGUAGE.upper()} | Model: {DEEPGRAM_MODEL.upper()}")
-            logger.info("Connected to Deepgram WebSocket")
+            logger.info(f"🎤 {_tag} Language: {_lang.upper()} | Model: {_model.upper()}")
+            logger.info(f"Connected to Deepgram WebSocket {_tag}")
             logger.info("Press Stop to end")
 
             async def send_audio():
@@ -3190,7 +3263,7 @@ async def stream_audio(controller):
                     logger.error(f"Send error: {e}")
 
             async def recv_transcripts():
-                global full_sermon_transcript, _last_transcript_time
+                global full_sermon_transcript, full_sermon_transcript_secondary, _last_transcript_time
                 try:
                     async for msg in ws:
                         try:
@@ -3226,24 +3299,27 @@ async def stream_audio(controller):
                                         else:
                                             break
                                     if repeat_count > 3:
-                                        logger.info(f"📝 {phrase}... (repeated {repeat_count}x, collapsed)")
+                                        logger.info(f"📝 {_tag} {phrase}... (repeated {repeat_count}x, collapsed)")
                                         logger.warning(f"⚠️ Transcript repetition detected and collapsed")
                                         sentence = phrase + "..."
                                         collapsed = True
                                         break
-                                
+
                                 if not collapsed:
-                                    logger.info(f"📝 {sentence}")
-                                
+                                    logger.info(f"📝 {_tag} {sentence}")
+
+                                # Append to the appropriate transcript buffer
                                 full_sermon_transcript += " " + sentence.strip()
+                                if is_secondary:
+                                    full_sermon_transcript_secondary += " " + sentence.strip()
                                 _last_transcript_time = time.time()  # Feature 6
-                                _process_transcript_blob(sentence, partial_context, controller)
+                                _process_transcript_blob(sentence, partial_context, controller, parser=_parser)
                         except Exception as e:
-                            logger.error(f"Recv error: {e}")
+                            logger.error(f"Recv error {_tag}: {e}")
                 except asyncio.CancelledError:
                     pass
                 except Exception as e:
-                    logger.warning(f"WebSocket closed: {e}")
+                    logger.warning(f"WebSocket closed {_tag}: {e}")
 
             sender   = asyncio.create_task(send_audio())
             receiver = asyncio.create_task(recv_transcripts())
@@ -3293,11 +3369,14 @@ async def stream_audio(controller):
 
 
 # ── SARVAM STREAMING ──────────────────────────────────────────────────────────
-async def stream_audio_sarvam(controller):
-    global full_sermon_transcript
+async def stream_audio_sarvam(controller, is_secondary=False):
+    global full_sermon_transcript, full_sermon_transcript_secondary
     import base64
     from sarvamai import AsyncSarvamAI
     import pyaudio
+
+    _parser = SECONDARY_PARSER if is_secondary else None
+    _tag    = "[SEC-ML]" if is_secondary else "[PRI-ML]"
 
     audio  = pyaudio.PyAudio()
     stream = None
@@ -3361,7 +3440,7 @@ async def stream_audio_sarvam(controller):
                             pass
 
                     async def recv_transcripts():
-                        global full_sermon_transcript, _last_transcript_time
+                        global full_sermon_transcript, full_sermon_transcript_secondary, _last_transcript_time
                         try:
                             async for message in ws:
                                 try:
@@ -3389,18 +3468,20 @@ async def stream_audio_sarvam(controller):
                                     english_text = translate_to_english(sentence)
                                     display_text = malayalam_text if show_malayalam_raw else english_text
                                     
-                                    logger.info(f"📝 {display_text}")
+                                    logger.info(f"📝 {_tag} {display_text}")
                                     if show_malayalam_raw and english_text != malayalam_text:
-                                        logger.info(f"🔤 {english_text}")
+                                        logger.info(f"🔤 {_tag} {english_text}")
 
                                     check_verse_queue(english_text, controller)
                                     full_sermon_transcript += " " + english_text.strip()
+                                    if is_secondary:
+                                        full_sermon_transcript_secondary += " " + english_text.strip()
                                     _last_transcript_time = time.time()
                                     # Bug Fix 3A: Parse the original transcript (which preserves
                                     # English book names the preacher actually said) rather than
                                     # Sarvam's English translation, which can hallucinate names
                                     # like "John the Baptist" from Malayalam context words.
-                                    _process_transcript_blob(malayalam_text, partial_context, controller)
+                                    _process_transcript_blob(malayalam_text, partial_context, controller, parser=_parser)
                                     # Bug 1 Fix: Also detect colon-notation references that only
                                     # appear in the auto-translation (e.g. "Matthew 3:5", "John 12:27").
                                     # _detect_from_translation uses parse_eng and requires a colon
@@ -3408,12 +3489,12 @@ async def stream_audio_sarvam(controller):
                                     _detect_from_translation(english_text, controller)
                                         
                                 except Exception as e:
-                                    logger.error(f"Sarvam message processing error: {e}")
+                                    logger.error(f"Sarvam message processing error {_tag}: {e}")
                         except asyncio.CancelledError:
                             pass
                         except Exception as e:
                             if not stop_event.is_set():
-                                logger.warning(f"Sarvam session ended, reconnecting: {e}")
+                                logger.warning(f"Sarvam session ended {_tag}, reconnecting: {e}")
 
                     sender   = asyncio.create_task(send_audio())
                     pinger   = asyncio.create_task(keepalive())
@@ -3542,10 +3623,31 @@ async def main():
         points_task   = asyncio.create_task(live_points_loop())
         watchdog_task = asyncio.create_task(_silence_watchdog())
 
+        # ── Primary stream task ───────────────────────────────────────────────
         if USE_SARVAM:
-            await stream_audio_sarvam(_controller)
+            primary_task = asyncio.create_task(stream_audio_sarvam(_controller, is_secondary=False))
         else:
-            await stream_audio(_controller)
+            primary_task = asyncio.create_task(stream_audio(_controller, is_secondary=False))
+
+        # ── Optional secondary stream task ────────────────────────────────────
+        secondary_task = None
+        if DUAL_STT_ENABLED and SECONDARY_LANGUAGE:
+            if SECONDARY_USE_SARVAM:
+                secondary_task = asyncio.create_task(stream_audio_sarvam(_controller, is_secondary=True))
+            else:
+                secondary_task = asyncio.create_task(stream_audio(_controller, is_secondary=True))
+            logger.info(f"🌐 Secondary STT stream started (lang={SECONDARY_LANGUAGE})")
+
+        # Wait for stop signal, then cancel all stream tasks
+        await stop_event.wait()
+        primary_task.cancel()
+        if secondary_task:
+            secondary_task.cancel()
+
+        tasks_to_gather = [primary_task]
+        if secondary_task:
+            tasks_to_gather.append(secondary_task)
+        await asyncio.gather(*tasks_to_gather, return_exceptions=True)
     finally:
         # BUG 2: Set shutdown flag FIRST so background threads can see it and exit
         _shutdown_flag.set()

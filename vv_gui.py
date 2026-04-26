@@ -831,6 +831,32 @@ class VerseViewApp(ctk.CTk):
         )
         self.atem_test_btn.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(6, 2))
 
+        # ── Dual STT Mode ──
+        o_sep("🌐 Dual STT Mode")
+
+        self.dual_stt_var = ctk.BooleanVar(value=False)
+        ctk.CTkCheckBox(f, text="Enable Dual STT (run a second STT stream in parallel)",
+                        variable=self.dual_stt_var,
+                        command=self._on_dual_stt_toggle).grid(
+            row=r, column=0, sticky="w", padx=10, pady=(0, 4))
+        r += 1
+
+        sec_sub = ctk.CTkFrame(f, fg_color="transparent")
+        sec_sub.grid(row=r, column=0, sticky="ew", padx=10, pady=(0, 8))
+        sec_sub.grid_columnconfigure(1, weight=1)
+        r += 1
+
+        ctk.CTkLabel(sec_sub, text="Secondary Language", anchor="w", width=130).grid(
+            row=0, column=0, padx=(0, 6), pady=2, sticky="w")
+        self.sec_lang_var = ctk.StringVar(value="English (Nova-3)")
+        self.sec_lang_menu = ctk.CTkOptionMenu(
+            sec_sub,
+            variable=self.sec_lang_var,
+            values=["English (Nova-3)", "Malayalam (Sarvam AI)", "Hindi (Nova-3)"],
+            state="disabled",
+        )
+        self.sec_lang_menu.grid(row=0, column=1, sticky="ew", pady=2)
+
         # ── Panic keybind ──
         o_sep("Panic Keybind")
         self.panic_var = ctk.StringVar(value="esc")
@@ -850,6 +876,11 @@ class VerseViewApp(ctk.CTk):
             ).grid(row=r, column=0, sticky="ew", padx=10, pady=(0, 8))
         r += 1
 
+
+    def _on_dual_stt_toggle(self):
+        """Enable/disable the secondary language dropdown based on the Dual STT checkbox."""
+        state = "normal" if self.dual_stt_var.get() else "disabled"
+        self.sec_lang_menu.configure(state=state)
 
     def _toggle_options(self):
         self._opts_open = not self._opts_open
@@ -1046,6 +1077,15 @@ class VerseViewApp(ctk.CTk):
         self.auto_start_var.set(s.get("auto_start", False))
         self.smart_schedule_var.set(s.get("smart_schedule", False))
 
+        # Dual STT
+        saved_dual = s.get("dual_stt_enabled", False)
+        self.dual_stt_var.set(saved_dual)
+        saved_sec_lang = s.get("secondary_language")
+        if saved_sec_lang:
+            lang_map = {"en": "English (Nova-3)", "ml": "Malayalam (Sarvam AI)", "hi": "Hindi (Nova-3)"}
+            self.sec_lang_var.set(lang_map.get(saved_sec_lang, "English (Nova-3)"))
+        self.sec_lang_menu.configure(state="normal" if saved_dual else "disabled")
+
         saved_ml_raw = s.get("show_malayalam_raw", False)
         self.ml_raw_var.set(saved_ml_raw)
         engine.show_malayalam_raw = saved_ml_raw
@@ -1131,6 +1171,8 @@ class VerseViewApp(ctk.CTk):
             "smart_schedule":             self.smart_schedule_var.get(),
             "show_malayalam_raw":         self.ml_raw_var.get(),
             "panic_key":                  self.panic_var.get(),
+            "dual_stt_enabled":           self.dual_stt_var.get(),
+            "secondary_language":         self._sec_lang_code(),
             "live_points_prompt":         self.live_app.get_prompt(),
             "live_points_llm_enabled":    self.live_app.get_live_llm_enabled() if hasattr(self.live_app, "get_live_llm_enabled") else False,
             "rate":                       self._safe_int(self.rate_entry,      16000),
@@ -1367,6 +1409,16 @@ class VerseViewApp(ctk.CTk):
             "Multi (Nova-2)":        "multi",
         }.get(self.lang_var.get(), "en")
 
+    def _sec_lang_code(self) -> str | None:
+        """Return the secondary language code, or None if Dual STT is disabled."""
+        if not self.dual_stt_var.get():
+            return None
+        return {
+            "English (Nova-3)":      "en",
+            "Malayalam (Sarvam AI)": "ml",
+            "Hindi (Nova-3)":        "hi",
+        }.get(self.sec_lang_var.get(), "en")
+
 
     def _mic_index(self) -> int:
         return self.mic_map.get(self.mic_var.get(), 0)
@@ -1461,6 +1513,13 @@ class VerseViewApp(ctk.CTk):
                 missing.append("Deepgram API Key")
             if not s["sarvam_api_key"] and self._lang_code() == "ml":
                 missing.append("Sarvam API Key")
+            # Dual STT key validation
+            if s.get("dual_stt_enabled") and s.get("secondary_language"):
+                sec = s["secondary_language"]
+                if sec in ("en", "hi") and not s["deepgram_api_key"]:
+                    missing.append("Deepgram API Key (required for secondary English/Hindi stream)")
+                if sec == "ml" and not s["sarvam_api_key"]:
+                    missing.append("Sarvam API Key (required for secondary Malayalam stream)")
             if missing:
                 mb.showwarning("Missing Keys", f"Please enter in Advanced Settings:\n\n{chr(10).join(missing)}")
                 self._append_log(f"⚠️ Missing keys: {', '.join(missing)}")
@@ -1505,6 +1564,8 @@ class VerseViewApp(ctk.CTk):
                 atem_key_duration          = s.get("atem_key_duration", 5.0),
                 gui_app                    = self,
                 bridge_ready_callback      = self._on_bridge_ready,
+                dual_stt_enabled           = s.get("dual_stt_enabled", False),
+                secondary_language         = s.get("secondary_language"),
             )
 
 
