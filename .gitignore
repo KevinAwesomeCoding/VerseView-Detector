@@ -21,3 +21,6 @@ debug.py
 verseview.spec
 *.spec
 scratch.py
+
+# Aider files
+.aider*

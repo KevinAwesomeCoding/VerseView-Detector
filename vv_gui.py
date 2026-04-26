@@ -340,7 +340,7 @@ class VerseViewApp(ctk.CTk):
         # Language
         sep_label("Language")
         self.lang_var, self.lang_menu = add_option([
-            "English (Nova-2)",
+            "English (Nova-3)",
             "Malayalam (Sarvam AI)",
             "Hindi (Nova-3)",
             "Multi (Nova-2)",
@@ -624,13 +624,12 @@ class VerseViewApp(ctk.CTk):
             self.bot_status_lbl.configure(text="● Ready", text_color="#a07a00")
             self.bot_start_btn.configure(state="normal")
             self._bot_log("✅ Bridge ready — engine connected.")
-            # Only auto-start if the bot subprocess isn't already running.
-            # On engine restart the bridge re-injects its controller but the
-            # bot subprocess is still alive — don't launch a second copy.
-            if self._bot_process is None or self._bot_process.poll() is not None:
-                self._auto_start_bot()   # auto-start if token is saved
-            else:
-                self._bot_log("ℹ️ Bot already running — skipping auto-start.")
+            # NOTE: Bot auto-start is disabled — bot is broken and pending fix.
+            # if self._bot_process is None or self._bot_process.poll() is not None:
+            #     self._auto_start_bot()   # auto-start if token is saved
+            # else:
+            #     self._bot_log("ℹ️ Bot already running — skipping auto-start.")
+            self._bot_log("ℹ️ Bot auto-start is currently disabled.")
         self.after(0, _update)       # always schedule onto the tkinter thread
 
     def _bot_log(self, text: str):
@@ -1022,7 +1021,7 @@ class VerseViewApp(ctk.CTk):
     # ─────────────────────────────────────────────────
     def _load_into_ui(self):
         s = self._s
-        self.lang_var.set(s.get("language", "English (Nova-2)"))
+        self.lang_var.set(s.get("language", "English (Nova-3)"))
         self.bible_var.set(s.get("bible_translation", "WEB").upper())
         self.live_app.set_screen(s.get("display_screen", "Display 2 (Right/Extended)"))
         self.url_entry.delete(0, "end")
@@ -1362,7 +1361,7 @@ class VerseViewApp(ctk.CTk):
 
     def _lang_code(self) -> str:
         return {
-            "English (Nova-2)":      "en",
+            "English (Nova-3)":      "en",
             "Malayalam (Sarvam AI)": "ml",
             "Hindi (Nova-3)":        "hi",
             "Multi (Nova-2)":        "multi",
@@ -1423,9 +1422,9 @@ class VerseViewApp(ctk.CTk):
             if t >= datetime.time(16, 40):
                 return "Hindi (Nova-3)"
             if t >= datetime.time(10, 40):
-                return "English (Nova-2)"
+                return "English (Nova-3)"
             if t >= datetime.time(9, 10):
-                return "English (Nova-2)"
+                return "English (Nova-3)"
 
 
         return None  # weekday or too early — no auto-language

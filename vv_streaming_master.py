@@ -672,6 +672,8 @@ def generate_sermon_summary():
     import datetime
     today_str = datetime.datetime.now().strftime("%B %d, %Y  ·  %I:%M %p")
 
+    verse_list = "\n".join([f"- {v}" for v in verses_cited]) if verses_cited else "None detected"
+
     prompt = (
         "You are a precise sermon note-taker. Your ONLY job is to document what was ACTUALLY SAID "
         "in the transcript below. You must NOT invent, infer, assume, or add anything that was not "
@@ -1963,8 +1965,21 @@ class VerseController:
                 _hw = _session_verse_high_water.get(ref)
                 if _hw:
                     # We've already been tracking verses in this chapter this session —
-                    # upgrade to the last known verse so display resumes correctly
-                    ref = f"{ref}:{_hw}"
+                    # upgrade to the last known verse so display resumes correctly.
+                    # Validate first — if the upgraded ref is out of range, skip display
+                    # rather than sending a bad ref that will cause the browser to alert.
+                    _upgraded = f"{ref}:{_hw}"
+                    if _reject_verse_out_of_range(_upgraded):
+                        logger.warning(
+                            f"⚠️ Skipping chapter resume — hw verse {_hw} is out of range for {ref}"
+                        )
+                        new_book    = " ".join(_parts[:-1])
+                        new_chapter = _parts[-1]
+                        current_book    = new_book
+                        current_chapter = new_chapter
+                        current_verse   = None
+                        return True
+                    ref = _upgraded
                     logger.info(f"📍 Resuming: chapter ref → {ref} (last known verse this session)")
                 else:
                     # Pure chapter-only: just update context, skip display
@@ -2052,6 +2067,20 @@ class VerseController:
             if not self.driver:
                 if not self.connect():
                     return False
+
+            # Dismiss any stale alert left open by a previous bad send (e.g. a
+            # chapter-only ref that the website rejected with an alert dialog).
+            # If we don't clear it first, the next execute_script throws
+            # "unexpected alert open" and the real verse never gets through.
+            try:
+                from selenium.webdriver.support.ui import WebDriverWait
+                from selenium.webdriver.support import expected_conditions as EC
+                alert = self.driver.switch_to.alert
+                alert_text = alert.text
+                logger.warning(f"⚠️ Stale browser alert detected — dismissing before send: \"{alert_text}\"")
+                alert.dismiss()
+            except Exception:
+                pass  # No alert present — proceed normally
 
             self.driver.execute_script("arguments[0].value = arguments[1];", self.box, ref)
             self.driver.execute_script("arguments[0].click();", self.btn)
