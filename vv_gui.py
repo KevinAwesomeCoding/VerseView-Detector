@@ -376,11 +376,13 @@ class VerseViewApp(ctk.CTk):
 
         def _on_stt_engine_changed(val):
             # Show/hide the AssemblyAI key row in Advanced based on selection
-            if hasattr(self, "aai_key_row_frame"):
+            if hasattr(self, "aai_key_label"):
                 if "assemblyai" in val.lower():
-                    self.aai_key_row_frame.grid()
+                    self.aai_key_label.grid()
+                    self.aai_key_entry.grid()
                 else:
-                    self.aai_key_row_frame.grid_remove()
+                    self.aai_key_label.grid_remove()
+                    self.aai_key_entry.grid_remove()
 
         self.stt_engine_menu.configure(command=_on_stt_engine_changed)
 
@@ -972,23 +974,22 @@ class VerseViewApp(ctk.CTk):
             setattr(self, attr, e)
 
         # ── AssemblyAI key row (shown/hidden by STT engine dropdown) ──
-        _aai_row = n + 2 + len(key_fields)
-        self.aai_key_row_frame = ctk.CTkFrame(self.adv_frame, fg_color="transparent")
-        self.aai_key_row_frame.grid(row=_aai_row, column=0, columnspan=2,
-                                     sticky="ew", padx=0, pady=0)
-        self.aai_key_row_frame.grid_columnconfigure(1, weight=1)
-        ctk.CTkLabel(self.aai_key_row_frame, text="AssemblyAI Key", anchor="w").grid(
-            row=0, column=0, padx=10, pady=4, sticky="w"
-        )
+        # Placed immediately after the key_fields block; sync section is offset below.
+        _aai_row = n + 2 + len(key_fields)          # row 16 (5+2+9)
+        self.aai_key_label = ctk.CTkLabel(self.adv_frame, text="AssemblyAI Key", anchor="w")
+        self.aai_key_label.grid(row=_aai_row, column=0, padx=10, pady=4, sticky="w")
+        
         self.aai_key_entry = ctk.CTkEntry(
-            self.aai_key_row_frame, show="•", width=200,
-            placeholder_text="Paste AssemblyAI API key"
+            self.adv_frame, show="•", width=200,
+            placeholder_text="Paste key here"
         )
-        self.aai_key_entry.grid(row=0, column=1, padx=10, pady=4, sticky="ew")
-        self.aai_key_row_frame.grid_remove()  # hidden until AssemblyAI is selected
+        self.aai_key_entry.grid(row=_aai_row, column=1, padx=10, pady=4, sticky="ew")
+        
+        self.aai_key_label.grid_remove()  # hidden until AssemblyAI is selected
+        self.aai_key_entry.grid_remove()  # hidden until AssemblyAI is selected
 
-        # ── Settings Sync ──
-        sync_row = n + 2 + len(key_fields)
+        # ── Settings Sync ──  (starts one row below the AAI key row)
+        sync_row = _aai_row + 1                      # row 17
         ctk.CTkLabel(
             self.adv_frame, text="─── Settings Sync ───", anchor="w",
             font=ctk.CTkFont(size=12, weight="bold"),
@@ -1125,11 +1126,13 @@ class VerseViewApp(ctk.CTk):
         if hasattr(self, "stt_engine_var"):
             self.stt_engine_var.set(engine_label)
         # Show/hide the AAI key field to match saved engine choice
-        if hasattr(self, "aai_key_row_frame"):
+        if hasattr(self, "aai_key_label"):
             if saved_engine == "assemblyai":
-                self.aai_key_row_frame.grid()
+                self.aai_key_label.grid()
+                self.aai_key_entry.grid()
             else:
-                self.aai_key_row_frame.grid_remove()
+                self.aai_key_label.grid_remove()
+                self.aai_key_entry.grid_remove()
         saved_aai_key = s.get("assemblyai_api_key", "")
         if hasattr(self, "aai_key_entry") and saved_aai_key:
             self.aai_key_entry.delete(0, "end")

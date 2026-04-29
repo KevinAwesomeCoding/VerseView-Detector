@@ -13,9 +13,15 @@ DEFAULTS = {
     "cerebras_api_key":           "",
     "mistral_api_key":            "",
     "sarvam_api_key":             "",
+    "assemblyai_api_key":         "",
     "discord_webhook_url":        "",
     "discord_log_webhook_url":    "",
     "discord_notes_webhook_url":  "",
+    # ── STT Engine ──
+    "stt_engine":                 "deepgram",
+    # ── Dual STT ──
+    "dual_stt_enabled":           False,
+    "secondary_language":         None,
     # ── Language / Input ──
     "language":                   "English (Nova-2)",
     "mic_index":                  0,
