@@ -417,6 +417,8 @@ DISCORD_WEBHOOK_URL         = ""
 DISCORD_LOG_WEBHOOK_URL     = ""
 DISCORD_NOTES_WEBHOOK_URL   = ""
 SARVAM_API_KEY        = ""
+ASSEMBLYAI_API_KEY    = ""
+STT_ENGINE            = "deepgram"   # "deepgram" | "assemblyai"
 
 CONFIDENCE_THRESHOLD   = 0.75
 REQUIRE_MANUAL_CONFIRM = True
@@ -1021,6 +1023,7 @@ def configure(
     gui_app=None,
     bridge_ready_callback=None,
     dual_stt_enabled=False, secondary_language=None,
+    assemblyai_api_key="", stt_engine="deepgram",
 ):
     global DEEPGRAM_API_KEY, GROQ_API_KEY, GEMINI_API_KEY, CEREBRAS_API_KEY, MISTRAL_API_KEY, SARVAM_API_KEY
     global DISCORD_WEBHOOK_URL, DISCORD_LOG_WEBHOOK_URL, DISCORD_NOTES_WEBHOOK_URL
@@ -1041,6 +1044,7 @@ def configure(
     global DUAL_STT_ENABLED, SECONDARY_LANGUAGE, SECONDARY_PARSER
     global SECONDARY_DEEPGRAM_LANGUAGE, SECONDARY_DEEPGRAM_MODEL, SECONDARY_USE_SARVAM
     global full_sermon_transcript_secondary
+    global ASSEMBLYAI_API_KEY, STT_ENGINE
     WORSHIP_MODE = False
     _verse_history.clear()
     # Reset context so stale chapter from previous session never bleeds in
@@ -1070,6 +1074,8 @@ def configure(
     CEREBRAS_API_KEY = cerebras_api_key
     MISTRAL_API_KEY  = mistral_api_key
     SARVAM_API_KEY   = sarvam_api_key
+    ASSEMBLYAI_API_KEY = assemblyai_api_key
+    STT_ENGINE         = stt_engine.lower().strip() if stt_engine else "deepgram"
 
     # ── Groq: verse extraction only ──
     groq_client = _GroqClient(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
@@ -2535,9 +2541,33 @@ def detect_verse_hybrid(text, controller, confidence=1.0, parser=None) -> bool:
         if current_book and not current_chapter:
             m_ch = re.search(r'\b(?:chapter|chap|ch)\s+(\d{1,3})\b', num_norm.lower())
             if m_ch:
-                current_chapter = m_ch.group(1)
-                current_verse   = None
-                logger.info(f"📌 Chapter context set: {current_book} {current_chapter}")
+                proposed_chapter = m_ch.group(1)
+                # Issue 1 fix: Reject a chapter that is suspiciously lower than the session
+                # high-water mark for this book.  "chapter nine" in a Revelation 19 sermon
+                # is almost always a mishear of "chapter nineteen" — don't let a low chapter
+                # number silently clobber a chapter we've already progressed past.
+                _best_hw_for_book = max(
+                    (v for k, v in _session_verse_high_water.items()
+                     if k.startswith(current_book + " ")),
+                    default=0,
+                )
+                _best_hw_chapter = 0
+                for k in _session_verse_high_water:
+                    if k.startswith(current_book + " "):
+                        try:
+                            _best_hw_chapter = max(_best_hw_chapter, int(k.split()[-1]))
+                        except ValueError:
+                            pass
+                if _best_hw_chapter > 0 and int(proposed_chapter) < _best_hw_chapter - 2:
+                    logger.warning(
+                        f"⚠️ Chapter downgrade blocked: '{current_book} {proposed_chapter}' "
+                        f"contradicts session high-water chapter {_best_hw_chapter} — "
+                        f"likely mishear (e.g. 'nine' for 'nineteen')"
+                    )
+                else:
+                    current_chapter = proposed_chapter
+                    current_verse   = None
+                    logger.info(f"📌 Chapter context set: {current_book} {current_chapter}")
 
         # Bug 5: Log and skip if text is purely a chapter/verse range description
         _range_desc = re.search(
@@ -2636,9 +2666,20 @@ def detect_verse_hybrid(text, controller, confidence=1.0, parser=None) -> bool:
             )
             
             if not has_ref_anchor:
-                if _dedup_blocked(text, "no-anchor"):
-                    logger.info(f"\U0001f6ab BLOCKED: No book/chapter/verse anchor in '{text[:60]}'")
-                is_blocked = True
+                # Issue 4 fix: a long utterance (≥8 words) with no anchor is still worth
+                # sending to the LLM if we have active book context and a recent explicit
+                # ref — it may be a near-verbatim verse quote (e.g. Psalm 19:14).
+                # We skip the BLOCKED log and fall through to the LLM layer instead.
+                _is_long_quote_candidate = (
+                    len(text.split()) >= 8
+                    and current_book
+                    and current_chapter
+                    and (time.time() - _last_explicit_ref_time) < _EXPLICIT_REF_EXPIRY
+                )
+                if not _is_long_quote_candidate:
+                    if _dedup_blocked(text, "no-anchor"):
+                        logger.info(f"\U0001f6ab BLOCKED: No book/chapter/verse anchor in '{text[:60]}'")
+                    is_blocked = True
             if not is_blocked:
                 is_blocked = _reject_verse_out_of_range(verse)
             
@@ -2689,6 +2730,25 @@ def detect_verse_hybrid(text, controller, confidence=1.0, parser=None) -> bool:
                 if "John" in verse and (_is_john_the_baptist(text) or _is_john_surname(text)):
                     logger.info(f"🚫 BLOCKED: 'John the Baptist' is not the book of John in '{text[:60]}'")
                     is_blocked = True
+
+            if not is_blocked:
+                # Issue 5 fix: "John" as a standalone personal name (not Gospel reference).
+                # Require at least one of: "gospel of", "book of", a chapter/verse keyword,
+                # or a digit following "John" before we treat it as the Gospel of John.
+                if "John" in verse and not is_blocked:
+                    _has_gospel_cue = bool(
+                        re.search(r'\b(?:gospel|book)\s+of\s+john\b', text, re.IGNORECASE) or
+                        re.search(r'\bjohn\s+(?:chapter|chap|ch|\d)', text, re.IGNORECASE) or
+                        re.search(r'\bjohn\s+\d', text, re.IGNORECASE) or
+                        ':' in text
+                    )
+                    if not _has_gospel_cue:
+                        if _dedup_blocked(text, "john-name"):
+                            logger.info(
+                                f"🚫 BLOCKED: 'John' appears without chapter/gospel cue "
+                                f"— likely a person name in '{text[:60]}'"
+                            )
+                        is_blocked = True
 
             if not is_blocked:
                 chap_num = verse.split()[-1]
@@ -2845,11 +2905,29 @@ def detect_verse_hybrid(text, controller, confidence=1.0, parser=None) -> bool:
                 candidate = m_num.group(1)
                 try:
                     if int(candidate) == int(current_verse) + 1:
-                        ref = f"{current_book} {current_chapter}:{candidate}"
-                        logger.info(f"🔍 SEQUENTIAL: {ref} ({int(confidence*100)}% Acc)")
-                        deliver_verse(ref, controller, bypass_cooldown=False, confidence=confidence, source="SEQUENTIAL")
-                        trigger_onwards_if_needed(ref, text)
-                        return True
+                        # Issue 3 fix: don't fire sequential on quantity phrases like
+                        # "ten minutes", "ten points", "ten seconds", etc.
+                        # Scan 3 tokens after the matched number for blocker words.
+                        _seq_after = num_norm[m_num.end():].strip().split()
+                        _SEQ_BLOCKERS = {
+                            "minutes", "minute", "seconds", "second", "hours", "hour",
+                            "days", "day", "weeks", "week", "months", "month", "years", "year",
+                            "points", "point", "reasons", "reason", "things", "thing",
+                            "times", "people", "men", "women", "dollars", "percent",
+                            "members", "steps", "ways", "items", "chapters", "churches",
+                        }
+                        _seq_nearby = {w.lower().rstrip(".,!?;:") for w in _seq_after[:3]}
+                        if _seq_nearby & _SEQ_BLOCKERS:
+                            logger.debug(
+                                f"🚫 SEQUENTIAL suppressed: '{candidate}' followed by "
+                                f"quantity word in '{text[:60]}'"
+                            )
+                        else:
+                            ref = f"{current_book} {current_chapter}:{candidate}"
+                            logger.info(f"🔍 SEQUENTIAL: {ref} ({int(confidence*100)}% Acc)")
+                            deliver_verse(ref, controller, bypass_cooldown=False, confidence=confidence, source="SEQUENTIAL")
+                            trigger_onwards_if_needed(ref, text)
+                            return True
                 except ValueError:
                     pass
 
@@ -2963,10 +3041,20 @@ def detect_verse_hybrid(text, controller, confidence=1.0, parser=None) -> bool:
         has_book   = any(kw in text_lower for kw in BOOK_KEYWORDS)
         has_number = bool(re.search(r'\d+', text)) or any(w in text_lower for w in NUMBER_WORDS)
 
-        if not has_book and not has_number:
+        # Issue 4 fix: long verse-like text with active context gets one LLM attempt
+        # even if it has no book keyword or number (e.g. "meditation of my heart be accepted").
+        _is_verse_quote_candidate = (
+            len(text.split()) >= 8
+            and current_book
+            and current_chapter
+            and (time.time() - _last_explicit_ref_time) < _EXPLICIT_REF_EXPIRY
+        )
+
+        if not has_book and not has_number and not _is_verse_quote_candidate:
             return False
-                # Require BOTH a book name AND a number before burning an LLM call
-        if not (has_book and has_number):
+        # Require BOTH a book name AND a number before burning an LLM call
+        # (unless this is a verse-quote candidate)
+        if not (has_book and has_number) and not _is_verse_quote_candidate:
             return False
 
         # Need at least 6 words so context is rich enough for LLM
@@ -3052,6 +3140,17 @@ def _detect_explicit_reference(sentence: str, controller) -> bool:
             if "John" in ref and (_is_john_the_baptist(sentence) or _is_john_surname(sentence)):
                 logger.debug(f"⚡ FAST-PATH skipped: 'John the Baptist' is not the book of John")
                 continue
+            # Issue 5 fix: also block John refs without a gospel/chapter cue
+            if "John" in ref:
+                _fp_gospel_cue = bool(
+                    re.search(r'\b(?:gospel|book)\s+of\s+john\b', sentence, re.IGNORECASE) or
+                    re.search(r'\bjohn\s+(?:chapter|chap|ch|\d)', sentence, re.IGNORECASE) or
+                    re.search(r'\bjohn\s+\d', sentence, re.IGNORECASE) or
+                    ':' in sentence
+                )
+                if not _fp_gospel_cue:
+                    logger.debug(f"⚡ FAST-PATH skipped: 'John' without gospel cue in '{sentence[:60]}'")
+                    continue
             if _reject_verse_out_of_range(ref):
                 continue
 
@@ -3080,6 +3179,26 @@ def _detect_explicit_reference(sentence: str, controller) -> bool:
                 if not _reject_verse_out_of_range(ref_second):
                     check_and_queue_range(clean, ref_second, controller)
                 return True
+
+        # Issue 2 fix: "Book chapter N V" — parser returns chapter-only ref but a bare
+        # verse number follows immediately (e.g. "Acts chapter one eight" → Acts 1:8).
+        # Look for a second standalone digit right after the chapter number in num_norm.
+        _clean_norm = normalize_numbers_only(clean)
+        _chap_v_m = re.search(
+            r'\b(?:chapter|chap|ch)\s+(\d{1,3})\s+(\d{1,3})\b',
+            _clean_norm, re.IGNORECASE,
+        )
+        if _chap_v_m:
+            chap_n  = _chap_v_m.group(1)
+            verse_n = _chap_v_m.group(2)
+            # Only fire if the chapter matches current context (or no chapter yet set)
+            if not current_chapter or current_chapter == chap_n:
+                ref_cv = f"{current_book} {chap_n}:{verse_n}"
+                if not _reject_verse_out_of_range(ref_cv):
+                    logger.info(f"⚡ FAST-PATH (chap-verse-adjacent): {ref_cv}")
+                    deliver_verse(ref_cv, controller, bypass_cooldown=True, confidence=1.0, source="FAST-PATH")
+                    trigger_onwards_if_needed_standalone(ref_cv, sentence)
+                    return True
 
     return False
 
@@ -3123,6 +3242,16 @@ def _detect_from_translation(english_text: str, controller) -> bool:
             continue
         if "John" in ref and (_is_john_the_baptist(english_text) or _is_john_surname(english_text)):
             continue
+        # Issue 5 fix: translation path — same John guard
+        if "John" in ref:
+            _tr_gospel_cue = bool(
+                re.search(r'\b(?:gospel|book)\s+of\s+john\b', english_text, re.IGNORECASE) or
+                re.search(r'\bjohn\s+(?:chapter|chap|ch|\d)', english_text, re.IGNORECASE) or
+                re.search(r'\bjohn\s+\d', english_text, re.IGNORECASE) or
+                ':' in english_text
+            )
+            if not _tr_gospel_cue:
+                continue
         logger.info(f"⚡ TRANSLATION-PATH ref: {ref}")
         deliver_verse(ref, controller, bypass_cooldown=True, confidence=1.0, source="TRANSLATION-PATH")
         trigger_onwards_if_needed_standalone(ref, english_text)
@@ -3540,6 +3669,195 @@ async def stream_audio_sarvam(controller, is_secondary=False):
             pass
 
 
+# ── ASSEMBLYAI UNIVERSAL-3 PRO STREAMING ─────────────────────────────────────
+async def stream_audio_assemblyai(controller):
+    """Stream audio to AssemblyAI Universal-3 Pro (u3-rt-pro) and feed transcripts
+    through the same _process_transcript_blob() pipeline as Deepgram.
+
+    Architecture note:
+      The AssemblyAI SDK's StreamingClient.stream() is a *blocking* call that
+      consumes a synchronous audio generator.  We run it in a thread via
+      run_in_executor so the asyncio event loop is never blocked.  Transcripts
+      are bridged back onto the event loop via an asyncio.Queue + call_soon_threadsafe.
+    """
+    global full_sermon_transcript, _last_transcript_time
+
+    import pyaudio
+
+    audio  = pyaudio.PyAudio()
+    stream = None
+
+    try:
+        mic_info = audio.get_device_info_by_index(MIC_INDEX)
+        logger.info(f"Using: [{MIC_INDEX}] {mic_info['name']}")
+        if "stereo mix" in mic_info["name"].lower():
+            logger.warning(
+                "⚠️ Stereo Mix selected — ALL desktop audio will be captured. "
+                "Non-church audio may trigger false detections."
+            )
+        stream = audio.open(
+            format=pyaudio.paInt16, channels=1, rate=RATE,
+            input=True, input_device_index=MIC_INDEX,
+            frames_per_buffer=CHUNK,
+        )
+        logger.info("Microphone opened")
+    except Exception as e:
+        logger.error(f"Microphone error: {e}")
+        return
+
+    # ── Import AssemblyAI SDK (lazy — not everyone installs it) ──────────────
+    try:
+        import assemblyai as aai
+        from assemblyai.streaming.v3 import (
+            StreamingClient,
+            StreamingClientOptions,
+            StreamingParameters,
+            StreamingEvents,
+            TurnEvent,
+            SessionInformation,
+        )
+    except ImportError:
+        logger.error(
+            "❌ AssemblyAI SDK not installed. Run: pip install -U assemblyai"
+        )
+        return
+
+    loop          = asyncio.get_event_loop()
+    partial_context = [""]
+
+    # threading.Event mirror of stop_event so the blocking audio generator can
+    # exit cleanly without polling the asyncio Event from a non-async thread.
+    _stop_mirror  = threading.Event()
+
+    # asyncio.Queue bridges transcript strings from the SDK callback thread to
+    # the async consumer loop below.
+    _transcript_queue: asyncio.Queue = asyncio.Queue()
+
+    # ── Reconnect loop — mirrors Sarvam's pattern ─────────────────────────────
+    while not stop_event.is_set():
+
+        # Reset stop mirror for this attempt
+        _stop_mirror.clear()
+
+        # ── Audio generator (runs inside the executor thread) ─────────────────
+        def _audio_generator():
+            """Yield raw PCM chunks from the mic until stop is requested."""
+            while not _stop_mirror.is_set() and not stop_event.is_set():
+                try:
+                    yield stream.read(CHUNK, exception_on_overflow=False)
+                except Exception:
+                    break
+
+        # ── Event callbacks (called from SDK thread) ──────────────────────────
+        def _on_turn(client: StreamingClient, event: TurnEvent):
+            """Fired by the SDK when a formatted turn is complete."""
+            sentence = (event.transcript or "").strip()
+            if not sentence:
+                return
+            # Bridge to the asyncio event loop safely
+            loop.call_soon_threadsafe(_transcript_queue.put_nowait, sentence)
+
+        def _on_error(client: StreamingClient, error: Exception):
+            logger.error(f"⚠️ AssemblyAI streaming error: {error}")
+            # Signal the audio generator to stop; outer loop will reconnect
+            _stop_mirror.set()
+
+        def _on_session_information(client: StreamingClient, info: SessionInformation):
+            logger.info(f"🎤 AssemblyAI session: {info.session_id}")
+
+        # ── SDK client setup ──────────────────────────────────────────────────
+        params = StreamingParameters(
+            sample_rate=RATE,
+            speech_model="u3-rt-pro",
+            format_turns=True,
+        )
+        client_opts = StreamingClientOptions(
+            api_key=ASSEMBLYAI_API_KEY,
+            base_url="wss://streaming.assemblyai.com/v3/ws",
+        )
+        client = StreamingClient(client_opts)
+        client.on(StreamingEvents.Turn,               _on_turn)
+        client.on(StreamingEvents.Error,              _on_error)
+        client.on(StreamingEvents.SessionInformation, _on_session_information)
+
+        logger.info("🎤 [AAI] Connecting to AssemblyAI Universal-3 Pro...")
+
+        # ── Run blocking SDK call in executor ─────────────────────────────────
+        def _run_client():
+            try:
+                client.stream(_audio_generator(), params)
+            except Exception as exc:
+                if not stop_event.is_set():
+                    logger.error(f"AssemblyAI client error: {exc}")
+            finally:
+                _stop_mirror.set()   # unblock generator if still running
+
+        executor_future = loop.run_in_executor(None, _run_client)
+
+        # ── Async consumer: drain the transcript queue ────────────────────────
+        try:
+            while not stop_event.is_set():
+                try:
+                    # Use a short timeout so we notice stop_event promptly
+                    sentence = await asyncio.wait_for(
+                        _transcript_queue.get(), timeout=0.5
+                    )
+                except asyncio.TimeoutError:
+                    # No transcript yet; check if the executor finished (error/disconnect)
+                    if executor_future.done():
+                        break
+                    continue
+
+                if not sentence:
+                    continue
+
+                logger.info(f"📝 [AAI] {sentence}")
+                full_sermon_transcript += " " + sentence.strip()
+                _last_transcript_time   = time.time()
+                _process_transcript_blob(sentence, partial_context, controller)
+
+        finally:
+            # Signal the audio generator to stop, then wait for executor to finish
+            _stop_mirror.set()
+            try:
+                client.disconnect()
+            except Exception:
+                pass
+            try:
+                await asyncio.wait_for(executor_future, timeout=3.0)
+            except Exception:
+                pass
+
+        if stop_event.is_set():
+            break
+
+        logger.info("🔄 AssemblyAI session ended. Reconnecting in 2s...")
+        await asyncio.sleep(2)
+
+    # ── Microphone teardown — identical to stream_audio() ────────────────────
+    import time as _pa_t
+    _chunk_secs = CHUNK / max(RATE, 1)
+    _pa_t.sleep(_chunk_secs + 0.05)
+    if stream:
+        try:
+            if sys.platform == "darwin":
+                stream.abort_stream()
+            else:
+                stream.stop_stream()
+        except Exception:
+            pass
+        _pa_t.sleep(0.05)
+        try:
+            stream.close()
+        except Exception:
+            pass
+    _pa_t.sleep(0.1)
+    try:
+        audio.terminate()
+    except Exception:
+        pass
+
+
 # ── SILENCE WATCHDOG (Feature 6) ──────────────────────────────────────────────
 async def _silence_watchdog():
     """Feature 6: auto-stop engine if no transcript line arrives within SILENCE_TIMEOUT seconds."""
@@ -3616,7 +3934,13 @@ async def main():
 
     logger.info("=" * 60)
     logger.info("🚀 VerseView Live Started")
-    logger.info(f"   Engine: {'Sarvam AI (Malayalam)' if USE_SARVAM else 'Deepgram'}")
+    if USE_SARVAM:
+        _engine_label = "Sarvam AI (Malayalam)"
+    elif STT_ENGINE == "assemblyai":
+        _engine_label = "AssemblyAI Universal-3 Pro"
+    else:
+        _engine_label = "Deepgram"
+    logger.info(f"   Engine: {_engine_label}")
     logger.info("=" * 60)
 
     try:
@@ -3626,6 +3950,8 @@ async def main():
         # ── Primary stream task ───────────────────────────────────────────────
         if USE_SARVAM:
             primary_task = asyncio.create_task(stream_audio_sarvam(_controller, is_secondary=False))
+        elif STT_ENGINE == "assemblyai":
+            primary_task = asyncio.create_task(stream_audio_assemblyai(_controller))
         else:
             primary_task = asyncio.create_task(stream_audio(_controller, is_secondary=False))
 

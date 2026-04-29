@@ -1,6 +1,7 @@
 customtkinter
 pyaudio
 deepgram-sdk>=3.0.0
+assemblyai
 sarvamai
 websockets
 selenium

@@ -367,23 +367,22 @@ class VerseViewApp(ctk.CTk):
         self.lang_menu.configure(command=_on_lang_changed)
 
 
-        # ── Dual STT toggle ──
-        self._dual_stt_open = False
-        self.btn_dual_stt = ctk.CTkButton(
-            right, text="▶   Dual STT Mode",
-            fg_color="transparent",
-            text_color=("gray40", "gray60"),
-            anchor="w", hover=False,
-            command=self._toggle_dual_stt
-        )
-        self.btn_dual_stt.grid(row=row, column=0, sticky="ew", padx=10, pady=(4, 2))
-        self._dual_stt_row = row
-        row += 2  # row N+1 is reserved for dual_stt_frame when expanded
+        # STT Engine
+        sep_label("STT Engine")
+        self.stt_engine_var, self.stt_engine_menu = add_option([
+            "Deepgram",
+            "AssemblyAI (Universal-3 Pro)",
+        ])
 
-        self.dual_stt_frame = ctk.CTkFrame(right)
-        self.dual_stt_frame.grid_columnconfigure(0, weight=1)
-        self._build_dual_stt()
+        def _on_stt_engine_changed(val):
+            # Show/hide the AssemblyAI key row in Advanced based on selection
+            if hasattr(self, "aai_key_row_frame"):
+                if "assemblyai" in val.lower():
+                    self.aai_key_row_frame.grid()
+                else:
+                    self.aai_key_row_frame.grid_remove()
 
+        self.stt_engine_menu.configure(command=_on_stt_engine_changed)
 
         # Bible Translation
         sep_label("Bible Translation")
@@ -849,6 +848,31 @@ class VerseViewApp(ctk.CTk):
         )
         self.atem_test_btn.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(6, 2))
 
+        # ── Dual STT Mode ──
+        o_sep("🌐 Dual STT Mode")
+
+        self.dual_stt_var = ctk.BooleanVar(value=False)
+        ctk.CTkCheckBox(f, text="Enable Dual STT (run a second STT stream in parallel)",
+                        variable=self.dual_stt_var,
+                        command=self._on_dual_stt_toggle).grid(
+            row=r, column=0, sticky="w", padx=10, pady=(0, 4))
+        r += 1
+
+        sec_sub = ctk.CTkFrame(f, fg_color="transparent")
+        sec_sub.grid(row=r, column=0, sticky="ew", padx=10, pady=(0, 8))
+        sec_sub.grid_columnconfigure(1, weight=1)
+        r += 1
+
+        ctk.CTkLabel(sec_sub, text="Secondary Language", anchor="w", width=130).grid(
+            row=0, column=0, padx=(0, 6), pady=2, sticky="w")
+        self.sec_lang_var = ctk.StringVar(value="English (Nova-3)")
+        self.sec_lang_menu = ctk.CTkOptionMenu(
+            sec_sub,
+            variable=self.sec_lang_var,
+            values=["English (Nova-3)", "Malayalam (Sarvam AI)", "Hindi (Nova-3)"],
+            state="disabled",
+        )
+        self.sec_lang_menu.grid(row=0, column=1, sticky="ew", pady=2)
 
         # ── Panic keybind ──
         o_sep("Panic Keybind")
@@ -874,45 +898,6 @@ class VerseViewApp(ctk.CTk):
         """Enable/disable the secondary language dropdown based on the Dual STT checkbox."""
         state = "normal" if self.dual_stt_var.get() else "disabled"
         self.sec_lang_menu.configure(state=state)
-
-    def _toggle_dual_stt(self):
-        self._dual_stt_open = not self._dual_stt_open
-        if self._dual_stt_open:
-            self.dual_stt_frame.grid(
-                row=self._dual_stt_row + 1, column=0,
-                sticky="ew", padx=14, pady=(0, 10)
-            )
-            self.btn_dual_stt.configure(text="▼   Dual STT Mode")
-        else:
-            self.dual_stt_frame.grid_forget()
-            self.btn_dual_stt.configure(text="▶   Dual STT Mode")
-
-    def _build_dual_stt(self):
-        f = self.dual_stt_frame
-        r = 0
-
-        self.dual_stt_var = ctk.BooleanVar(value=False)
-        ctk.CTkCheckBox(f, text="Enable Dual STT (run a second STT stream in parallel)",
-                        variable=self.dual_stt_var,
-                        command=self._on_dual_stt_toggle).grid(
-            row=r, column=0, sticky="w", padx=10, pady=(10, 4))
-        r += 1
-
-        sec_sub = ctk.CTkFrame(f, fg_color="transparent")
-        sec_sub.grid(row=r, column=0, sticky="ew", padx=10, pady=(0, 10))
-        sec_sub.grid_columnconfigure(1, weight=1)
-        r += 1
-
-        ctk.CTkLabel(sec_sub, text="Secondary Language", anchor="w", width=130).grid(
-            row=0, column=0, padx=(0, 6), pady=2, sticky="w")
-        self.sec_lang_var = ctk.StringVar(value="English (Nova-3)")
-        self.sec_lang_menu = ctk.CTkOptionMenu(
-            sec_sub,
-            variable=self.sec_lang_var,
-            values=["English (Nova-3)", "Malayalam (Sarvam AI)", "Hindi (Nova-3)"],
-            state="disabled",
-        )
-        self.sec_lang_menu.grid(row=0, column=1, sticky="ew", pady=2)
 
     def _toggle_options(self):
         self._opts_open = not self._opts_open
@@ -985,6 +970,22 @@ class VerseViewApp(ctk.CTk):
                              placeholder_text="Paste key here")
             e.grid(row=n+2+j, column=1, padx=10, pady=4, sticky="ew")
             setattr(self, attr, e)
+
+        # ── AssemblyAI key row (shown/hidden by STT engine dropdown) ──
+        _aai_row = n + 2 + len(key_fields)
+        self.aai_key_row_frame = ctk.CTkFrame(self.adv_frame, fg_color="transparent")
+        self.aai_key_row_frame.grid(row=_aai_row, column=0, columnspan=2,
+                                     sticky="ew", padx=0, pady=0)
+        self.aai_key_row_frame.grid_columnconfigure(1, weight=1)
+        ctk.CTkLabel(self.aai_key_row_frame, text="AssemblyAI Key", anchor="w").grid(
+            row=0, column=0, padx=10, pady=4, sticky="w"
+        )
+        self.aai_key_entry = ctk.CTkEntry(
+            self.aai_key_row_frame, show="•", width=200,
+            placeholder_text="Paste AssemblyAI API key"
+        )
+        self.aai_key_entry.grid(row=0, column=1, padx=10, pady=4, sticky="ew")
+        self.aai_key_row_frame.grid_remove()  # hidden until AssemblyAI is selected
 
         # ── Settings Sync ──
         sync_row = n + 2 + len(key_fields)
@@ -1118,6 +1119,22 @@ class VerseViewApp(ctk.CTk):
             self.sec_lang_var.set(lang_map.get(saved_sec_lang, "English (Nova-3)"))
         self.sec_lang_menu.configure(state="normal" if saved_dual else "disabled")
 
+        # STT Engine
+        saved_engine = s.get("stt_engine", "deepgram")
+        engine_label = "AssemblyAI (Universal-3 Pro)" if saved_engine == "assemblyai" else "Deepgram"
+        if hasattr(self, "stt_engine_var"):
+            self.stt_engine_var.set(engine_label)
+        # Show/hide the AAI key field to match saved engine choice
+        if hasattr(self, "aai_key_row_frame"):
+            if saved_engine == "assemblyai":
+                self.aai_key_row_frame.grid()
+            else:
+                self.aai_key_row_frame.grid_remove()
+        saved_aai_key = s.get("assemblyai_api_key", "")
+        if hasattr(self, "aai_key_entry") and saved_aai_key:
+            self.aai_key_entry.delete(0, "end")
+            self.aai_key_entry.insert(0, saved_aai_key)
+
         saved_ml_raw = s.get("show_malayalam_raw", False)
         self.ml_raw_var.set(saved_ml_raw)
         engine.show_malayalam_raw = saved_ml_raw
@@ -1205,6 +1222,8 @@ class VerseViewApp(ctk.CTk):
             "panic_key":                  self.panic_var.get(),
             "dual_stt_enabled":           self.dual_stt_var.get(),
             "secondary_language":         self._sec_lang_code(),
+            "stt_engine":                 self._stt_engine_code(),
+            "assemblyai_api_key":         self.aai_key_entry.get().strip(),
             "live_points_prompt":         self.live_app.get_prompt(),
             "live_points_llm_enabled":    self.live_app.get_live_llm_enabled() if hasattr(self.live_app, "get_live_llm_enabled") else False,
             "rate":                       self._safe_int(self.rate_entry,      16000),
@@ -1451,6 +1470,13 @@ class VerseViewApp(ctk.CTk):
             "Hindi (Nova-3)":        "hi",
         }.get(self.sec_lang_var.get(), "en")
 
+    def _stt_engine_code(self) -> str:
+        """Return the internal engine identifier from the dropdown label."""
+        label = self.stt_engine_var.get() if hasattr(self, "stt_engine_var") else "Deepgram"
+        if "assemblyai" in label.lower():
+            return "assemblyai"
+        return "deepgram"
+
 
     def _mic_index(self) -> int:
         return self.mic_map.get(self.mic_var.get(), 0)
@@ -1541,10 +1567,12 @@ class VerseViewApp(ctk.CTk):
 
 
             missing = []
-            if not s["deepgram_api_key"] and self._lang_code() != "ml":
+            if not s["deepgram_api_key"] and self._lang_code() != "ml" and s.get("stt_engine", "deepgram") == "deepgram":
                 missing.append("Deepgram API Key")
             if not s["sarvam_api_key"] and self._lang_code() == "ml":
                 missing.append("Sarvam API Key")
+            if s.get("stt_engine") == "assemblyai" and not s.get("assemblyai_api_key"):
+                missing.append("AssemblyAI API Key")
             # Dual STT key validation
             if s.get("dual_stt_enabled") and s.get("secondary_language"):
                 sec = s["secondary_language"]
@@ -1598,6 +1626,8 @@ class VerseViewApp(ctk.CTk):
                 bridge_ready_callback      = self._on_bridge_ready,
                 dual_stt_enabled           = s.get("dual_stt_enabled", False),
                 secondary_language         = s.get("secondary_language"),
+                stt_engine                 = s.get("stt_engine", "deepgram"),
+                assemblyai_api_key         = s.get("assemblyai_api_key", ""),
             )
 
 
