@@ -28,7 +28,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install pyaudio
-          pip install pyinstaller customtkinter selenium webdriver-manager certifi requests websockets charset-normalizer sarvamai pynput deepgram-sdk PyATEMMax zeroconf discord.py aiohttp assemblyai
+          pip install pyinstaller customtkinter selenium webdriver-manager certifi requests websockets charset-normalizer sarvamai pynput deepgram-sdk PyATEMMax zeroconf discord.py aiohttp assemblyai>=0.41.0
 
       - name: Verify tkinter
         run: python -c "import tkinter; print('tkinter OK')"
@@ -66,7 +66,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install pyaudio
-          pip install pyinstaller customtkinter selenium webdriver-manager certifi requests websockets charset-normalizer sarvamai pynput deepgram-sdk PyATEMMax zeroconf discord.py aiohttp assemblyai
+          pip install pyinstaller customtkinter selenium webdriver-manager certifi requests websockets charset-normalizer sarvamai pynput deepgram-sdk PyATEMMax zeroconf discord.py aiohttp assemblyai>=0.41.0
 
       - name: Write version
         run: echo "build-${GITHUB_SHA::7}-${{ github.run_number }}" > version.txt
@@ -109,7 +109,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install pyaudio
-          pip install pyinstaller customtkinter selenium webdriver-manager certifi requests websockets charset-normalizer sarvamai pynput deepgram-sdk PyATEMMax zeroconf discord.py aiohttp assemblyai
+          pip install pyinstaller customtkinter selenium webdriver-manager certifi requests websockets charset-normalizer sarvamai pynput deepgram-sdk PyATEMMax zeroconf discord.py aiohttp assemblyai>=0.41.0
 
       - name: Write version
         run: echo "build-${GITHUB_SHA::7}-${{ github.run_number }}" > version.txt

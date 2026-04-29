@@ -3714,11 +3714,11 @@ async def stream_audio_assemblyai(controller):
             StreamingParameters,
             StreamingEvents,
             TurnEvent,
-            SessionInformation,
+            BeginEvent,
         )
-    except ImportError:
+    except ImportError as _aai_err:
         logger.error(
-            "❌ AssemblyAI SDK not installed. Run: pip install -U assemblyai"
+            f"❌ AssemblyAI SDK not installed or version too old. Run: pip install -U assemblyai  (detail: {_aai_err})"
         )
         return
 
@@ -3762,8 +3762,8 @@ async def stream_audio_assemblyai(controller):
             # Signal the audio generator to stop; outer loop will reconnect
             _stop_mirror.set()
 
-        def _on_session_information(client: StreamingClient, info: SessionInformation):
-            logger.info(f"🎤 AssemblyAI session: {info.session_id}")
+        def _on_session_information(client: StreamingClient, info: BeginEvent):
+            logger.info(f"🎤 AssemblyAI session: {info.id}")
 
         # ── SDK client setup ──────────────────────────────────────────────────
         params = StreamingParameters(
@@ -3778,14 +3778,15 @@ async def stream_audio_assemblyai(controller):
         client = StreamingClient(client_opts)
         client.on(StreamingEvents.Turn,               _on_turn)
         client.on(StreamingEvents.Error,              _on_error)
-        client.on(StreamingEvents.SessionInformation, _on_session_information)
+        client.on(StreamingEvents.Begin,               _on_session_information)
 
         logger.info("🎤 [AAI] Connecting to AssemblyAI Universal-3 Pro...")
 
         # ── Run blocking SDK call in executor ─────────────────────────────────
         def _run_client():
             try:
-                client.stream(_audio_generator(), params)
+                client.connect(params)
+                client.stream(_audio_generator())
             except Exception as exc:
                 if not stop_event.is_set():
                     logger.error(f"AssemblyAI client error: {exc}")
