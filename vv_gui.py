@@ -386,6 +386,25 @@ class VerseViewApp(ctk.CTk):
 
         self.stt_engine_menu.configure(command=_on_stt_engine_changed)
 
+
+        # ── Dual STT toggle ──
+        self._dual_stt_open = False
+        self.btn_dual_stt = ctk.CTkButton(
+            right, text="▶   Dual STT Mode",
+            fg_color="transparent",
+            text_color=("gray40", "gray60"),
+            anchor="w", hover=False,
+            command=self._toggle_dual_stt
+        )
+        self.btn_dual_stt.grid(row=row, column=0, sticky="ew", padx=10, pady=(4, 2))
+        self._dual_stt_row = row
+        row += 2  # row N+1 is reserved for dual_stt_frame when expanded
+
+        self.dual_stt_frame = ctk.CTkFrame(right)
+        self.dual_stt_frame.grid_columnconfigure(0, weight=1)
+        self._build_dual_stt()
+
+
         # Bible Translation
         sep_label("Bible Translation")
         self.bible_var, self.bible_menu = add_option([
@@ -850,31 +869,6 @@ class VerseViewApp(ctk.CTk):
         )
         self.atem_test_btn.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(6, 2))
 
-        # ── Dual STT Mode ──
-        o_sep("🌐 Dual STT Mode")
-
-        self.dual_stt_var = ctk.BooleanVar(value=False)
-        ctk.CTkCheckBox(f, text="Enable Dual STT (run a second STT stream in parallel)",
-                        variable=self.dual_stt_var,
-                        command=self._on_dual_stt_toggle).grid(
-            row=r, column=0, sticky="w", padx=10, pady=(0, 4))
-        r += 1
-
-        sec_sub = ctk.CTkFrame(f, fg_color="transparent")
-        sec_sub.grid(row=r, column=0, sticky="ew", padx=10, pady=(0, 8))
-        sec_sub.grid_columnconfigure(1, weight=1)
-        r += 1
-
-        ctk.CTkLabel(sec_sub, text="Secondary Language", anchor="w", width=130).grid(
-            row=0, column=0, padx=(0, 6), pady=2, sticky="w")
-        self.sec_lang_var = ctk.StringVar(value="English (Nova-3)")
-        self.sec_lang_menu = ctk.CTkOptionMenu(
-            sec_sub,
-            variable=self.sec_lang_var,
-            values=["English (Nova-3)", "Malayalam (Sarvam AI)", "Hindi (Nova-3)"],
-            state="disabled",
-        )
-        self.sec_lang_menu.grid(row=0, column=1, sticky="ew", pady=2)
 
         # ── Panic keybind ──
         o_sep("Panic Keybind")
@@ -900,6 +894,45 @@ class VerseViewApp(ctk.CTk):
         """Enable/disable the secondary language dropdown based on the Dual STT checkbox."""
         state = "normal" if self.dual_stt_var.get() else "disabled"
         self.sec_lang_menu.configure(state=state)
+
+    def _toggle_dual_stt(self):
+        self._dual_stt_open = not self._dual_stt_open
+        if self._dual_stt_open:
+            self.dual_stt_frame.grid(
+                row=self._dual_stt_row + 1, column=0,
+                sticky="ew", padx=14, pady=(0, 10)
+            )
+            self.btn_dual_stt.configure(text="▼   Dual STT Mode")
+        else:
+            self.dual_stt_frame.grid_forget()
+            self.btn_dual_stt.configure(text="▶   Dual STT Mode")
+
+    def _build_dual_stt(self):
+        f = self.dual_stt_frame
+        r = 0
+
+        self.dual_stt_var = ctk.BooleanVar(value=False)
+        ctk.CTkCheckBox(f, text="Enable Dual STT (run a second STT stream in parallel)",
+                        variable=self.dual_stt_var,
+                        command=self._on_dual_stt_toggle).grid(
+            row=r, column=0, sticky="w", padx=10, pady=(10, 4))
+        r += 1
+
+        sec_sub = ctk.CTkFrame(f, fg_color="transparent")
+        sec_sub.grid(row=r, column=0, sticky="ew", padx=10, pady=(0, 10))
+        sec_sub.grid_columnconfigure(1, weight=1)
+        r += 1
+
+        ctk.CTkLabel(sec_sub, text="Secondary Language", anchor="w", width=130).grid(
+            row=0, column=0, padx=(0, 6), pady=2, sticky="w")
+        self.sec_lang_var = ctk.StringVar(value="English (Nova-3)")
+        self.sec_lang_menu = ctk.CTkOptionMenu(
+            sec_sub,
+            variable=self.sec_lang_var,
+            values=["English (Nova-3)", "Malayalam (Sarvam AI)", "Hindi (Nova-3)"],
+            state="disabled",
+        )
+        self.sec_lang_menu.grid(row=0, column=1, sticky="ew", pady=2)
 
     def _toggle_options(self):
         self._opts_open = not self._opts_open
