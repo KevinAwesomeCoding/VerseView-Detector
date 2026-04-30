@@ -3571,10 +3571,24 @@ async def stream_audio_sarvam(controller, is_secondary=False):
                     async def keepalive():
                         try:
                             while not stop_event.is_set():  # type: ignore
-                                await asyncio.sleep(25)
-                                if not stop_event.is_set():  # type: ignore
-                                    silence = b'\x00' * CHUNK * 2
-                                    await ws.transcribe(audio=base64.b64encode(silence).decode("utf-8"))  # type: ignore
+                                # Wait up to 25 s for stop — this makes the task
+                                # respond instantly to cancellation and to stop_event,
+                                # unlike asyncio.sleep() whose internal Future can be
+                                # left pending when the event loop tears down.
+                                try:
+                                    await asyncio.wait_for(
+                                        stop_event.wait(),  # type: ignore
+                                        timeout=25,
+                                    )
+                                    break  # stop_event fired — exit cleanly
+                                except asyncio.TimeoutError:
+                                    pass  # 25 s elapsed; fall through to send keepalive
+                                if stop_event.is_set():  # type: ignore
+                                    break
+                                silence = b'\x00' * CHUNK * 2
+                                await ws.transcribe(audio=base64.b64encode(silence).decode("utf-8"))  # type: ignore
+                        except asyncio.CancelledError:
+                            pass   # explicit cancel from shutdown — exit cleanly
                         except Exception:
                             pass
 
@@ -3764,7 +3778,10 @@ async def stream_audio_assemblyai(controller, is_secondary: bool = False):
 
         # ── Event callbacks (called from SDK thread) ──────────────────────────
         def _on_turn(client: StreamingClient, event: TurnEvent):
-            """Fired by the SDK when a formatted turn is complete."""
+            """Fired by the SDK on every word addition AND at end of turn.
+            We only want the final formatted sentence — ignore partials."""
+            if not event.end_of_turn:
+                return
             sentence = (event.transcript or "").strip()
             if not sentence:
                 return

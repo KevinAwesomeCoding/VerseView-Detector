@@ -360,12 +360,18 @@ class VerseViewApp(ctk.CTk):
 
         def _on_lang_changed(val):
             is_ml = "Malayalam" in val
+            is_hi = val == "Hindi"
             self.ml_raw_cb.configure(state="normal" if is_ml else "disabled")
-            # Swap STT engine options based on language
+
+            # AssemblyAI streaming only supports EN/ES/DE/FR/IT/PT.
+            # Malayalam uses Sarvam only; Hindi uses Deepgram only.
             if is_ml:
-                new_opts = ["Sarvam AI", "AssemblyAI (Universal-3 Pro)"]
+                new_opts = ["Sarvam AI"]
+            elif is_hi:
+                new_opts = ["Deepgram"]
             else:
                 new_opts = ["Deepgram", "AssemblyAI (Universal-3 Pro)"]
+
             self.stt_engine_menu.configure(values=new_opts)
             # Reset to the first (default) option for the new language
             self.stt_engine_var.set(new_opts[0])
@@ -956,9 +962,12 @@ class VerseViewApp(ctk.CTk):
         self.sec_engine_menu.grid(row=1, column=1, sticky="ew", pady=2)
 
         def _on_sec_lang_changed(val):
-            """Swap secondary engine options when secondary language changes."""
+            """Swap secondary engine options when secondary language changes.
+            AssemblyAI streaming only supports EN/ES/DE/FR/IT/PT."""
             if "Malayalam" in val:
-                new_opts = ["Sarvam AI", "AssemblyAI (Universal-3 Pro)"]
+                new_opts = ["Sarvam AI"]
+            elif val == "Hindi":
+                new_opts = ["Deepgram"]
             else:
                 new_opts = ["Deepgram", "AssemblyAI (Universal-3 Pro)"]
             self.sec_engine_menu.configure(values=new_opts)
@@ -1184,9 +1193,11 @@ class VerseViewApp(ctk.CTk):
             lang_map = {"en": "English", "ml": "Malayalam", "hi": "Hindi"}
             _sec_label = lang_map.get(saved_sec_lang, "English")
             self.sec_lang_var.set(_sec_label)
-            # Sync secondary engine dropdown options to match restored language
+            # Sync secondary engine dropdown options — AAI not allowed for ml/hi
             if saved_sec_lang == "ml":
-                self.sec_engine_menu.configure(values=["Sarvam AI", "AssemblyAI (Universal-3 Pro)"])
+                self.sec_engine_menu.configure(values=["Sarvam AI"])
+            elif saved_sec_lang == "hi":
+                self.sec_engine_menu.configure(values=["Deepgram"])
             else:
                 self.sec_engine_menu.configure(values=["Deepgram", "AssemblyAI (Universal-3 Pro)"])
         saved_sec_engine = s.get("secondary_stt_engine", "deepgram")
@@ -1204,10 +1215,16 @@ class VerseViewApp(ctk.CTk):
         # STT Engine — must restore dropdown options first based on saved language
         saved_lang_code = self._lang_code()
         if saved_lang_code == "ml":
-            self.stt_engine_menu.configure(values=["Sarvam AI", "AssemblyAI (Universal-3 Pro)"])
+            self.stt_engine_menu.configure(values=["Sarvam AI"])
+        elif saved_lang_code == "hi":
+            self.stt_engine_menu.configure(values=["Deepgram"])
         else:
             self.stt_engine_menu.configure(values=["Deepgram", "AssemblyAI (Universal-3 Pro)"])
         saved_engine = s.get("stt_engine", "deepgram")
+        # Clamp: if a stale "assemblyai" was saved for a language that doesn't support it,
+        # silently fall back to the correct default for that language.
+        if saved_engine == "assemblyai" and saved_lang_code in ("ml", "hi"):
+            saved_engine = "sarvam" if saved_lang_code == "ml" else "deepgram"
         engine_label = {
             "assemblyai": "AssemblyAI (Universal-3 Pro)",
             "sarvam":     "Sarvam AI",
