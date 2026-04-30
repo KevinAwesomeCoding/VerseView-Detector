@@ -420,6 +420,7 @@ SARVAM_API_KEY        = ""
 ASSEMBLYAI_API_KEY    = ""
 STT_ENGINE            = "deepgram"   # "deepgram" | "assemblyai"
 AAI_LANGUAGE          = "en"         # "en" | "hi" | "ml" | "multi"
+AAI_TURN_CUTOFF_SEC   = 5            # force_endpoint interval in seconds (3–11)
 
 CONFIDENCE_THRESHOLD   = 0.75
 REQUIRE_MANUAL_CONFIRM = True
@@ -1026,6 +1027,7 @@ def configure(
     bridge_ready_callback=None,
     dual_stt_enabled=False, secondary_language=None, secondary_stt_engine="deepgram",
     assemblyai_api_key="", stt_engine="deepgram",
+    aai_turn_cutoff=5,
 ):
     global DEEPGRAM_API_KEY, GROQ_API_KEY, GEMINI_API_KEY, CEREBRAS_API_KEY, MISTRAL_API_KEY, SARVAM_API_KEY
     global DISCORD_WEBHOOK_URL, DISCORD_LOG_WEBHOOK_URL, DISCORD_NOTES_WEBHOOK_URL
@@ -1047,7 +1049,7 @@ def configure(
     global SECONDARY_DEEPGRAM_LANGUAGE, SECONDARY_DEEPGRAM_MODEL, SECONDARY_USE_SARVAM
     global SECONDARY_STT_ENGINE
     global full_sermon_transcript_secondary
-    global ASSEMBLYAI_API_KEY, STT_ENGINE, AAI_LANGUAGE
+    global ASSEMBLYAI_API_KEY, STT_ENGINE, AAI_LANGUAGE, AAI_TURN_CUTOFF_SEC
     WORSHIP_MODE = False
     _verse_history.clear()
     # Reset context so stale chapter from previous session never bleeds in
@@ -1079,6 +1081,7 @@ def configure(
     SARVAM_API_KEY   = sarvam_api_key
     ASSEMBLYAI_API_KEY = assemblyai_api_key
     STT_ENGINE         = stt_engine.lower().strip() if stt_engine else "deepgram"
+    AAI_TURN_CUTOFF_SEC = max(3, min(11, int(aai_turn_cutoff or 5)))
 
     # ── Groq: verse extraction only ──
     groq_client = _GroqClient(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
@@ -3810,6 +3813,7 @@ async def stream_audio_assemblyai(controller, is_secondary: bool = False):
             speech_model=_aai_model,
             format_turns=True,
             language_detection=_lang_detect or None,
+            min_turn_silence=300,   # 300 ms of silence commits the turn naturally
         )
         client_opts = StreamingClientOptions(
             api_key=ASSEMBLYAI_API_KEY,
@@ -3839,6 +3843,27 @@ async def stream_audio_assemblyai(controller, is_secondary: bool = False):
                 _stop_mirror.set()   # unblock generator if still running
 
         executor_future = loop.run_in_executor(None, _run_client)
+
+        # ── Periodic force_endpoint task ──────────────────────────────────────
+        # AAI's universal-3 model only fires end_of_turn when the speaker
+        # pauses naturally.  For continuous speech (long sentences, preachers
+        # who don't breathe), we kick force_endpoint() every N seconds so
+        # the turn is always committed within AAI_TURN_CUTOFF_SEC.
+        async def _force_endpoint_loop():
+            """Every AAI_TURN_CUTOFF_SEC seconds, force the current turn to close."""
+            try:
+                while not stop_event.is_set() and not _stop_mirror.is_set():
+                    await asyncio.sleep(AAI_TURN_CUTOFF_SEC)
+                    if stop_event.is_set() or _stop_mirror.is_set():
+                        break
+                    try:
+                        await loop.run_in_executor(None, client.force_endpoint)
+                    except Exception:
+                        pass  # ignore if session already closed
+            except asyncio.CancelledError:
+                pass
+
+        _force_task = asyncio.ensure_future(_force_endpoint_loop())
 
         # ── Async consumer: drain the transcript queue ────────────────────────
         try:
@@ -3872,6 +3897,12 @@ async def stream_audio_assemblyai(controller, is_secondary: bool = False):
                     _process_transcript_blob(sentence, partial_context, controller)
 
         finally:
+            # Cancel the periodic force_endpoint task first
+            _force_task.cancel()
+            try:
+                await asyncio.wait_for(asyncio.shield(_force_task), timeout=1.0)
+            except Exception:
+                pass
             # Stop audio generator first so stream() returns quickly
             _stop_mirror.set()
             # disconnect(terminate=True) sends a TerminateSession message which

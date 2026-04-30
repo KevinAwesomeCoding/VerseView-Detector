@@ -996,6 +996,7 @@ class VerseViewApp(ctk.CTk):
             ("Cooldown (s)",         "3.0",   "cooldown_entry"),
             ("Dedup Window (s)",     "60",    "dedup_entry"),
             ("Silence Timeout (s)", "60",    "silence_entry"),
+            ("AAI Turn Cutoff (s)",  "5",     "aai_cutoff_entry"),
         ]
         for i, (lbl, default, attr) in enumerate(fields):
             ctk.CTkLabel(self.adv_frame, text=lbl, anchor="w").grid(
@@ -1287,6 +1288,7 @@ class VerseViewApp(ctk.CTk):
         self.cooldown_entry.delete(0, "end"); self.cooldown_entry.insert(0, str(s.get("cooldown",         3.0)))
         self.dedup_entry.delete(0, "end");    self.dedup_entry.insert(0,    str(s.get("dedup_window",     60)))
         self.silence_entry.delete(0, "end");  self.silence_entry.insert(0,  str(s.get("silence_timeout",  60)))
+        self.aai_cutoff_entry.delete(0, "end"); self.aai_cutoff_entry.insert(0, str(s.get("aai_turn_cutoff", 5)))
         self.llm_var.set("Enabled" if s.get("llm_enabled", True) else "Disabled")
 
         self.atem_var.set(s.get("atem_enabled", False))
@@ -1342,6 +1344,7 @@ class VerseViewApp(ctk.CTk):
             "cooldown":                   self._safe_float(self.cooldown_entry, 3.0),
             "dedup_window":               self._safe_int(self.dedup_entry,     60),
             "silence_timeout":            self._safe_int(self.silence_entry,   60),
+            "aai_turn_cutoff":            self._safe_int(self.aai_cutoff_entry, 5),
             "llm_enabled":                self.llm_var.get() == "Enabled",
             "deepgram_api_key":           self.dg_key_entry.get(),
             "groq_api_key":               self.or_key_entry.get(),
@@ -1763,6 +1766,7 @@ class VerseViewApp(ctk.CTk):
                 secondary_stt_engine       = _sec_engine,
                 stt_engine                 = _engine,
                 assemblyai_api_key         = s.get("assemblyai_api_key", ""),
+                aai_turn_cutoff            = s.get("aai_turn_cutoff", 5),
             )
 
 
