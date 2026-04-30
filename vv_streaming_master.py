@@ -419,6 +419,7 @@ DISCORD_NOTES_WEBHOOK_URL   = ""
 SARVAM_API_KEY        = ""
 ASSEMBLYAI_API_KEY    = ""
 STT_ENGINE            = "deepgram"   # "deepgram" | "assemblyai"
+AAI_LANGUAGE          = "en"         # "en" | "hi" | "ml" | "multi"
 
 CONFIDENCE_THRESHOLD   = 0.75
 REQUIRE_MANUAL_CONFIRM = True
@@ -481,6 +482,7 @@ SECONDARY_PARSER              = None   # parse_eng / parse_hindi / parse_ml
 SECONDARY_DEEPGRAM_LANGUAGE   = "en"
 SECONDARY_DEEPGRAM_MODEL      = "nova-3"
 SECONDARY_USE_SARVAM          = False
+SECONDARY_STT_ENGINE          = "deepgram"   # "deepgram" | "sarvam" | "assemblyai"
 full_sermon_transcript_secondary = ""  # clean secondary-only buffer
 
 _sarvam_ignore_until = 0.0
@@ -1022,7 +1024,7 @@ def configure(
     atem_enabled=False, atem_ip="192.168.1.240", atem_key_duration=5.0,
     gui_app=None,
     bridge_ready_callback=None,
-    dual_stt_enabled=False, secondary_language=None,
+    dual_stt_enabled=False, secondary_language=None, secondary_stt_engine="deepgram",
     assemblyai_api_key="", stt_engine="deepgram",
 ):
     global DEEPGRAM_API_KEY, GROQ_API_KEY, GEMINI_API_KEY, CEREBRAS_API_KEY, MISTRAL_API_KEY, SARVAM_API_KEY
@@ -1043,8 +1045,9 @@ def configure(
     global BRIDGE_READY_CALLBACK
     global DUAL_STT_ENABLED, SECONDARY_LANGUAGE, SECONDARY_PARSER
     global SECONDARY_DEEPGRAM_LANGUAGE, SECONDARY_DEEPGRAM_MODEL, SECONDARY_USE_SARVAM
+    global SECONDARY_STT_ENGINE
     global full_sermon_transcript_secondary
-    global ASSEMBLYAI_API_KEY, STT_ENGINE
+    global ASSEMBLYAI_API_KEY, STT_ENGINE, AAI_LANGUAGE
     WORSHIP_MODE = False
     _verse_history.clear()
     # Reset context so stale chapter from previous session never bleeds in
@@ -1172,12 +1175,14 @@ def configure(
         DEEPGRAM_MODEL         = "nova-3"
         PRIMARY_PARSER         = parse_eng
         normalize_numbers_only = norm_eng
+        AAI_LANGUAGE           = "en"
     elif language == "hi":
         USE_SARVAM             = False
         DEEPGRAM_LANGUAGE      = "hi"
         DEEPGRAM_MODEL         = "nova-3"
         PRIMARY_PARSER         = parse_hindi
         normalize_numbers_only = norm_hindi
+        AAI_LANGUAGE           = "hi"
     elif language == "ml":
         USE_SARVAM             = True
         SARVAM_LANGUAGE        = "ml-IN"
@@ -1187,41 +1192,46 @@ def configure(
         # "ജോൺ ചാപ്റ്റർ 12:27" or "John chapter 12 verse 5").
         PRIMARY_PARSER         = parse_ml
         normalize_numbers_only = norm_ml
+        AAI_LANGUAGE           = "ml"
     else:
         USE_SARVAM             = False
         DEEPGRAM_LANGUAGE      = "multi"
         DEEPGRAM_MODEL         = "nova-3"
         PRIMARY_PARSER         = parse_eng
         normalize_numbers_only = norm_eng
+        AAI_LANGUAGE           = "multi"
 
     # ── Dual STT — secondary stream configuration ──
-    DUAL_STT_ENABLED = dual_stt_enabled
+    DUAL_STT_ENABLED   = dual_stt_enabled
     SECONDARY_LANGUAGE = secondary_language
+    SECONDARY_STT_ENGINE = secondary_stt_engine
     full_sermon_transcript_secondary = ""
     if dual_stt_enabled and secondary_language:
+        # Set parser based on secondary language
         if secondary_language == "en":
-            SECONDARY_USE_SARVAM           = False
-            SECONDARY_DEEPGRAM_LANGUAGE    = "en"
-            SECONDARY_DEEPGRAM_MODEL       = "nova-3"
-            SECONDARY_PARSER               = parse_eng
+            SECONDARY_DEEPGRAM_LANGUAGE = "en"
+            SECONDARY_DEEPGRAM_MODEL    = "nova-3"
+            SECONDARY_PARSER            = parse_eng
         elif secondary_language == "hi":
-            SECONDARY_USE_SARVAM           = False
-            SECONDARY_DEEPGRAM_LANGUAGE    = "hi"
-            SECONDARY_DEEPGRAM_MODEL       = "nova-3"
-            SECONDARY_PARSER               = parse_hindi
+            SECONDARY_DEEPGRAM_LANGUAGE = "hi"
+            SECONDARY_DEEPGRAM_MODEL    = "nova-3"
+            SECONDARY_PARSER            = parse_hindi
         elif secondary_language == "ml":
-            SECONDARY_USE_SARVAM           = True
-            SECONDARY_DEEPGRAM_LANGUAGE    = "en"   # unused — Sarvam handles ml
-            SECONDARY_DEEPGRAM_MODEL       = "nova-3"
-            SECONDARY_PARSER               = parse_ml
+            SECONDARY_DEEPGRAM_LANGUAGE = "en"   # unused when Sarvam/AAI handles ml
+            SECONDARY_DEEPGRAM_MODEL    = "nova-3"
+            SECONDARY_PARSER            = parse_ml
         else:
-            SECONDARY_USE_SARVAM           = False
-            SECONDARY_DEEPGRAM_LANGUAGE    = "multi"
-            SECONDARY_DEEPGRAM_MODEL       = "nova-3"
-            SECONDARY_PARSER               = parse_eng
-        logger.info(f"🌐 Dual STT          : ON  (secondary={secondary_language})")
+            SECONDARY_DEEPGRAM_LANGUAGE = "multi"
+            SECONDARY_DEEPGRAM_MODEL    = "nova-3"
+            SECONDARY_PARSER            = parse_eng
+
+        # Route secondary stream: Sarvam only for ml+sarvam, AAI for assemblyai, else Deepgram
+        SECONDARY_USE_SARVAM = (secondary_language == "ml" and secondary_stt_engine == "sarvam")
+
+        logger.info(f"🌐 Dual STT          : ON  (secondary={secondary_language}, engine={secondary_stt_engine})")
     else:
         SECONDARY_USE_SARVAM = False
+        SECONDARY_STT_ENGINE = "deepgram"
         SECONDARY_PARSER     = None
 
 
@@ -3670,19 +3680,23 @@ async def stream_audio_sarvam(controller, is_secondary=False):
 
 
 # ── ASSEMBLYAI UNIVERSAL-3 PRO STREAMING ─────────────────────────────────────
-async def stream_audio_assemblyai(controller):
-    """Stream audio to AssemblyAI Universal-3 Pro (u3-rt-pro) and feed transcripts
-    through the same _process_transcript_blob() pipeline as Deepgram.
+async def stream_audio_assemblyai(controller, is_secondary: bool = False):
+    """Stream audio to AssemblyAI and feed transcripts through the detection pipeline.
 
-    Architecture note:
-      The AssemblyAI SDK's StreamingClient.stream() is a *blocking* call that
-      consumes a synchronous audio generator.  We run it in a thread via
-      run_in_executor so the asyncio event loop is never blocked.  Transcripts
-      are bridged back onto the event loop via an asyncio.Queue + call_soon_threadsafe.
+    When is_secondary=True, uses the secondary language/parser globals so it can
+    run in parallel with a primary stream (Dual STT mode).
     """
-    global full_sermon_transcript, _last_transcript_time
+    global full_sermon_transcript, full_sermon_transcript_secondary, _last_transcript_time
 
     import pyaudio
+
+    # ── Resolve which language + parser to use for this stream ────────────────
+    if is_secondary:
+        _lang   = SECONDARY_LANGUAGE or "en"
+        _parser = SECONDARY_PARSER
+    else:
+        _lang   = AAI_LANGUAGE
+        _parser = None   # _process_transcript_blob uses PRIMARY_PARSER internally
 
     audio  = pyaudio.PyAudio()
     stream = None
@@ -3765,11 +3779,20 @@ async def stream_audio_assemblyai(controller):
         def _on_session_information(client: StreamingClient, info: BeginEvent):
             logger.info(f"🎤 AssemblyAI session: {info.id}")
 
-        # ── SDK client setup ──────────────────────────────────────────────────
+        # ── Speech model selection based on language ──────────────────────────
+        # u3-rt-pro is English-only; multilingual model handles hi / ml / multi.
+        if _lang in ("hi", "ml", "multi"):
+            _aai_model   = "universal-streaming-multilingual"
+            _lang_detect = _lang == "multi"   # auto-detect for multi mode
+        else:
+            _aai_model   = "u3-rt-pro"
+            _lang_detect = False
+
         params = StreamingParameters(
             sample_rate=RATE,
-            speech_model="u3-rt-pro",
+            speech_model=_aai_model,
             format_turns=True,
+            language_detection=_lang_detect or None,
         )
         client_opts = StreamingClientOptions(
             api_key=ASSEMBLYAI_API_KEY,
@@ -3780,7 +3803,12 @@ async def stream_audio_assemblyai(controller):
         client.on(StreamingEvents.Error,              _on_error)
         client.on(StreamingEvents.Begin,               _on_session_information)
 
-        logger.info("🎤 [AAI] Connecting to AssemblyAI Universal-3 Pro...")
+        _model_label = {
+            "u3-rt-pro":                      "Universal-3 Pro (English)",
+            "universal-streaming-multilingual":"Universal-3 Multilingual",
+        }.get(_aai_model, _aai_model)
+        _stream_tag = "AAI-SEC" if is_secondary else "AAI"
+        logger.info(f"🎤 [{_stream_tag}] Connecting — {_model_label} / lang={_lang}...")
 
         # ── Run blocking SDK call in executor ─────────────────────────────────
         def _run_client():
@@ -3812,16 +3840,36 @@ async def stream_audio_assemblyai(controller):
                 if not sentence:
                     continue
 
-                logger.info(f"📝 [AAI] {sentence}")
-                full_sermon_transcript += " " + sentence.strip()
-                _last_transcript_time   = time.time()
-                _process_transcript_blob(sentence, partial_context, controller)
+                _stream_tag = "AAI-SEC" if is_secondary else "AAI"
+                logger.info(f"📝 [{_stream_tag}] {sentence}")
+                _last_transcript_time = time.time()
+
+                if is_secondary:
+                    full_sermon_transcript_secondary += " " + sentence.strip()
+                    _process_transcript_blob(
+                        sentence, partial_context, controller,
+                        is_secondary=True
+                    )
+                else:
+                    full_sermon_transcript += " " + sentence.strip()
+                    _process_transcript_blob(sentence, partial_context, controller)
 
         finally:
-            # Signal the audio generator to stop, then wait for executor to finish
+            # Stop audio generator first so stream() returns quickly
             _stop_mirror.set()
+            # disconnect(terminate=True) sends a TerminateSession message which
+            # causes the server to close the WebSocket, unblocking the SDK's
+            # internal read/write threads so join() returns cleanly.
+            # Run in executor because join() can take up to ~1s even when clean.
+            async def _safe_disconnect():
+                try:
+                    await loop.run_in_executor(
+                        None, lambda: client.disconnect(terminate=True)
+                    )
+                except Exception:
+                    pass
             try:
-                client.disconnect()
+                await asyncio.wait_for(_safe_disconnect(), timeout=4.0)
             except Exception:
                 pass
             try:
@@ -3832,7 +3880,8 @@ async def stream_audio_assemblyai(controller):
         if stop_event.is_set():
             break
 
-        logger.info("🔄 AssemblyAI session ended. Reconnecting in 2s...")
+        _stream_tag = "AAI-SEC" if is_secondary else "AAI"
+        logger.info(f"🔄 [{_stream_tag}] Session ended. Reconnecting in 2s...")
         await asyncio.sleep(2)
 
     # ── Microphone teardown — identical to stream_audio() ────────────────────
@@ -3961,9 +4010,11 @@ async def main():
         if DUAL_STT_ENABLED and SECONDARY_LANGUAGE:
             if SECONDARY_USE_SARVAM:
                 secondary_task = asyncio.create_task(stream_audio_sarvam(_controller, is_secondary=True))
+            elif SECONDARY_STT_ENGINE == "assemblyai":
+                secondary_task = asyncio.create_task(stream_audio_assemblyai(_controller, is_secondary=True))
             else:
                 secondary_task = asyncio.create_task(stream_audio(_controller, is_secondary=True))
-            logger.info(f"🌐 Secondary STT stream started (lang={SECONDARY_LANGUAGE})")
+            logger.info(f"🌐 Secondary STT stream started (lang={SECONDARY_LANGUAGE}, engine={SECONDARY_STT_ENGINE})")
 
         # Wait for stop signal, then cancel all stream tasks
         await stop_event.wait()

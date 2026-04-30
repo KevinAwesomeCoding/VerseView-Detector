@@ -23,7 +23,7 @@ DEFAULTS = {
     "dual_stt_enabled":           False,
     "secondary_language":         None,
     # ── Language / Input ──
-    "language":                   "English (Nova-2)",
+    "language":                   "English",
     "mic_index":                  0,
     "show_malayalam_raw":         False,
     # ── Display ──

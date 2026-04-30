@@ -340,10 +340,10 @@ class VerseViewApp(ctk.CTk):
         # Language
         sep_label("Language")
         self.lang_var, self.lang_menu = add_option([
-            "English (Nova-3)",
-            "Malayalam (Sarvam AI)",
-            "Hindi (Nova-3)",
-            "Multi (Nova-2)",
+            "English",
+            "Malayalam",
+            "Hindi",
+            "Multi-Language",
         ])
 
         def _on_ml_raw_toggle():
@@ -359,11 +359,18 @@ class VerseViewApp(ctk.CTk):
         row += 1
 
         def _on_lang_changed(val):
-            if "Malayalam" in val:
-                self.ml_raw_cb.configure(state="normal")
+            is_ml = "Malayalam" in val
+            self.ml_raw_cb.configure(state="normal" if is_ml else "disabled")
+            # Swap STT engine options based on language
+            if is_ml:
+                new_opts = ["Sarvam AI", "AssemblyAI (Universal-3 Pro)"]
             else:
-                self.ml_raw_cb.configure(state="disabled")
-        
+                new_opts = ["Deepgram", "AssemblyAI (Universal-3 Pro)"]
+            self.stt_engine_menu.configure(values=new_opts)
+            # Reset to the first (default) option for the new language
+            self.stt_engine_var.set(new_opts[0])
+            _on_stt_engine_changed(new_opts[0])
+
         self.lang_menu.configure(command=_on_lang_changed)
 
 
@@ -891,9 +898,10 @@ class VerseViewApp(ctk.CTk):
 
 
     def _on_dual_stt_toggle(self):
-        """Enable/disable the secondary language dropdown based on the Dual STT checkbox."""
+        """Enable/disable the secondary language/engine dropdowns based on the Dual STT checkbox."""
         state = "normal" if self.dual_stt_var.get() else "disabled"
         self.sec_lang_menu.configure(state=state)
+        self.sec_engine_menu.configure(state=state)
 
     def _toggle_dual_stt(self):
         self._dual_stt_open = not self._dual_stt_open
@@ -923,16 +931,40 @@ class VerseViewApp(ctk.CTk):
         sec_sub.grid_columnconfigure(1, weight=1)
         r += 1
 
+        # ── Secondary Language row ──
         ctk.CTkLabel(sec_sub, text="Secondary Language", anchor="w", width=130).grid(
             row=0, column=0, padx=(0, 6), pady=2, sticky="w")
-        self.sec_lang_var = ctk.StringVar(value="English (Nova-3)")
+        self.sec_lang_var = ctk.StringVar(value="English")
         self.sec_lang_menu = ctk.CTkOptionMenu(
             sec_sub,
             variable=self.sec_lang_var,
-            values=["English (Nova-3)", "Malayalam (Sarvam AI)", "Hindi (Nova-3)"],
+            values=["English", "Malayalam", "Hindi"],
             state="disabled",
         )
         self.sec_lang_menu.grid(row=0, column=1, sticky="ew", pady=2)
+
+        # ── Secondary STT Engine row ──
+        ctk.CTkLabel(sec_sub, text="Secondary Engine", anchor="w", width=130).grid(
+            row=1, column=0, padx=(0, 6), pady=2, sticky="w")
+        self.sec_engine_var = ctk.StringVar(value="Deepgram")
+        self.sec_engine_menu = ctk.CTkOptionMenu(
+            sec_sub,
+            variable=self.sec_engine_var,
+            values=["Deepgram", "AssemblyAI (Universal-3 Pro)"],
+            state="disabled",
+        )
+        self.sec_engine_menu.grid(row=1, column=1, sticky="ew", pady=2)
+
+        def _on_sec_lang_changed(val):
+            """Swap secondary engine options when secondary language changes."""
+            if "Malayalam" in val:
+                new_opts = ["Sarvam AI", "AssemblyAI (Universal-3 Pro)"]
+            else:
+                new_opts = ["Deepgram", "AssemblyAI (Universal-3 Pro)"]
+            self.sec_engine_menu.configure(values=new_opts)
+            self.sec_engine_var.set(new_opts[0])
+
+        self.sec_lang_menu.configure(command=_on_sec_lang_changed)
 
     def _toggle_options(self):
         self._opts_open = not self._opts_open
@@ -1119,7 +1151,7 @@ class VerseViewApp(ctk.CTk):
     # ─────────────────────────────────────────────────
     def _load_into_ui(self):
         s = self._s
-        self.lang_var.set(s.get("language", "English (Nova-3)"))
+        self.lang_var.set(s.get("language", "English"))
         self.bible_var.set(s.get("bible_translation", "WEB").upper())
         self.live_app.set_screen(s.get("display_screen", "Display 2 (Right/Extended)"))
         self.url_entry.delete(0, "end")
@@ -1149,13 +1181,38 @@ class VerseViewApp(ctk.CTk):
         self.dual_stt_var.set(saved_dual)
         saved_sec_lang = s.get("secondary_language")
         if saved_sec_lang:
-            lang_map = {"en": "English (Nova-3)", "ml": "Malayalam (Sarvam AI)", "hi": "Hindi (Nova-3)"}
-            self.sec_lang_var.set(lang_map.get(saved_sec_lang, "English (Nova-3)"))
-        self.sec_lang_menu.configure(state="normal" if saved_dual else "disabled")
+            lang_map = {"en": "English", "ml": "Malayalam", "hi": "Hindi"}
+            _sec_label = lang_map.get(saved_sec_lang, "English")
+            self.sec_lang_var.set(_sec_label)
+            # Sync secondary engine dropdown options to match restored language
+            if saved_sec_lang == "ml":
+                self.sec_engine_menu.configure(values=["Sarvam AI", "AssemblyAI (Universal-3 Pro)"])
+            else:
+                self.sec_engine_menu.configure(values=["Deepgram", "AssemblyAI (Universal-3 Pro)"])
+        saved_sec_engine = s.get("secondary_stt_engine", "deepgram")
+        _sec_engine_label_map = {
+            "assemblyai": "AssemblyAI (Universal-3 Pro)",
+            "sarvam":     "Sarvam AI",
+            "deepgram":   "Deepgram",
+        }
+        if hasattr(self, "sec_engine_var"):
+            self.sec_engine_var.set(_sec_engine_label_map.get(saved_sec_engine, "Deepgram"))
+        _dual_state = "normal" if saved_dual else "disabled"
+        self.sec_lang_menu.configure(state=_dual_state)
+        self.sec_engine_menu.configure(state=_dual_state)
 
-        # STT Engine
+        # STT Engine — must restore dropdown options first based on saved language
+        saved_lang_code = self._lang_code()
+        if saved_lang_code == "ml":
+            self.stt_engine_menu.configure(values=["Sarvam AI", "AssemblyAI (Universal-3 Pro)"])
+        else:
+            self.stt_engine_menu.configure(values=["Deepgram", "AssemblyAI (Universal-3 Pro)"])
         saved_engine = s.get("stt_engine", "deepgram")
-        engine_label = "AssemblyAI (Universal-3 Pro)" if saved_engine == "assemblyai" else "Deepgram"
+        engine_label = {
+            "assemblyai": "AssemblyAI (Universal-3 Pro)",
+            "sarvam":     "Sarvam AI",
+            "deepgram":   "Deepgram",
+        }.get(saved_engine, "Deepgram")
         if hasattr(self, "stt_engine_var"):
             self.stt_engine_var.set(engine_label)
         # Show/hide the AAI key field to match saved engine choice
@@ -1258,6 +1315,7 @@ class VerseViewApp(ctk.CTk):
             "panic_key":                  self.panic_var.get(),
             "dual_stt_enabled":           self.dual_stt_var.get(),
             "secondary_language":         self._sec_lang_code(),
+            "secondary_stt_engine":       self._sec_engine_code(),
             "stt_engine":                 self._stt_engine_code(),
             "assemblyai_api_key":         self.aai_key_entry.get().strip(),
             "live_points_prompt":         self.live_app.get_prompt(),
@@ -1490,10 +1548,10 @@ class VerseViewApp(ctk.CTk):
 
     def _lang_code(self) -> str:
         return {
-            "English (Nova-3)":      "en",
-            "Malayalam (Sarvam AI)": "ml",
-            "Hindi (Nova-3)":        "hi",
-            "Multi (Nova-2)":        "multi",
+            "English":        "en",
+            "Malayalam":      "ml",
+            "Hindi":          "hi",
+            "Multi-Language": "multi",
         }.get(self.lang_var.get(), "en")
 
     def _sec_lang_code(self) -> str | None:
@@ -1501,9 +1559,9 @@ class VerseViewApp(ctk.CTk):
         if not self.dual_stt_var.get():
             return None
         return {
-            "English (Nova-3)":      "en",
-            "Malayalam (Sarvam AI)": "ml",
-            "Hindi (Nova-3)":        "hi",
+            "English":   "en",
+            "Malayalam": "ml",
+            "Hindi":     "hi",
         }.get(self.sec_lang_var.get(), "en")
 
     def _stt_engine_code(self) -> str:
@@ -1511,6 +1569,17 @@ class VerseViewApp(ctk.CTk):
         label = self.stt_engine_var.get() if hasattr(self, "stt_engine_var") else "Deepgram"
         if "assemblyai" in label.lower():
             return "assemblyai"
+        if "sarvam" in label.lower():
+            return "sarvam"
+        return "deepgram"
+
+    def _sec_engine_code(self) -> str:
+        """Return the internal engine identifier for the secondary STT stream."""
+        label = self.sec_engine_var.get() if hasattr(self, "sec_engine_var") else "Deepgram"
+        if "assemblyai" in label.lower():
+            return "assemblyai"
+        if "sarvam" in label.lower():
+            return "sarvam"
         return "deepgram"
 
 
@@ -1561,16 +1630,16 @@ class VerseViewApp(ctk.CTk):
 
 
         if wd == 5:  # Saturday → Malayalam
-            return "Malayalam (Sarvam AI)"
+            return "Malayalam"
 
 
         if wd == 6:  # Sunday — pick the LATEST threshold that has passed
             if t >= datetime.time(16, 40):
-                return "Hindi (Nova-3)"
+                return "Hindi"
             if t >= datetime.time(10, 40):
-                return "English (Nova-3)"
+                return "English"
             if t >= datetime.time(9, 10):
-                return "English (Nova-3)"
+                return "English"
 
 
         return None  # weekday or too early — no auto-language
@@ -1603,19 +1672,31 @@ class VerseViewApp(ctk.CTk):
 
 
             missing = []
-            if not s["deepgram_api_key"] and self._lang_code() != "ml" and s.get("stt_engine", "deepgram") == "deepgram":
-                missing.append("Deepgram API Key")
-            if not s["sarvam_api_key"] and self._lang_code() == "ml":
-                missing.append("Sarvam API Key")
-            if s.get("stt_engine") == "assemblyai" and not s.get("assemblyai_api_key"):
-                missing.append("AssemblyAI API Key")
-            # Dual STT key validation
-            if s.get("dual_stt_enabled") and s.get("secondary_language"):
-                sec = s["secondary_language"]
-                if sec in ("en", "hi") and not s["deepgram_api_key"]:
-                    missing.append("Deepgram API Key (required for secondary English/Hindi stream)")
-                if sec == "ml" and not s["sarvam_api_key"]:
+            _engine    = s.get("stt_engine", "deepgram")
+            _lang_code = self._lang_code()
+            _sec_engine = s.get("secondary_stt_engine", "deepgram")
+            _sec_lang   = s.get("secondary_language")
+
+            # Primary stream key validation
+            if _engine == "deepgram" and _lang_code != "ml":
+                if not s["deepgram_api_key"]:
+                    missing.append("Deepgram API Key")
+            if _engine == "sarvam":
+                if not s["sarvam_api_key"]:
+                    missing.append("Sarvam API Key")
+            if _engine == "assemblyai":
+                if not s.get("assemblyai_api_key"):
+                    missing.append("AssemblyAI API Key")
+
+            # Secondary stream key validation
+            if s.get("dual_stt_enabled") and _sec_lang:
+                if _sec_engine == "deepgram" and not s["deepgram_api_key"]:
+                    missing.append("Deepgram API Key (required for secondary stream)")
+                if _sec_engine == "sarvam" and not s["sarvam_api_key"]:
                     missing.append("Sarvam API Key (required for secondary Malayalam stream)")
+                if _sec_engine == "assemblyai" and not s.get("assemblyai_api_key"):
+                    missing.append("AssemblyAI API Key (required for secondary stream)")
+
             if missing:
                 mb.showwarning("Missing Keys", f"Please enter in Advanced Settings:\n\n{chr(10).join(missing)}")
                 self._append_log(f"⚠️ Missing keys: {', '.join(missing)}")
@@ -1661,8 +1742,9 @@ class VerseViewApp(ctk.CTk):
                 gui_app                    = self,
                 bridge_ready_callback      = self._on_bridge_ready,
                 dual_stt_enabled           = s.get("dual_stt_enabled", False),
-                secondary_language         = s.get("secondary_language"),
-                stt_engine                 = s.get("stt_engine", "deepgram"),
+                secondary_language         = _sec_lang,
+                secondary_stt_engine       = _sec_engine,
+                stt_engine                 = _engine,
                 assemblyai_api_key         = s.get("assemblyai_api_key", ""),
             )
 

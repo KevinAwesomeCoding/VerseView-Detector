@@ -340,10 +340,10 @@ class VerseViewApp(ctk.CTk):
         # Language
         sep_label("Language")
         self.lang_var, self.lang_menu = add_option([
-            "English (Nova-2)",
-            "Malayalam (Sarvam AI)",
-            "Hindi (Nova-3)",
-            "Multi (Nova-2)",
+            "English",
+            "Malayalam",
+            "Hindi",
+            "Multi-Language",
         ])
 
         def _on_ml_raw_toggle():
@@ -1022,7 +1022,7 @@ class VerseViewApp(ctk.CTk):
     # ─────────────────────────────────────────────────
     def _load_into_ui(self):
         s = self._s
-        self.lang_var.set(s.get("language", "English (Nova-2)"))
+        self.lang_var.set(s.get("language", "English"))
         self.bible_var.set(s.get("bible_translation", "WEB").upper())
         self.live_app.set_screen(s.get("display_screen", "Display 2 (Right/Extended)"))
         self.url_entry.delete(0, "end")
@@ -1362,10 +1362,10 @@ class VerseViewApp(ctk.CTk):
 
     def _lang_code(self) -> str:
         return {
-            "English (Nova-2)":      "en",
-            "Malayalam (Sarvam AI)": "ml",
-            "Hindi (Nova-3)":        "hi",
-            "Multi (Nova-2)":        "multi",
+            "English":        "en",
+            "Malayalam":      "ml",
+            "Hindi":          "hi",
+            "Multi-Language": "multi",
         }.get(self.lang_var.get(), "en")
 
 
@@ -1416,16 +1416,16 @@ class VerseViewApp(ctk.CTk):
 
 
         if wd == 5:  # Saturday → Malayalam
-            return "Malayalam (Sarvam AI)"
+            return "Malayalam"
 
 
         if wd == 6:  # Sunday — pick the LATEST threshold that has passed
             if t >= datetime.time(16, 40):
-                return "Hindi (Nova-3)"
+                return "Hindi"
             if t >= datetime.time(10, 40):
-                return "English (Nova-2)"
+                return "English"
             if t >= datetime.time(9, 10):
-                return "English (Nova-2)"
+                return "English"
 
 
         return None  # weekday or too early — no auto-language
