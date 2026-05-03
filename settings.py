@@ -26,6 +26,7 @@ DEFAULTS = {
     "language":                   "English",
     "mic_index":                  0,
     "show_malayalam_raw":         False,
+    "malayalam_transliteration":  False,
     # ── Display ──
     "remote_url":                 "http://localhost:50010/control.html",
     "display_screen":             "Display 2 (Right/Extended)",

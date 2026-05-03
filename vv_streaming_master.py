@@ -374,6 +374,7 @@ logger.addHandler(_DiscordLogHandler(_discord_live_log))
 USE_XPATH             = sys.platform == "darwin"
 USE_SARVAM            = False
 show_malayalam_raw    = False
+MALAYALAM_TRANSLITERATION = False
 DEEPGRAM_LANGUAGE     = "en"
 DEEPGRAM_MODEL        = "nova-3"
 SARVAM_LANGUAGE       = "ml-IN"
@@ -1078,12 +1079,13 @@ def configure(
     dual_stt_enabled=False, secondary_language=None, secondary_stt_engine="deepgram",
     assemblyai_api_key="", stt_engine="deepgram",
     aai_turn_cutoff=5,
+    malayalam_transliteration=False,
 ):
     global DEEPGRAM_API_KEY, GROQ_API_KEY, GEMINI_API_KEY, CEREBRAS_API_KEY, MISTRAL_API_KEY, SARVAM_API_KEY
     global DISCORD_WEBHOOK_URL, DISCORD_LOG_WEBHOOK_URL, DISCORD_NOTES_WEBHOOK_URL
     global USE_SARVAM, DEEPGRAM_LANGUAGE, DEEPGRAM_MODEL, SARVAM_LANGUAGE
     global PRIMARY_PARSER, MIC_INDEX, RATE, CHUNK, REMOTE_URL
-    global show_malayalam_raw
+    global show_malayalam_raw, MALAYALAM_TRANSLITERATION
     global DEDUP_WINDOW, COOLDOWN, LLM_ENABLED, BIBLE_TRANSLATION, USE_XPATH
     global groq_client, cerebras_client, mistral_client
     global CONFIDENCE_THRESHOLD, REQUIRE_MANUAL_CONFIRM, CONFIRM_CALLBACK, REQUIRE_VERIFY, PANIC_KEY, SMART_AMEN_ENABLED
@@ -1132,6 +1134,7 @@ def configure(
     ASSEMBLYAI_API_KEY = assemblyai_api_key
     STT_ENGINE         = stt_engine.lower().strip() if stt_engine else "deepgram"
     AAI_TURN_CUTOFF_SEC = max(3, min(11, int(aai_turn_cutoff or 5)))
+    MALAYALAM_TRANSLITERATION = malayalam_transliteration
 
     # ── Groq: verse extraction only ──
     groq_client = _GroqClient(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
@@ -3772,12 +3775,16 @@ async def stream_audio_sarvam(controller, is_secondary=False):
             logger.info("Connecting to Sarvam AI...")
             try:
                 async with client.speech_to_text_streaming.connect(
-                    model="saaras:v3", mode="transcribe",
+                    model="saaras:v3",
+                    mode="translit" if MALAYALAM_TRANSLITERATION else "transcribe",
                     language_code=SARVAM_LANGUAGE, sample_rate=RATE,
                     high_vad_sensitivity=True, vad_signals=False,
                     input_audio_codec="pcm_s16le",
                 ) as ws:
-                    logger.info(f"Sarvam AI connected — {SARVAM_LANGUAGE} saaras:v3")
+                    logger.info(
+                        f"Sarvam AI connected — {SARVAM_LANGUAGE} saaras:v3 "
+                        f"({'translit/Manglish' if MALAYALAM_TRANSLITERATION else 'transcribe/Malayalam'})"
+                    )
                     global _sarvam_ignore_until
                     _sarvam_ignore_until = time.time() + 3.0
                     logger.info("⏳ Ignoring post-reconnect audio (3s cooldown)")
@@ -3843,29 +3850,44 @@ async def stream_audio_sarvam(controller, is_secondary=False):
                                     if time.time() < _sarvam_ignore_until:
                                         continue
 
-                                    malayalam_text = sentence
-                                    english_text = translate_to_english(sentence)
-                                    display_text = malayalam_text if show_malayalam_raw else english_text
-                                    
-                                    logger.info(f"📝 {_tag} {display_text}")
-                                    if show_malayalam_raw and english_text != malayalam_text:
-                                        logger.info(f"🔤 {_tag} {english_text}")
+                                    if MALAYALAM_TRANSLITERATION:
+                                        # ── Translit mode: Sarvam outputs Roman/Manglish directly.
+                                        # Route the romanized text through the English parser so
+                                        # Bible references (e.g. "John 3:16") are caught. Skip the
+                                        # translation step — text is already Latin script.
+                                        display_text = sentence
+                                        logger.info(f"📝 {_tag} [Manglish] {display_text}")
+                                        check_verse_queue(sentence, controller)
+                                        full_sermon_transcript += " " + sentence.strip()
+                                        if is_secondary:
+                                            full_sermon_transcript_secondary += " " + sentence.strip()
+                                        _last_transcript_time = time.time()
+                                        _process_transcript_blob(sentence, partial_context, controller, parser=_parser)
+                                    else:
+                                        # ── Transcribe mode: native Malayalam script (original behaviour).
+                                        malayalam_text = sentence
+                                        english_text = translate_to_english(sentence)
+                                        display_text = malayalam_text if show_malayalam_raw else english_text
+                                        
+                                        logger.info(f"📝 {_tag} {display_text}")
+                                        if show_malayalam_raw and english_text != malayalam_text:
+                                            logger.info(f"🔤 {_tag} {english_text}")
 
-                                    check_verse_queue(english_text, controller)
-                                    full_sermon_transcript += " " + english_text.strip()
-                                    if is_secondary:
-                                        full_sermon_transcript_secondary += " " + english_text.strip()
-                                    _last_transcript_time = time.time()
-                                    # Bug Fix 3A: Parse the original transcript (which preserves
-                                    # English book names the preacher actually said) rather than
-                                    # Sarvam's English translation, which can hallucinate names
-                                    # like "John the Baptist" from Malayalam context words.
-                                    _process_transcript_blob(malayalam_text, partial_context, controller, parser=_parser)
-                                    # Bug 1 Fix: Also detect colon-notation references that only
-                                    # appear in the auto-translation (e.g. "Matthew 3:5", "John 12:27").
-                                    # _detect_from_translation uses parse_eng and requires a colon
-                                    # so false positives from hallucinated names are minimal.
-                                    _detect_from_translation(english_text, controller)
+                                        check_verse_queue(english_text, controller)
+                                        full_sermon_transcript += " " + english_text.strip()
+                                        if is_secondary:
+                                            full_sermon_transcript_secondary += " " + english_text.strip()
+                                        _last_transcript_time = time.time()
+                                        # Bug Fix 3A: Parse the original transcript (which preserves
+                                        # English book names the preacher actually said) rather than
+                                        # Sarvam's English translation, which can hallucinate names
+                                        # like "John the Baptist" from Malayalam context words.
+                                        _process_transcript_blob(malayalam_text, partial_context, controller, parser=_parser)
+                                        # Bug 1 Fix: Also detect colon-notation references that only
+                                        # appear in the auto-translation (e.g. "Matthew 3:5", "John 12:27").
+                                        # _detect_from_translation uses parse_eng and requires a colon
+                                        # so false positives from hallucinated names are minimal.
+                                        _detect_from_translation(english_text, controller)
                                         
                                 except Exception as e:
                                     logger.error(f"Sarvam message processing error {_tag}: {e}")

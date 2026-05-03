@@ -363,6 +363,7 @@ class VerseViewApp(ctk.CTk):
             is_hi = val == "Hindi"
             is_multi = val == "Multi-Language"
             self.ml_raw_cb.configure(state="normal" if is_ml else "disabled")
+            self.ml_translit_cb.configure(state="normal" if is_ml else "disabled")
 
             # AssemblyAI streaming only supports EN/ES/DE/FR/IT/PT.
             # Malayalam uses Sarvam only; Hindi uses Deepgram only.
@@ -825,6 +826,16 @@ class VerseViewApp(ctk.CTk):
                         variable=self.smart_amen_var).grid(row=r, column=0, sticky="w", padx=10, pady=(0, 3))
         r += 1
 
+        # ── Malayalam Transliteration (Manglish) ──
+        self.ml_translit_var = ctk.BooleanVar(value=False)
+        self.ml_translit_cb = ctk.CTkCheckBox(
+            f, text="Malayalam Transliteration — Manglish/Romanized output (Sarvam translit mode)",
+            variable=self.ml_translit_var,
+            state="disabled",  # enabled only when language is Malayalam
+        )
+        self.ml_translit_cb.grid(row=r, column=0, sticky="w", padx=10, pady=(0, 3))
+        r += 1
+
         self.auto_save_var = ctk.BooleanVar(value=True)
         ctk.CTkCheckBox(f, text="Auto-Save Sermon Notes on App Close",
                         variable=self.auto_save_var).grid(row=r, column=0, sticky="w", padx=10, pady=(0, 3))
@@ -1266,8 +1277,13 @@ class VerseViewApp(ctk.CTk):
         engine.show_malayalam_raw = saved_ml_raw
         if "Malayalam" in self.lang_var.get():
             self.ml_raw_cb.configure(state="normal")
+            self.ml_translit_cb.configure(state="normal")
         else:
             self.ml_raw_cb.configure(state="disabled")
+            self.ml_translit_cb.configure(state="disabled")
+
+        saved_ml_translit = s.get("malayalam_transliteration", False)
+        self.ml_translit_var.set(saved_ml_translit)
 
         saved_panic = s.get("panic_key", "esc")
         self.panic_var.set(saved_panic)
@@ -1346,6 +1362,7 @@ class VerseViewApp(ctk.CTk):
             "auto_start":                 self.auto_start_var.get(),
             "smart_schedule":             self.smart_schedule_var.get(),
             "show_malayalam_raw":         self.ml_raw_var.get(),
+            "malayalam_transliteration":  self.ml_translit_var.get(),
             "panic_key":                  self.panic_var.get(),
             "dual_stt_enabled":           self.dual_stt_var.get(),
             "secondary_language":         self._sec_lang_code(),
@@ -1782,6 +1799,7 @@ class VerseViewApp(ctk.CTk):
                 stt_engine                 = _engine,
                 assemblyai_api_key         = s.get("assemblyai_api_key", ""),
                 aai_turn_cutoff            = s.get("aai_turn_cutoff", 5),
+                malayalam_transliteration  = s.get("malayalam_transliteration", False),
             )
 
 
