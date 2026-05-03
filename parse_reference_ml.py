@@ -653,13 +653,45 @@ def convert_word_numbers_eng(text):
         i += 1
     return " ".join(result)
 
+# Books whose names are also common English words — require a chapter/verse
+# co-signal nearby before triggering (mirrors parse_reference_eng.py guard).
+_AMBIGUOUS_BOOK_NAMES_ML: set = {
+    "Ruth", "Mark", "James", "Numbers", "Acts", "Job", "Amos",
+    "Lamentations", "Obadiah",
+}
+_COSIGNAL_RE_ML = re.compile(
+    r'\b(?:chapter|chap|ch|verse|verses|the\s+book\s+of)\b|\d',
+    re.IGNORECASE
+)
+
+# Maximum chapters per book — used to reject implausible chapter numbers
+_BOOK_CHAPTER_COUNTS_ML = {
+    "Genesis": 50, "Exodus": 40, "Leviticus": 27, "Numbers": 36, "Deuteronomy": 34,
+    "Joshua": 24, "Judges": 21, "Ruth": 4,
+    "1 Samuel": 31, "2 Samuel": 24, "1 Kings": 22, "2 Kings": 25,
+    "1 Chronicles": 29, "2 Chronicles": 36,
+    "Ezra": 10, "Nehemiah": 13, "Esther": 10, "Job": 42,
+    "Psalm": 150, "Proverbs": 31, "Ecclesiastes": 12, "Song of Solomon": 8,
+    "Isaiah": 66, "Jeremiah": 52, "Lamentations": 5, "Ezekiel": 48, "Daniel": 12,
+    "Hosea": 14, "Joel": 3, "Amos": 9, "Obadiah": 1, "Jonah": 4, "Micah": 7,
+    "Nahum": 3, "Habakkuk": 3, "Zephaniah": 3, "Haggai": 2, "Zechariah": 14, "Malachi": 4,
+    "Matthew": 28, "Mark": 16, "Luke": 24, "John": 21, "Acts": 28, "Romans": 16,
+    "1 Corinthians": 16, "2 Corinthians": 13, "Galatians": 6, "Ephesians": 6,
+    "Philippians": 4, "Colossians": 4, "1 Thessalonians": 5, "2 Thessalonians": 3,
+    "1 Timothy": 6, "2 Timothy": 4, "Titus": 3, "Philemon": 1, "Hebrews": 13,
+    "James": 5, "1 Peter": 5, "2 Peter": 3, "1 John": 5, "2 John": 1, "3 John": 1,
+    "Jude": 1, "Revelation": 22,
+}
+
 def resolve_book_eng(bookraw: str):
     b = bookraw.strip().lower()
     if b in BOOKS_ENG:
         return BOOKS_ENG[b]
+    # Word-boundary search — prevents "am" (Amos) matching inside "sanctuary",
+    # "acts" matching inside "lamentations", etc.
     if len(b) >= 4:
         for key in BOOKS_ENG:
-            if key in b or b in key:
+            if len(key) >= 4 and re.search(r'\b' + re.escape(key) + r'\b', b):
                 return BOOKS_ENG[key]
     return None
 
@@ -794,8 +826,23 @@ def parse_references(text: str):
 
     for m in REF_RE_ENG.finditer(t_eng):
         eng = resolve_book_eng(m.group("book"))
-        if eng:
-            results.append(f"{eng} {m.group('chap')}{(':'+ m.group('verses')) if m.group('verses') else ''}")
+        if not eng:
+            continue
+        # Ambiguous book names require a chapter/verse co-signal nearby
+        if eng in _AMBIGUOUS_BOOK_NAMES_ML:
+            raw_start = max(0, m.start() - 60)
+            raw_end   = min(len(text), m.end() + 60)
+            if not _COSIGNAL_RE_ML.search(text[raw_start:raw_end]):
+                continue
+        # Reject implausible chapter numbers
+        try:
+            chap_int = int(m.group("chap"))
+            max_chap = _BOOK_CHAPTER_COUNTS_ML.get(eng, 999)
+            if chap_int > max_chap:
+                continue
+        except (ValueError, TypeError):
+            pass
+        results.append(f"{eng} {m.group('chap')}{(':' + m.group('verses')) if m.group('verses') else ''}")
 
     if results:
         return results

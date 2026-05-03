@@ -1577,7 +1577,7 @@ class VerseViewApp(ctk.CTk):
 
     def _attach_log_handler(self):
         handler = GUILogHandler(self._append_log)
-        handler.setFormatter(logging.Formatter('%(asctime)s %(levelname)s  %(message)s'))
+        handler.setFormatter(logging.Formatter('%(asctime)s  %(message)s', datefmt='%H:%M'))
         logging.getLogger().addHandler(handler)
 
 

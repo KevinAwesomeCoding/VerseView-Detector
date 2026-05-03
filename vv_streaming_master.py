@@ -325,15 +325,28 @@ class _DiscordLogHandler(logging.Handler):
         super().__init__()
         self._live = live_log
 
+    @staticmethod
+    def _is_garbage_line(msg: str) -> bool:
+        """Return True if this log line should be kept out of the Discord live feed.
+        Criteria: the message body contains a large proportion of Malayalam Unicode
+        characters, indicating an untranslated / garbled transcript blob that would
+        appear as random script to Discord viewers.  The full log file still keeps
+        every line."""
+        # Strip the leading timestamp prefix ("HH:MM:SS ") before measuring
+        body = msg[9:] if len(msg) > 9 else msg
+        ml_chars = sum(1 for c in body if '\u0D00' <= c <= '\u0D7F')
+        total    = len(body.replace(' ', ''))
+        return total > 0 and (ml_chars / total) > 0.35
+
     def emit(self, record):
         if not DISCORD_LOG_WEBHOOK_URL:
             return
         try:
             import datetime as _dt
             if record.levelno >= logging.INFO:
-                self._live.append(
-                    f"{_dt.datetime.now().strftime('%H:%M:%S')} {record.getMessage()}"
-                )
+                line = f"{_dt.datetime.now().strftime('%H:%M:%S')} {record.getMessage()}"
+                if not self._is_garbage_line(line):
+                    self._live.append(line)
         except Exception:
             pass
 
@@ -1811,6 +1824,26 @@ def translate_to_english(text: str) -> str:
     if not text.strip():
         return text
 
+    def _is_bad_translation(original: str, result: str) -> bool:
+        """Return True if result looks like a failed/offensive/nonsensical translation."""
+        if not result or not result.strip():
+            return True
+        r = result.strip()
+        # Suspiciously short when input was long
+        if len(original) > 30 and len(r) < 3:
+            return True
+        # Still contains substantial Malayalam Unicode (translation didn't work)
+        ml_chars = sum(1 for c in r if '\u0D00' <= c <= '\u0D7F')
+        if ml_chars > len(r) * 0.3:
+            return True
+        # Looks like an API error message
+        if any(phrase in r.lower() for phrase in [
+            "i cannot", "i can't", "translation failed", "error",
+            "sorry", "unable to", "not able to",
+        ]):
+            return True
+        return False
+
     try:
         url = "https://api.sarvam.ai/translate"
         headers = {
@@ -1829,7 +1862,7 @@ def translate_to_english(text: str) -> str:
         r = requests.post(url, headers=headers, json=payload, timeout=5, verify=certifi.where())
         if r.status_code == 200:
             translated = r.json().get("translated_text", "")
-            if translated:
+            if translated and not _is_bad_translation(text, translated):
                 return translated
     except Exception as e:
         logger.debug(f"Sarvam translate exception: {e}")
@@ -1845,7 +1878,7 @@ def translate_to_english(text: str) -> str:
             )
             if r.status_code == 200:
                 translated = r.json()["choices"][0]["message"]["content"].strip()
-                if translated and not translated.lower().startswith("translate this"):
+                if translated and not translated.lower().startswith("translate this") and not _is_bad_translation(text, translated):
                     return translated
     except Exception as e:
         logger.debug(f"Groq translate exception: {e}")
@@ -2575,20 +2608,42 @@ def _is_range_not_verse(sentence: str, chap: str, verse: str) -> bool:
 
     return False
 
-# ── Bug Fix 1: Book-count guard ───────────────────────────────────────────────
+# ── Bug Fix 1: Book-count / money guard ─────────────────────────────────────
 _BOOK_COUNT_RE = re.compile(
     r'\b(\d+)\s+(?:books?|episodes?|letters?|chapters?|times?|words?|'
     r'missionaries|journeys?|trips?|people|men|women|'
+    r'dollars?|rupees?|cents?|paise?|\$|£|€|'
+    r'percent|percentage|%|'
+    r'members?|families|churches?|nations?|countries|'
+    r'days?|weeks?|months?|years?|hours?|minutes?|'
     r'പുസ്തകങ്ങൾ|പുസ്തകം)',
     re.IGNORECASE
 )
 
+# Sentences that are clearly about money/offerings — a number here is NOT a verse
+_MONEY_CONTEXT_RE = re.compile(
+    r'\b(?:offer(?:ing)?s?|tithe|donation|collection|amount|'
+    r'rupee|dollar|cent|paise|\$|£|€|'
+    r'percent|percentage|%|'
+    r'budget|fund|money|pay(?:ment)?|salary|'
+    r'പ്രണ്ടിക്കൾ|കാണിക്ക|ദശാംശ)\b',
+    re.IGNORECASE
+)
+
 def _is_book_count_number(text: str, num_str: str) -> bool:
-    """Return True if num_str appears as a book-count quantity in text.
-    e.g. 'the last three books' → '3' is a count, not a chapter number."""
+    """Return True if num_str appears as a book-count or money quantity in text.
+    e.g. 'the last three books' → '3' is a count, not a chapter number.
+    e.g. '100 dollars offered' → '100' is money, not a verse."""
     for m in _BOOK_COUNT_RE.finditer(text):
         if m.group(1) == num_str:
             return True
+    # If the sentence context is clearly about money/offerings, any large number is suspect
+    if _MONEY_CONTEXT_RE.search(text):
+        try:
+            if int(num_str) >= 10:
+                return True
+        except ValueError:
+            pass
     return False
 
 
@@ -3475,6 +3530,10 @@ def _detect_from_translation(english_text: str, controller) -> bool:
     for ref in refs:
         if ":" not in ref:
             continue  # chapter-only guesses from translated text are too risky
+        # Require the translated text to be substantial enough to be reliable.
+        # Very short translations (e.g. hallucinated "Joel 3:5") are discarded.
+        if len(english_text.split()) < 5:
+            continue
         if _is_book_count_number(english_text, ref.split()[-1].split(":")[0]):
             continue
         if _reject_verse_out_of_range(ref):
@@ -3527,7 +3586,12 @@ def _process_transcript_blob(sentence: str, partial_context_ref: list, controlle
             break
         check_verse_queue(part, controller)
         partial_context += " " + part
-        found = detect_verse_hybrid(partial_context.strip(), controller, confidence=1.0, parser=parser)
+        # Ambiguity penalty: very short blobs (≤3 words) are high-ambiguity fragments.
+        # Reduce confidence so the contextual / sequential layers can't fire from a
+        # 2-word burst alone — they need a stronger signal.
+        _blob_words    = len(partial_context.split())
+        _blob_conf     = 1.0 if _blob_words > 3 else 0.75
+        found = detect_verse_hybrid(partial_context.strip(), controller, confidence=_blob_conf, parser=parser)
         if found:
             partial_context = ""
             break
