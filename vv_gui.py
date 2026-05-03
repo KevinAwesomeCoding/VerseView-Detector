@@ -207,10 +207,31 @@ class VerseViewApp(ctk.CTk):
             self._log_container, state="disabled",
             font=("Segoe UI", 12), wrap="word"
         )
+        self._left_weight = 1000
+        self._right_weight = 1000
+
         # Divider between the two panels (hidden until dual mode enabled)
         self._log_divider = ctk.CTkFrame(
-            self._log_container, width=2, fg_color=("gray75", "gray30")
+            self._log_container, width=4, fg_color=("gray60", "gray40"),
+            cursor="sb_h_double_arrow"
         )
+        
+        def _on_divider_drag(event):
+            c_width = self._log_container.winfo_width()
+            if c_width < 100: return
+            x_rel = event.x_root - self._log_container.winfo_rootx()
+            min_w = 150
+            if x_rel < min_w: x_rel = min_w
+            elif x_rel > c_width - min_w: x_rel = c_width - min_w
+            
+            self._left_weight = int((x_rel / c_width) * 1000)
+            self._right_weight = 1000 - self._left_weight
+            self._log_container.grid_columnconfigure(0, weight=self._left_weight)
+            self._log_container.grid_columnconfigure(2, weight=self._right_weight)
+            
+        self._log_divider.bind("<B1-Motion>", _on_divider_drag)
+        self._log_divider.bind("<Button-1>", _on_divider_drag)
+
 
         # Read the actual rendered bg color from log_box so scroll frames match exactly
         _log_fg = ("gray86", "gray17")
@@ -411,7 +432,7 @@ class VerseViewApp(ctk.CTk):
             self.stt_engine_menu.configure(values=new_opts)
             # Reset to the first (default) option for the new language
             self.stt_engine_var.set(new_opts[0])
-            _on_stt_engine_changed(new_opts[0])
+            self._update_log_headers()
 
         self.lang_menu.configure(command=_on_lang_changed)
 
@@ -424,11 +445,8 @@ class VerseViewApp(ctk.CTk):
             "AssemblyAI (Universal-3 Multilingual)",
         ])
 
-        def _on_stt_engine_changed(val):
-            if hasattr(self, "_update_aai_key_visibility"):
-                self._update_aai_key_visibility()
-
-        self.stt_engine_menu.configure(command=_on_stt_engine_changed)
+        # Live-update headers when engine changes
+        self.stt_engine_menu.configure(command=lambda _: self._update_log_headers())
 
 
         # ── Dual STT toggle ──
@@ -798,23 +816,7 @@ class VerseViewApp(ctk.CTk):
         else:
             self.bot_status_lbl.configure(text="⏸ Waiting for engine…", text_color="#888888")
         self._bot_process = None
-    def _update_aai_key_visibility(self):
-        """Show the AssemblyAI key field if either the primary or secondary STT engine is set to AssemblyAI."""
-        if not hasattr(self, "aai_key_label"):
-            return
-            
-        show_aai = False
-        if hasattr(self, "stt_engine_var") and "assemblyai" in self.stt_engine_var.get().lower():
-            show_aai = True
-        if hasattr(self, "sec_engine_var") and "assemblyai" in self.sec_engine_var.get().lower():
-            show_aai = True
-            
-        if show_aai:
-            self.aai_key_label.grid()
-            self.aai_key_entry.grid()
-        else:
-            self.aai_key_label.grid_remove()
-            self.aai_key_entry.grid_remove()
+
 
 
     def _build_options(self):
@@ -1034,16 +1036,10 @@ class VerseViewApp(ctk.CTk):
                 new_opts = ["Deepgram", "AssemblyAI (Universal-3 Pro)", "AssemblyAI (Universal-3 Multilingual)"]
             self.sec_engine_menu.configure(values=new_opts)
             self.sec_engine_var.set(new_opts[0])
-            if hasattr(self, "_update_aai_key_visibility"):
-                self._update_aai_key_visibility()
+            self._update_log_headers()
 
         self.sec_lang_menu.configure(command=_on_sec_lang_changed)
-        
-        def _on_sec_engine_changed(val):
-            if hasattr(self, "_update_aai_key_visibility"):
-                self._update_aai_key_visibility()
-                
-        self.sec_engine_menu.configure(command=_on_sec_engine_changed)
+        self.sec_engine_menu.configure(command=lambda _: self._update_log_headers())
 
     def _toggle_options(self):
         self._opts_open = not self._opts_open
@@ -1105,6 +1101,7 @@ class VerseViewApp(ctk.CTk):
             ("Groq API Key",              "or_key_entry"),
             ("Gemini API Key",            "gm_key_entry"),
             ("Sarvam Key",                "sv_key_entry"),
+            ("AssemblyAI Key",            "aai_key_entry"),
             ("Discord Webhook URL",       "dc_key_entry"),
             ("Discord Log Webhook URL",   "dc_log_key_entry"),
             ("Discord Notes Webhook URL", "dc_notes_key_entry"),
@@ -1118,23 +1115,8 @@ class VerseViewApp(ctk.CTk):
             e.grid(row=n+2+j, column=1, padx=10, pady=4, sticky="ew")
             setattr(self, attr, e)
 
-        # ── AssemblyAI key row (shown/hidden by STT engine dropdown) ──
-        # Placed immediately after the key_fields block; sync section is offset below.
-        _aai_row = n + 2 + len(key_fields)          # row 16 (5+2+9)
-        self.aai_key_label = ctk.CTkLabel(self.adv_frame, text="AssemblyAI Key", anchor="w")
-        self.aai_key_label.grid(row=_aai_row, column=0, padx=10, pady=4, sticky="w")
-        
-        self.aai_key_entry = ctk.CTkEntry(
-            self.adv_frame, show="•", width=200,
-            placeholder_text="Paste key here"
-        )
-        self.aai_key_entry.grid(row=_aai_row, column=1, padx=10, pady=4, sticky="ew")
-        
-        self.aai_key_label.grid_remove()  # hidden until AssemblyAI is selected
-        self.aai_key_entry.grid_remove()  # hidden until AssemblyAI is selected
-
-        # ── Settings Sync ──  (starts one row below the AAI key row)
-        sync_row = _aai_row + 1                      # row 17
+        # ── Settings Sync ──
+        sync_row = n + 2 + len(key_fields) + 1
         ctk.CTkLabel(
             self.adv_frame, text="─── Settings Sync ───", anchor="w",
             font=ctk.CTkFont(size=12, weight="bold"),
@@ -1313,13 +1295,7 @@ class VerseViewApp(ctk.CTk):
         }.get(saved_engine, "Deepgram")
         if hasattr(self, "stt_engine_var"):
             self.stt_engine_var.set(engine_label)
-        # Show/hide the AAI key field to match saved engine choice
-        if hasattr(self, "_update_aai_key_visibility"):
-            self._update_aai_key_visibility()
-        saved_aai_key = s.get("assemblyai_api_key", "")
-        if hasattr(self, "aai_key_entry") and saved_aai_key:
-            self.aai_key_entry.delete(0, "end")
-            self.aai_key_entry.insert(0, saved_aai_key)
+
 
         saved_ml_raw = s.get("show_malayalam_raw", False)
         self.ml_raw_var.set(saved_ml_raw)
@@ -1375,7 +1351,7 @@ class VerseViewApp(ctk.CTk):
         self.atem_ip_entry.delete(0, "end");  self.atem_ip_entry.insert(0,  s.get("atem_ip", ""))
         self.atem_dur_entry.delete(0, "end"); self.atem_dur_entry.insert(0, str(s.get("atem_key_duration", 5.0)))
 
-        # ── load all 3 Discord webhook URLs ──
+        # ── load all webhook and API keys ──
         for attr, key in [
             ("dg_key_entry",       "deepgram_api_key"),
             ("cb_key_entry",       "cerebras_api_key"),
@@ -1383,6 +1359,7 @@ class VerseViewApp(ctk.CTk):
             ("or_key_entry",       "groq_api_key"),
             ("gm_key_entry",       "gemini_api_key"),
             ("sv_key_entry",       "sarvam_api_key"),
+            ("aai_key_entry",      "assemblyai_api_key"),
             ("dc_key_entry",       "discord_webhook_url"),
             ("dc_log_key_entry",   "discord_log_webhook_url"),
             ("dc_notes_key_entry", "discord_notes_webhook_url"),
@@ -1634,24 +1611,32 @@ class VerseViewApp(ctk.CTk):
         """Show/hide the secondary log panel and update both header labels.
         In dual mode the log area splits into two side-by-side panes.
         """
-        if enabled:
-            # Build header text from current dropdown selections
+    def _update_log_headers(self):
+        """Update the log header text dynamically when dropdowns change."""
+        if hasattr(self, "_pri_header") and hasattr(self, "dual_stt_var") and self.dual_stt_var.get():
             pri_engine = self.stt_engine_var.get() if hasattr(self, "stt_engine_var") else "Primary"
             sec_engine = self.sec_engine_var.get()  if hasattr(self, "sec_engine_var")  else "Secondary"
             pri_lang   = self.lang_var.get()         if hasattr(self, "lang_var")         else ""
             sec_lang   = self.sec_lang_var.get()     if hasattr(self, "sec_lang_var")     else ""
-            self._pri_header.configure(
-                text=f"🎙 Primary — {pri_engine}  ({pri_lang})"
-            )
-            self._sec_header.configure(
-                text=f"🎙 Secondary — {sec_engine}  ({sec_lang})"
-            )
+            self._pri_header.configure(text=f"🎙 Primary — {pri_engine}  ({pri_lang})")
+            self._sec_header.configure(text=f"🎙 Secondary — {sec_engine}  ({sec_lang})")
+
+    def _set_dual_log_view(self, enabled: bool):
+        """Show/hide the secondary log panel and update both header labels.
+        In dual mode the log area splits into two side-by-side panes.
+        """
+        if enabled:
+            self._log_container.grid_columnconfigure(0, weight=getattr(self, "_left_weight", 1000))
+            self._log_container.grid_columnconfigure(2, weight=getattr(self, "_right_weight", 1000))
+            self._update_log_headers()
             # Show headers in row 0, log boxes in row 1, divider spans both rows
             self._pri_header.grid(row=0, column=0, sticky="ew", padx=(0, 4), pady=(0, 2))
             self._sec_header.grid(row=0, column=2, sticky="ew", padx=(4, 0), pady=(0, 2))
-            self._log_divider.grid(row=0, column=1, rowspan=2, sticky="ns", padx=4)
+            self._log_divider.grid(row=0, column=1, rowspan=2, sticky="ns", padx=2)
             self._sec_log_box.grid(row=1, column=2, sticky="nsew")
         else:
+            self._log_container.grid_columnconfigure(0, weight=1)
+            self._log_container.grid_columnconfigure(2, weight=0)
             self._pri_header.grid_remove()
             self._sec_header.grid_remove()
             self._log_divider.grid_remove()
