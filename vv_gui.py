@@ -175,11 +175,42 @@ class VerseViewApp(ctk.CTk):
         split_frame.grid_columnconfigure(0, weight=1) 
         split_frame.grid_columnconfigure(1, weight=0) # lock sidebar width
 
+        # Container for the log area — expands horizontally to support split view
+        self._log_container = ctk.CTkFrame(split_frame, fg_color="transparent")
+        self._log_container.grid(row=1, column=0, padx=(0, 2), sticky="nsew")
+        self._log_container.grid_rowconfigure(1, weight=1)
+        self._log_container.grid_columnconfigure(0, weight=1)   # primary — always present
+        self._log_container.grid_columnconfigure(1, weight=0)   # divider — fixed 2px
+        self._log_container.grid_columnconfigure(2, weight=1)   # secondary — shown in dual mode
+
+        # Primary header label (shown only in dual mode)
+        self._pri_header = ctk.CTkLabel(
+            self._log_container, text="Primary",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            text_color=("gray35", "gray65"), anchor="w",
+        )
+        # NOT gridded yet — _set_dual_log_view() controls visibility
+
         self.log_box = ctk.CTkTextbox(
-            split_frame, state="disabled",
+            self._log_container, state="disabled",
             font=("Segoe UI", 12), wrap="word"
         )
-        self.log_box.grid(row=1, column=0, padx=(0, 2), sticky="nsew")
+        self.log_box.grid(row=1, column=0, sticky="nsew")
+
+        # Secondary header + panel (hidden until dual mode is enabled)
+        self._sec_header = ctk.CTkLabel(
+            self._log_container, text="Secondary",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            text_color=("gray35", "gray65"), anchor="w",
+        )
+        self._sec_log_box = ctk.CTkTextbox(
+            self._log_container, state="disabled",
+            font=("Segoe UI", 12), wrap="word"
+        )
+        # Divider between the two panels (hidden until dual mode enabled)
+        self._log_divider = ctk.CTkFrame(
+            self._log_container, width=2, fg_color=("gray75", "gray30")
+        )
 
         # Read the actual rendered bg color from log_box so scroll frames match exactly
         _log_fg = ("gray86", "gray17")
@@ -394,14 +425,8 @@ class VerseViewApp(ctk.CTk):
         ])
 
         def _on_stt_engine_changed(val):
-            # Show/hide the AssemblyAI key row in Advanced based on selection
-            if hasattr(self, "aai_key_label"):
-                if "assemblyai" in val.lower():
-                    self.aai_key_label.grid()
-                    self.aai_key_entry.grid()
-                else:
-                    self.aai_key_label.grid_remove()
-                    self.aai_key_entry.grid_remove()
+            if hasattr(self, "_update_aai_key_visibility"):
+                self._update_aai_key_visibility()
 
         self.stt_engine_menu.configure(command=_on_stt_engine_changed)
 
@@ -773,6 +798,24 @@ class VerseViewApp(ctk.CTk):
         else:
             self.bot_status_lbl.configure(text="⏸ Waiting for engine…", text_color="#888888")
         self._bot_process = None
+    def _update_aai_key_visibility(self):
+        """Show the AssemblyAI key field if either the primary or secondary STT engine is set to AssemblyAI."""
+        if not hasattr(self, "aai_key_label"):
+            return
+            
+        show_aai = False
+        if hasattr(self, "stt_engine_var") and "assemblyai" in self.stt_engine_var.get().lower():
+            show_aai = True
+        if hasattr(self, "sec_engine_var") and "assemblyai" in self.sec_engine_var.get().lower():
+            show_aai = True
+            
+        if show_aai:
+            self.aai_key_label.grid()
+            self.aai_key_entry.grid()
+        else:
+            self.aai_key_label.grid_remove()
+            self.aai_key_entry.grid_remove()
+
 
     def _build_options(self):
         f = self.opts_frame
@@ -920,10 +963,11 @@ class VerseViewApp(ctk.CTk):
 
 
     def _on_dual_stt_toggle(self):
-        """Enable/disable the secondary language/engine dropdowns based on the Dual STT checkbox."""
+        """Enable/disable the secondary language/engine dropdowns and split log view."""
         state = "normal" if self.dual_stt_var.get() else "disabled"
         self.sec_lang_menu.configure(state=state)
         self.sec_engine_menu.configure(state=state)
+        self._set_dual_log_view(self.dual_stt_var.get())
 
     def _toggle_dual_stt(self):
         self._dual_stt_open = not self._dual_stt_open
@@ -990,8 +1034,16 @@ class VerseViewApp(ctk.CTk):
                 new_opts = ["Deepgram", "AssemblyAI (Universal-3 Pro)", "AssemblyAI (Universal-3 Multilingual)"]
             self.sec_engine_menu.configure(values=new_opts)
             self.sec_engine_var.set(new_opts[0])
+            if hasattr(self, "_update_aai_key_visibility"):
+                self._update_aai_key_visibility()
 
         self.sec_lang_menu.configure(command=_on_sec_lang_changed)
+        
+        def _on_sec_engine_changed(val):
+            if hasattr(self, "_update_aai_key_visibility"):
+                self._update_aai_key_visibility()
+                
+        self.sec_engine_menu.configure(command=_on_sec_engine_changed)
 
     def _toggle_options(self):
         self._opts_open = not self._opts_open
@@ -1234,6 +1286,8 @@ class VerseViewApp(ctk.CTk):
         _dual_state = "normal" if saved_dual else "disabled"
         self.sec_lang_menu.configure(state=_dual_state)
         self.sec_engine_menu.configure(state=_dual_state)
+        # Restore split-view state to match saved setting
+        self._set_dual_log_view(saved_dual)
 
         # STT Engine — must restore dropdown options first based on saved language
         saved_lang_code = self._lang_code()
@@ -1260,13 +1314,8 @@ class VerseViewApp(ctk.CTk):
         if hasattr(self, "stt_engine_var"):
             self.stt_engine_var.set(engine_label)
         # Show/hide the AAI key field to match saved engine choice
-        if hasattr(self, "aai_key_label"):
-            if "assemblyai" in saved_engine:
-                self.aai_key_label.grid()
-                self.aai_key_entry.grid()
-            else:
-                self.aai_key_label.grid_remove()
-                self.aai_key_entry.grid_remove()
+        if hasattr(self, "_update_aai_key_visibility"):
+            self._update_aai_key_visibility()
         saved_aai_key = s.get("assemblyai_api_key", "")
         if hasattr(self, "aai_key_entry") and saved_aai_key:
             self.aai_key_entry.delete(0, "end")
@@ -1581,14 +1630,53 @@ class VerseViewApp(ctk.CTk):
         logging.getLogger().addHandler(handler)
 
 
+    def _set_dual_log_view(self, enabled: bool):
+        """Show/hide the secondary log panel and update both header labels.
+        In dual mode the log area splits into two side-by-side panes.
+        """
+        if enabled:
+            # Build header text from current dropdown selections
+            pri_engine = self.stt_engine_var.get() if hasattr(self, "stt_engine_var") else "Primary"
+            sec_engine = self.sec_engine_var.get()  if hasattr(self, "sec_engine_var")  else "Secondary"
+            pri_lang   = self.lang_var.get()         if hasattr(self, "lang_var")         else ""
+            sec_lang   = self.sec_lang_var.get()     if hasattr(self, "sec_lang_var")     else ""
+            self._pri_header.configure(
+                text=f"🎙 Primary — {pri_engine}  ({pri_lang})"
+            )
+            self._sec_header.configure(
+                text=f"🎙 Secondary — {sec_engine}  ({sec_lang})"
+            )
+            # Show headers in row 0, log boxes in row 1, divider spans both rows
+            self._pri_header.grid(row=0, column=0, sticky="ew", padx=(0, 4), pady=(0, 2))
+            self._sec_header.grid(row=0, column=2, sticky="ew", padx=(4, 0), pady=(0, 2))
+            self._log_divider.grid(row=0, column=1, rowspan=2, sticky="ns", padx=4)
+            self._sec_log_box.grid(row=1, column=2, sticky="nsew")
+        else:
+            self._pri_header.grid_remove()
+            self._sec_header.grid_remove()
+            self._log_divider.grid_remove()
+            self._sec_log_box.grid_remove()
+
     def _append_log(self, msg: str):
         def _do():
-            at_bottom = self.log_box.yview()[1] >= 0.99
-            self.log_box.configure(state="normal")
-            self.log_box.insert("end", msg + "\n")
+            # ── Route secondary transcript lines to the secondary panel ──
+            # Tags emitted by the streaming engine:
+            #   Primary:   [PRI]  [PRI-ML]  [Manglish]  [AAI]
+            #   Secondary: [SEC]  [SEC-ML]  [AAI-SEC]
+            _is_secondary = (
+                "[SEC]" in msg or "[SEC-ML]" in msg or "[AAI-SEC]" in msg
+            )
+            if _is_secondary and hasattr(self, "_sec_log_box") and self._sec_log_box.winfo_ismapped():
+                target = self._sec_log_box
+            else:
+                target = self.log_box
+
+            at_bottom = target.yview()[1] >= 0.99
+            target.configure(state="normal")
+            target.insert("end", msg + "\n")
             if at_bottom:
-                self.log_box.see("end")
-            self.log_box.configure(state="disabled")
+                target.see("end")
+            target.configure(state="disabled")
         self.after(0, _do)
 
 
@@ -1596,6 +1684,10 @@ class VerseViewApp(ctk.CTk):
         self.log_box.configure(state="normal")
         self.log_box.delete("1.0", "end")
         self.log_box.configure(state="disabled")
+        if hasattr(self, "_sec_log_box"):
+            self._sec_log_box.configure(state="normal")
+            self._sec_log_box.delete("1.0", "end")
+            self._sec_log_box.configure(state="disabled")
 
 
     def _lang_code(self) -> str:
