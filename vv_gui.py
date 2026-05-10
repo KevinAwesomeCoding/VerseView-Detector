@@ -1774,12 +1774,68 @@ class VerseViewApp(ctk.CTk):
         return None  # weekday or too early — no auto-language
 
 
+    def _apply_schedule_dual_stt(self, lang: str):
+        """Configure Dual STT UI state based on the scheduled language.
+
+        Rules:
+          • English  → disable Dual STT (single-stream, no secondary needed)
+          • Malayalam → enable Dual STT; primary=Malayalam, secondary=English
+          • Hindi     → enable Dual STT; primary=Hindi,     secondary=English
+
+        The primary STT engine is left as whatever the user saved as their
+        default (stt_engine_var is not touched here).  The secondary engine
+        defaults to Deepgram, which supports English on all plans.
+        """
+        if lang == "English":
+            # Disable Dual STT
+            self.dual_stt_var.set(False)
+            self.sec_lang_menu.configure(state="disabled")
+            self.sec_engine_menu.configure(state="disabled")
+            self._set_dual_log_view(False)
+            self._append_log("📅 Smart Schedule: Dual STT disabled (English service)")
+
+        elif lang in ("Malayalam", "Hindi"):
+            # Enable Dual STT with English as the secondary stream
+            self.dual_stt_var.set(True)
+
+            # Secondary language → English
+            self.sec_lang_var.set("English")
+            self.sec_engine_menu.configure(
+                values=["Deepgram", "AssemblyAI (Universal-3 Pro)", "AssemblyAI (Universal-3 Multilingual)"]
+            )
+            # Preserve the user's saved secondary engine if it is valid for English,
+            # otherwise fall back to Deepgram.
+            s = self._collect_settings()
+            saved_sec_engine = s.get("secondary_stt_engine", "deepgram")
+            _label_map = {
+                "assemblyai_pro":          "AssemblyAI (Universal-3 Pro)",
+                "assemblyai_multilingual": "AssemblyAI (Universal-3 Multilingual)",
+                "assemblyai":              "AssemblyAI (Universal-3 Pro)",
+                "deepgram":                "Deepgram",
+            }
+            # sarvam is not valid for English secondary; fall back to deepgram
+            sec_label = _label_map.get(saved_sec_engine, "Deepgram")
+            self.sec_engine_var.set(sec_label)
+
+            # Enable dropdowns and expand the Dual STT panel if not already open
+            self.sec_lang_menu.configure(state="normal")
+            self.sec_engine_menu.configure(state="normal")
+            if not self._dual_stt_open:
+                self._toggle_dual_stt()
+            self._set_dual_log_view(True)
+            self._update_log_headers()
+            self._append_log(
+                f"📅 Smart Schedule: Dual STT enabled "
+                f"(primary={lang}, secondary=English [{sec_label}])"
+            )
+
     def _check_auto_start(self):
         """Called once after the window opens. Applies smart schedule then auto-starts if enabled."""
         if self.smart_schedule_var.get():
             lang = self._get_scheduled_language()
             if lang:
                 self.lang_var.set(lang)
+                self._apply_schedule_dual_stt(lang)
                 self._append_log(f"📅 Smart Schedule: language set to {lang}")
             else:
                 self._append_log("📅 Smart Schedule: no service detected for current day/time")
@@ -2447,6 +2503,11 @@ class VerseViewApp(ctk.CTk):
             ctrl.driver.execute_script("arguments[0].click();", ctrl.btn)
             self._append_log(f"✏️ Manual verse sent: {ref}")
             self.manual_verse_entry.delete(0, "end")
+            # Add to verse history so it appears in the history panel and session notes
+            try:
+                engine.add_to_verse_history(ref, source="MANUAL-ENTRY")
+            except Exception:
+                pass
         except Exception as e:
             mb.showerror("Send Error", f"Failed to send verse:\n{e}")
 
@@ -2528,6 +2589,11 @@ class VerseViewApp(ctk.CTk):
                     engine.set_context(book_ctx, chap_ctx, v)
                 except Exception:
                     pass
+            # Add to verse history so it appears in the history panel and session notes
+            try:
+                engine.add_to_verse_history(ref, source="CHAPTER-BROWSER")
+            except Exception:
+                pass
         except Exception as e:
             mb.showerror("Send Error", f"Failed to send verse:\n{e}")
 

@@ -1431,12 +1431,51 @@ class VerseViewApp(ctk.CTk):
         return None  # weekday or too early — no auto-language
 
 
+    def _apply_schedule_dual_stt(self, lang: str):
+        """Store dual STT overrides for use when the engine starts.
+
+        Rules (applied by Smart Schedule only):
+          • English  → disable Dual STT
+          • Malayalam → enable Dual STT; secondary=English
+          • Hindi     → enable Dual STT; secondary=English
+
+        Primary STT engine is whatever the user saved as default (not touched).
+        Secondary engine defaults to Deepgram (always valid for English).
+        """
+        s = cfg.load()
+        if lang == "English":
+            self._schedule_dual_stt_override = {
+                "dual_stt_enabled": False,
+                "secondary_language": None,
+                "secondary_stt_engine": s.get("secondary_stt_engine", "deepgram"),
+            }
+            self._append_log("📅 Smart Schedule: Dual STT disabled (English service)")
+        elif lang in ("Malayalam", "Hindi"):
+            # Preserve the user's saved secondary engine if valid for English secondary,
+            # otherwise fall back to Deepgram.
+            saved_sec_engine = s.get("secondary_stt_engine", "deepgram")
+            # sarvam is Malayalam-only; not valid for English secondary
+            sec_engine = saved_sec_engine if saved_sec_engine != "sarvam" else "deepgram"
+            self._schedule_dual_stt_override = {
+                "dual_stt_enabled": True,
+                "secondary_language": "en",
+                "secondary_stt_engine": sec_engine,
+            }
+            self._append_log(
+                f"📅 Smart Schedule: Dual STT enabled "
+                f"(primary={lang}, secondary=English [{sec_engine}])"
+            )
+        else:
+            self._schedule_dual_stt_override = None
+
     def _check_auto_start(self):
         """Called once after the window opens. Applies smart schedule then auto-starts if enabled."""
+        self._schedule_dual_stt_override = None  # reset each launch
         if self.smart_schedule_var.get():
             lang = self._get_scheduled_language()
             if lang:
                 self.lang_var.set(lang)
+                self._apply_schedule_dual_stt(lang)
                 self._append_log(f"📅 Smart Schedule: language set to {lang}")
             else:
                 self._append_log("📅 Smart Schedule: no service detected for current day/time")
@@ -1467,6 +1506,12 @@ class VerseViewApp(ctk.CTk):
                 self._append_log(f"⚠️ Missing keys: {', '.join(missing)}")
                 return
 
+
+            # ── Apply Smart Schedule dual STT overrides if present ──
+            _dual_override = getattr(self, "_schedule_dual_stt_override", None) or {}
+            _dual_enabled   = _dual_override.get("dual_stt_enabled",    s.get("dual_stt_enabled",    False))
+            _sec_lang       = _dual_override.get("secondary_language",   s.get("secondary_language",  None))
+            _sec_engine     = _dual_override.get("secondary_stt_engine", s.get("secondary_stt_engine","deepgram"))
 
             # ── pass all 3 Discord webhook URLs to the engine ──
             engine.configure(
@@ -1506,6 +1551,9 @@ class VerseViewApp(ctk.CTk):
                 atem_key_duration          = s.get("atem_key_duration", 5.0),
                 gui_app                    = self,
                 bridge_ready_callback      = self._on_bridge_ready,
+                dual_stt_enabled           = _dual_enabled,
+                secondary_language         = _sec_lang,
+                secondary_stt_engine       = _sec_engine,
             )
 
 
@@ -2076,6 +2124,11 @@ class VerseViewApp(ctk.CTk):
             ctrl.driver.execute_script("arguments[0].click();", ctrl.btn)
             self._append_log(f"✏️ Manual verse sent: {ref}")
             self.manual_verse_entry.delete(0, "end")
+            # Add to verse history so it appears in the history panel and session notes
+            try:
+                engine.add_to_verse_history(ref, source="MANUAL-ENTRY")
+            except Exception:
+                pass
         except Exception as e:
             mb.showerror("Send Error", f"Failed to send verse:\n{e}")
 
@@ -2157,6 +2210,11 @@ class VerseViewApp(ctk.CTk):
                     engine.set_context(book_ctx, chap_ctx, v)
                 except Exception:
                     pass
+            # Add to verse history so it appears in the history panel and session notes
+            try:
+                engine.add_to_verse_history(ref, source="CHAPTER-BROWSER")
+            except Exception:
+                pass
         except Exception as e:
             mb.showerror("Send Error", f"Failed to send verse:\n{e}")
 

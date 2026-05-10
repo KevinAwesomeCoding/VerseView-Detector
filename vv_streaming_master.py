@@ -519,6 +519,21 @@ _session_verse_high_water: dict = {}  # "Book chapter" → highest verse int see
 # reject backward jumps (e.g. jumping back to v1 when sermon is at v17).
 _last_presented_verse_num: int = 0        # ordinal of last verse sent to display
 _last_presented_verse_book_chap: str = "" # "Book chapter" key matching the above
+
+# ── Contextual-floor bypass flags ──────────────────────────────────────────────
+# CONTEXT_FLOOR_EXPLICIT_BYPASS: when True, the ML-3 backward-jump floor is
+# skipped for any transcript that contains an explicit book + chapter + verse
+# reference (e.g. "Daniel 11:5", "Acts chapter 9 verse 15").  Explicit refs are
+# always allowed regardless of what verse was last presented.
+CONTEXT_FLOOR_EXPLICIT_BYPASS: bool = True
+
+# CONTEXT_FLOOR_MANUAL_CONTEXT_BYPASS: when True, the floor is also skipped for
+# a short window after set_context() is called from the GUI (manual context
+# change), so that contextual detections immediately following a manual context
+# update are evaluated against the NEW position rather than the old floor.
+CONTEXT_FLOOR_MANUAL_CONTEXT_BYPASS: bool = True
+_MANUAL_CONTEXT_BYPASS_WINDOW: float = 30.0  # seconds the bypass stays active
+_manual_context_set_time: float = 0.0         # timestamp of last set_context() call
 LIVE_POINTS_ENABLED  = False   # Bug 8: guard — True only when LLM outline is enabled
 SILENCE_TIMEOUT      = 60      # Feature 6: auto-stop after N seconds without a transcript line
 _last_transcript_time = 0.0    # Feature 6: timestamp of last received transcript line
@@ -1318,10 +1333,30 @@ def get_context() -> dict:
 
 def set_context(book: str, chapter: str, verse: str):
     global current_book, current_chapter, current_verse
+    global _manual_context_set_time, _last_presented_verse_num, _last_presented_verse_book_chap
     current_book    = book.strip()    or None
     current_chapter = chapter.strip() or None
     current_verse   = verse.strip()   or None
-    logger.info(f"Context manually set: {current_book} {current_chapter}:{current_verse}")
+
+    # Reset the contextual floor so it is relative to the new manual position,
+    # not whatever verse was last auto-presented.  If the caller sets Daniel 11:5,
+    # contextual detections like "verse 3" should be evaluated against v5, not an
+    # older presented verse from a different part of the sermon.
+    if current_book and current_chapter and current_verse:
+        _new_key = f"{current_book} {current_chapter}"
+        try:
+            _last_presented_verse_num       = int(current_verse)
+            _last_presented_verse_book_chap = _new_key
+        except (ValueError, TypeError):
+            pass
+
+    # Stamp the manual-context time so the bypass window activates.
+    _manual_context_set_time = time.time()
+    logger.info(
+        f"Context manually set: {current_book} {current_chapter}:{current_verse} "
+        f"— contextual floor reset; bypass window active for "
+        f"{_MANUAL_CONTEXT_BYPASS_WINDOW:.0f}s"
+    )
 
 
 # ── VERSE RANGE QUEUE ─────────────────────────────────────────────────────────
@@ -1380,6 +1415,21 @@ def deliver_verse(ref: str, controller, bypass_cooldown=False, confidence=1.0, s
 
 def get_verse_history() -> list:
     return list(_verse_history)
+
+def add_to_verse_history(ref: str, source: str = "MANUAL") -> None:
+    """Add a verse to history without going through deliver_verse / Selenium.
+    Used when the GUI sends a verse manually (text box or chapter browser click)
+    so those refs still appear in the history panel and session notes."""
+    import datetime as _dt2
+    _verse_history.append({
+        "ref":   ref,
+        "time":  _dt2.datetime.now().strftime("%H:%M:%S"),
+        "layer": source,
+    })
+    if ref not in verses_cited:
+        verses_cited.append(ref)
+    send_to_discord(ref)
+    logger.info(f"📋 Added to history ({source}): {ref}")
 
 def clear_verse_history():
     _verse_history.clear()
@@ -3082,16 +3132,33 @@ def detect_verse_hybrid(text, controller, confidence=1.0, parser=None) -> bool:
                     r'\b(?:go(?:ing)?\s+back|let\s*[\'s]*\s*(?:go\s+)?back|return\s+to|'
                     r'back\s+to\s+verse|revisit|re-?read|again\s+from)\b',
                     text_lower))
+                # ── Contextual-floor bypass checks ──
+                _floor_bypass_reason = None
+                if CONTEXT_FLOOR_EXPLICIT_BYPASS and _is_explicit_full_ref(text):
+                    _floor_bypass_reason = "explicit full ref (book+chapter+verse) in transcript"
+                elif (CONTEXT_FLOOR_MANUAL_CONTEXT_BYPASS
+                        and (time.time() - _manual_context_set_time) < _MANUAL_CONTEXT_BYPASS_WINDOW):
+                    _floor_bypass_reason = (
+                        f"manual context was set {time.time() - _manual_context_set_time:.0f}s ago "
+                        f"(bypass window = {_MANUAL_CONTEXT_BYPASS_WINDOW:.0f}s)"
+                    )
                 if (not _explicit_backward
                         and _last_presented_verse_book_chap == _ctx_key
                         and _last_presented_verse_num > 0
                         and int(candidate) < _last_presented_verse_num - 5):
-                    logger.info(
-                        f"🚫 CONTEXTUAL FLOOR (ML-3): {current_book} {current_chapter}:{candidate} "
-                        f"rejected — too far back (last presented v{_last_presented_verse_num}, "
-                        f"floor is v{_last_presented_verse_num - 5})"
-                    )
-                    return False
+                    if _floor_bypass_reason:
+                        logger.info(
+                            f"✅ CONTEXTUAL FLOOR bypassed for {current_book} {current_chapter}:{candidate} "
+                            f"— {_floor_bypass_reason}"
+                        )
+                    else:
+                        logger.info(
+                            f"🚫 CONTEXTUAL FLOOR (ML-3): {current_book} {current_chapter}:{candidate} "
+                            f"rejected — too far back (last presented v{_last_presented_verse_num}, "
+                            f"floor is v{_last_presented_verse_num - 5}); "
+                            f"this is an inferred/contextual ref, not an explicit book+chapter+verse"
+                        )
+                        return False
                 ref = f"{current_book} {current_chapter}:{candidate}"
                 logger.info(f"🔍 CONTEXTUAL: {ref} ({int(confidence*100)}% Acc)")
                 deliver_verse(ref, controller, bypass_cooldown=False, confidence=confidence, source="CONTEXTUAL")
@@ -3122,15 +3189,32 @@ def detect_verse_hybrid(text, controller, confidence=1.0, parser=None) -> bool:
                         r'\b(?:go(?:ing)?\s+back|let\s*[\'s]*\s*(?:go\s+)?back|return\s+to|'
                         r'back\s+to\s+verse|revisit|re-?read|again\s+from)\b',
                         text_lower))
+                    # ── Contextual-floor bypass checks (bare-digit path) ──
+                    _floor_bypass_reason2 = None
+                    if CONTEXT_FLOOR_EXPLICIT_BYPASS and _is_explicit_full_ref(text):
+                        _floor_bypass_reason2 = "explicit full ref (book+chapter+verse) in transcript"
+                    elif (CONTEXT_FLOOR_MANUAL_CONTEXT_BYPASS
+                            and (time.time() - _manual_context_set_time) < _MANUAL_CONTEXT_BYPASS_WINDOW):
+                        _floor_bypass_reason2 = (
+                            f"manual context was set {time.time() - _manual_context_set_time:.0f}s ago "
+                            f"(bypass window = {_MANUAL_CONTEXT_BYPASS_WINDOW:.0f}s)"
+                        )
                     if (not _explicit_bwd2
                             and _last_presented_verse_book_chap == _ctx_key2
                             and _last_presented_verse_num > 0
                             and int(candidate) < _last_presented_verse_num - 5):
-                        logger.info(
-                            f"🚫 CONTEXTUAL FLOOR (ML-3 bare): {current_book} {current_chapter}:{candidate} "
-                            f"rejected — too far back (last presented v{_last_presented_verse_num})"
-                        )
-                        return False
+                        if _floor_bypass_reason2:
+                            logger.info(
+                                f"✅ CONTEXTUAL FLOOR bypassed (bare) for {current_book} {current_chapter}:{candidate} "
+                                f"— {_floor_bypass_reason2}"
+                            )
+                        else:
+                            logger.info(
+                                f"🚫 CONTEXTUAL FLOOR (ML-3 bare): {current_book} {current_chapter}:{candidate} "
+                                f"rejected — too far back (last presented v{_last_presented_verse_num}); "
+                                f"bare digits are the highest false-positive risk — floor enforced"
+                            )
+                            return False
                     ref = f"{current_book} {current_chapter}:{candidate}"
                     logger.info(f"🔍 CONTEXTUAL: {ref} ({int(confidence*100)}% Acc)")
                     deliver_verse(ref, controller, bypass_cooldown=False, confidence=confidence, source="CONTEXTUAL")
@@ -3398,6 +3482,39 @@ def detect_verse_hybrid(text, controller, confidence=1.0, parser=None) -> bool:
 
 # ── SENTENCE SPLITTER ─────────────────────────────────────────────────────────
 _CLAUSE_SPLIT_RE = re.compile(r'(?<=[.!?।])\s+') 
+
+
+def _is_explicit_full_ref(text: str) -> bool:
+    """Return True when *text* contains a fully explicit book + chapter + verse
+    reference that should bypass the contextual floor.
+
+    Accepts all of:
+      • Colon notation          — "Daniel 11:5", "Acts 9:15"
+      • Spoken chapter+verse    — "Daniel chapter 11 verse 5"
+      • Numbered-book variants  — "1 Corinthians 13:4", "2 Kings chapter 2 verse 11"
+
+    Does NOT match bare "verse 5" or bare chapter-only refs like "Daniel 11"
+    because those are inferred / contextual and the floor should still apply.
+    """
+    # Fast path: colon notation with a word before it (book name present)
+    if re.search(r'[A-Za-z]\w*\s+\d{1,3}:\d{1,3}', text):
+        return True
+    # Spoken form: book ... chapter N ... verse N
+    if re.search(
+        r'[A-Za-z]\w*\s+(?:chapter|chap|ch)\s+\d{1,3}\s+(?:verse|v)\s+\d{1,3}',
+        text, re.IGNORECASE
+    ):
+        return True
+    # Numbered-book colon form: "1 Kings 2:3"
+    if re.search(r'[1-3]\s+[A-Za-z]\w*\s+\d{1,3}:\d{1,3}', text):
+        return True
+    # Numbered-book spoken form: "1 Kings chapter 2 verse 3"
+    if re.search(
+        r'[1-3]\s+[A-Za-z]\w*\s+(?:chapter|chap|ch)\s+\d{1,3}\s+(?:verse|v)\s+\d{1,3}',
+        text, re.IGNORECASE
+    ):
+        return True
+    return False
 
 
 def _detect_explicit_reference(sentence: str, controller) -> bool:
@@ -3916,17 +4033,28 @@ async def stream_audio_sarvam(controller, is_secondary=False):
 
                                     if MALAYALAM_TRANSLITERATION:
                                         # ── Translit mode: Sarvam outputs Roman/Manglish directly.
-                                        # Route the romanized text through the English parser so
-                                        # Bible references (e.g. "John 3:16") are caught. Skip the
-                                        # translation step — text is already Latin script.
-                                        display_text = sentence
+                                        # The text is Latin-script but the WORDS are still Malayalam
+                                        # (e.g. "Yohannaan muunnu padhinaaru" = "John 3:16").
+                                        # We must still translate to English so that:
+                                        #   • check_verse_queue can track verse progression correctly
+                                        #   • _detect_from_translation can catch colon-notation refs
+                                        # We parse the original Manglish blob too (catches any English
+                                        # book names the preacher said aloud in English).
+                                        manglish_text = sentence
+                                        english_text  = translate_to_english(manglish_text)
+                                        display_text  = manglish_text
                                         logger.info(f"📝 {_tag} [Manglish] {display_text}")
-                                        check_verse_queue(sentence, controller)
-                                        full_sermon_transcript += " " + sentence.strip()
+                                        if english_text and english_text != manglish_text:
+                                            logger.info(f"🔤 {_tag} [Manglish→EN] {english_text}")
+                                        check_verse_queue(english_text, controller)
+                                        full_sermon_transcript += " " + english_text.strip()
                                         if is_secondary:
-                                            full_sermon_transcript_secondary += " " + sentence.strip()
+                                            full_sermon_transcript_secondary += " " + english_text.strip()
                                         _last_transcript_time = time.time()
-                                        _process_transcript_blob(sentence, partial_context, controller, parser=_parser)
+                                        # Parse original Manglish — catches English book names spoken directly
+                                        _process_transcript_blob(manglish_text, partial_context, controller, parser=_parser)
+                                        # Also run translation-path detection on the English translation
+                                        _detect_from_translation(english_text, controller)
                                     else:
                                         # ── Transcribe mode: native Malayalam script (original behaviour).
                                         malayalam_text = sentence
