@@ -1435,6 +1435,7 @@ class VerseViewApp(ctk.CTk):
     _SYNC_ALLOWED_KEYS = {
         "deepgram_api_key", "groq_api_key", "gemini_api_key",
         "cerebras_api_key", "mistral_api_key", "sarvam_api_key",
+        "assemblyai_api_key",
         "discord_webhook_url", "discord_log_webhook_url", "discord_notes_webhook_url",
         "discord_bot_token",
     }
