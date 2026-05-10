@@ -68,7 +68,8 @@ class VerseViewApp(ctk.CTk):
         self._running             = False
         self._closing             = False
         self._engine_thread       = None
-        self._notes_saved         = False
+        self._notes_saved         = False   # True once notes have been written to a file
+        self._notes_generated     = False   # True once notes have been generated (manually or auto)
         self._worship_mode_active = False
 
 
@@ -1938,7 +1939,8 @@ class VerseViewApp(ctk.CTk):
 
 
             self._running = True
-            self.btn_start.configure(state="disabled")
+            self._notes_saved     = False   # reset note state for new session
+            self._notes_generated = False
             self.btn_stop.configure(state="normal")
             self.lbl_status.configure(text="● Running", text_color="#2a7a2a")
             self.lang_menu.configure(state="disabled")
@@ -2019,6 +2021,7 @@ class VerseViewApp(ctk.CTk):
 
 
     def _show_summary_window(self, content):
+        self._notes_generated = True   # notes have been generated for this session
         win = ctk.CTkToplevel(self)
         win.title("Sermon Cliff Notes")
         win.geometry("600x700")
@@ -2055,6 +2058,7 @@ class VerseViewApp(ctk.CTk):
                     f.write(content)
                 self._append_log(f"💾 Saved Sermon Notes to {path}")
                 self._notes_saved = True
+                self._notes_generated = True
                 win.destroy()
 
         btn_save = ctk.CTkButton(
@@ -2069,6 +2073,7 @@ class VerseViewApp(ctk.CTk):
         if mb.askyesno("Clear Memory", "Are you sure you want to delete the current recorded sermon?\n\nThis cannot be undone!"):
             engine.clear_sermon_buffer()
             self._notes_saved = False
+            self._notes_generated = False
             self._append_log("🗑️ Sermon memory wiped clean for the next service.")
 
 
@@ -2737,7 +2742,7 @@ class VerseViewApp(ctk.CTk):
     def _finish_close(self):
         """Called after the engine has fully stopped (or was already stopped)."""
         # Auto-save summary if needed
-        if self.auto_save_var.get() and not self._notes_saved and engine.full_sermon_transcript and len(engine.full_sermon_transcript.strip()) > 100:
+        if self.auto_save_var.get() and not self._notes_saved and not self._notes_generated and engine.full_sermon_transcript and len(engine.full_sermon_transcript.strip()) > 100:
             self.lbl_status.configure(text="● Auto-Saving Notes...", text_color="#a07020")
             self.update()
             try:
