@@ -395,7 +395,8 @@ class VerseViewApp(ctk.CTk):
         self.lang_var, self.lang_menu = add_option([
             "English",
             "Malayalam",
-            "Hindi",
+            "Hindi Nova-3",
+            "Hindi Sarvam AI",
             "Multi-Language",
         ])
 
@@ -413,17 +414,20 @@ class VerseViewApp(ctk.CTk):
 
         def _on_lang_changed(val):
             is_ml = "Malayalam" in val
-            is_hi = val == "Hindi"
+            is_hi_nova   = val == "Hindi Nova-3"
+            is_hi_sarvam = val == "Hindi Sarvam AI"
+            is_hi = is_hi_nova or is_hi_sarvam
             is_multi = val == "Multi-Language"
             self.ml_raw_cb.configure(state="normal" if is_ml else "disabled")
             self.ml_translit_cb.configure(state="normal" if is_ml else "disabled")
 
             # AssemblyAI streaming only supports EN/ES/DE/FR/IT/PT.
-            # Malayalam uses Sarvam only; Hindi uses Deepgram only.
-            # Multi-Language can only use the Multilingual model (not Pro which is English-only).
-            if is_ml:
+            # Malayalam and Hindi Sarvam AI use Sarvam only.
+            # Hindi Nova-3 uses Deepgram only.
+            # Multi-Language can only use the Multilingual model.
+            if is_ml or is_hi_sarvam:
                 new_opts = ["Sarvam AI"]
-            elif is_hi:
+            elif is_hi_nova:
                 new_opts = ["Deepgram"]
             elif is_multi:
                 new_opts = ["Deepgram", "AssemblyAI (Universal-3 Multilingual)"]
@@ -1274,7 +1278,7 @@ class VerseViewApp(ctk.CTk):
 
         # STT Engine — must restore dropdown options first based on saved language
         saved_lang_code = self._lang_code()
-        if saved_lang_code == "ml":
+        if saved_lang_code in ("ml", "hi-sarvam"):
             self.stt_engine_menu.configure(values=["Sarvam AI"])
         elif saved_lang_code == "hi":
             self.stt_engine_menu.configure(values=["Deepgram"])
@@ -1679,10 +1683,13 @@ class VerseViewApp(ctk.CTk):
 
     def _lang_code(self) -> str:
         return {
-            "English":        "en",
-            "Malayalam":      "ml",
-            "Hindi":          "hi",
-            "Multi-Language": "multi",
+            "English":          "en",
+            "Malayalam":        "ml",
+            "Hindi Nova-3":     "hi",
+            "Hindi Sarvam AI":  "hi-sarvam",
+            # backward-compat: old saves stored "Hindi" (pre-split)
+            "Hindi":            "hi",
+            "Multi-Language":   "multi",
         }.get(self.lang_var.get(), "en")
 
     def _sec_lang_code(self) -> str | None:
@@ -1865,10 +1872,10 @@ class VerseViewApp(ctk.CTk):
             _sec_lang   = s.get("secondary_language")
 
             # Primary stream key validation
-            if _engine == "deepgram" and _lang_code != "ml":
+            if _engine == "deepgram" and _lang_code not in ("ml", "hi-sarvam"):
                 if not s["deepgram_api_key"]:
                     missing.append("Deepgram API Key")
-            if _engine == "sarvam":
+            if _engine == "sarvam" or _lang_code == "hi-sarvam":
                 if not s["sarvam_api_key"]:
                     missing.append("Sarvam API Key")
             if _engine in ("assemblyai", "assemblyai_pro", "assemblyai_multilingual"):

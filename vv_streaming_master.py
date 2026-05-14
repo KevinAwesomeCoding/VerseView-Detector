@@ -3957,8 +3957,29 @@ async def stream_audio_sarvam(controller, is_secondary=False):
             try:
                 async with client.speech_to_text_streaming.connect(
                     model="saaras:v3",
+                    # [Q1] mode="transcribe" is correct for live church sermon transcription.
+                    #      Sarvam V3's streaming WebSocket is inherently real-time (sub-150ms latency)
+                    #      regardless of mode.  The `mode` param only controls OUTPUT FORMAT:
+                    #        "transcribe"  → high-accuracy Malayalam text  ✅ (correct for sermons)
+                    #        "translate"   → Malayalam speech → English text
+                    #        "translit"    → Malayalam speech → Roman/Manglish script
+                    #        "codemix"     → code-switched audio (e.g. Malayalam+English mixed)
+                    #      There is NO "realtime" or "realtime_accurate" mode value in V3's core API;
+                    #      those strings only appear in third-party wrappers (Bolna, Pipecat, etc.).
                     mode="translit" if MALAYALAM_TRANSLITERATION else "transcribe",
+                    # [Q3] language_code="ml-IN" — V3 natively supports all 22 scheduled Indian
+                    #      languages including Malayalam.  Accuracy on Malayalam (including
+                    #      Malayalam-English code-mix) is significantly improved over V2:
+                    #      V2 required explicit language hints; V3 was trained end-to-end on
+                    #      native Indian language data.  No code change needed; "ml-IN" is optimal.
                     language_code=SARVAM_LANGUAGE, sample_rate=RATE,
+                    # [Q2] high_vad_sensitivity=True is the correct choice for sermon audio.
+                    #      Sarvam V3 docs recommend True for responsive speech detection; the
+                    #      tradeoff is that ~0.5s of silence marks a segment boundary (vs ~1s when
+                    #      False).  For a preacher who pauses between sentences this is fine:
+                    #      0.5s is shorter than a natural breath pause, so sentences are segmented
+                    #      cleanly without early cut-off.  Setting False would only help if the
+                    #      audio has persistent background noise that triggers false endpoints.
                     high_vad_sensitivity=True, vad_signals=False,
                     input_audio_codec="pcm_s16le",
                 ) as ws:
@@ -4312,7 +4333,7 @@ async def stream_audio_assemblyai(controller, is_secondary: bool = False):
                     )
                 except asyncio.TimeoutError:
                     # No transcript yet; check if the executor finished (error/disconnect)
-                    if executor_future.done():
+                    if  executor_future.done():
                         break
                     continue
 
