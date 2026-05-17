@@ -897,7 +897,7 @@ class VerseViewApp(ctk.CTk):
         ctk.CTkCheckBox(f, text="Smart Schedule (auto-set language by day & time)",
                         variable=self.smart_schedule_var).grid(row=r, column=0, sticky="w", padx=10, pady=(0, 2))
         r += 1
-        ctk.CTkLabel(f, text="  Sat→Malayalam  |  Sun 9:10 AM→English  |  10:40 AM→English  |  4:40 PM→Hindi",
+        ctk.CTkLabel(f, text="  Sat→Malayalam  |  Sun 9:10 AM→English  |  10:40 AM→Malayalam  |  4:40 PM→Hindi",
                      text_color=["#666666", "#888888"],
                      font=ctk.CTkFont(size=11)).grid(row=r, column=0, sticky="w", padx=10, pady=(0, 6))
         r += 1
@@ -1774,7 +1774,7 @@ class VerseViewApp(ctk.CTk):
             if t >= datetime.time(16, 40):
                 return "Hindi"
             if t >= datetime.time(10, 40):
-                return "English"
+                return "Malayalam"
             if t >= datetime.time(9, 10):
                 return "English"
 
