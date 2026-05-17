@@ -879,6 +879,7 @@ def clear_sermon_buffer():
     global full_sermon_transcript, verses_cited
     full_sermon_transcript = ""
     verses_cited           = []
+    _verse_history.clear()
     logger.info("🗑️ Sermon memory has been manually cleared.")
 
 
@@ -1131,7 +1132,8 @@ def configure(
     global full_sermon_transcript_secondary
     global ASSEMBLYAI_API_KEY, STT_ENGINE, AAI_LANGUAGE, AAI_TURN_CUTOFF_SEC
     WORSHIP_MODE = False
-    _verse_history.clear()
+    if not _verse_history:          # only wipe on a true fresh launch
+        _verse_history.clear()
     # Reset context so stale chapter from previous session never bleeds in
     current_book    = None
     current_chapter = None

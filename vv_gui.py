@@ -71,6 +71,7 @@ class VerseViewApp(ctk.CTk):
         self._notes_saved         = False   # True once notes have been written to a file
         self._notes_generated     = False   # True once notes have been generated (manually or auto)
         self._worship_mode_active = False
+        self.pinned               = False
 
 
         self._build_ui()
@@ -167,6 +168,16 @@ class VerseViewApp(ctk.CTk):
             command=self._manual_check_update
         )
         self.btn_update.pack(side="right", padx=(8, 0))
+
+        # Always-on-top pin button
+        self.btn_pin = ctk.CTkButton(
+            top, text="📌", width=36,
+            fg_color="transparent", border_color=("gray60", "gray40"), border_width=1,
+            text_color=("gray40", "gray70"), hover_color=("gray85", "gray25"),
+            font=ctk.CTkFont(size=14),
+            command=self._toggle_pin
+        )
+        self.btn_pin.pack(side="right", padx=(4, 0))
 
 
         # ── SPLIT FRAME FOR LOGS AND HISTORY ──
@@ -2363,6 +2374,14 @@ class VerseViewApp(ctk.CTk):
                 self._append_log("🎬 ATEM manual: keyer OFF" if turned_off else "⚠️ ATEM manual: keyer OFF (could not confirm — switcher unreachable)")
             import threading
             threading.Thread(target=_turn_off, daemon=True).start()
+
+    def _toggle_pin(self):
+        self.pinned = not self.pinned
+        self.wm_attributes("-topmost", self.pinned)
+        if self.pinned:
+            self.btn_pin.configure(fg_color="#5a3a8a", text_color="white", border_width=0)
+        else:
+            self.btn_pin.configure(fg_color="transparent", text_color=("gray40", "gray70"), border_width=1)
 
     def _toggle_worship_mode(self):
         self._worship_mode_active = not self._worship_mode_active
