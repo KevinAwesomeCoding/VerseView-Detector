@@ -882,79 +882,6 @@ def clear_sermon_buffer():
     logger.info("🗑️ Sermon memory has been manually cleared.")
 
 
-def restore_session(data: dict) -> None:
-    """Restore engine globals from a previously saved session dict.
-
-    Memory-only — does NOT restart the engine or connect to VerseView.
-    Uses .get() with safe fallbacks so a partial/old session never crashes.
-    """
-    global full_sermon_transcript, verses_cited, _verse_history
-    global current_book, current_chapter, current_verse
-    global _session_verse_high_water, _advance_transcript_offset
-    global _last_explicit_ref_time
-
-    try:
-        transcript = data.get("full_sermon_transcript", "")
-        if isinstance(transcript, str):
-            full_sermon_transcript = transcript
-            logger.info(f"✅ Restored: full_sermon_transcript ({len(transcript)} chars)")
-
-        cited = data.get("verses_cited", [])
-        if isinstance(cited, list):
-            verses_cited = [str(v) for v in cited]
-            logger.info(f"✅ Restored: verses_cited ({len(verses_cited)} refs)")
-
-        history = data.get("verse_history", [])
-        if isinstance(history, list):
-            _verse_history = [
-                {
-                    "ref":   str(item.get("ref",   "")),
-                    "time":  str(item.get("time",  "")),
-                    "layer": str(item.get("layer", "RESTORED")),
-                }
-                for item in history
-                if isinstance(item, dict)
-            ]
-            logger.info(f"✅ Restored: verse_history ({len(_verse_history)} entries)")
-
-        book = data.get("current_book")
-        if book is not None:
-            current_book = str(book)
-            logger.info(f"✅ Restored: current_book = {current_book}")
-
-        chapter = data.get("current_chapter")
-        if chapter is not None:
-            current_chapter = str(chapter)
-            logger.info(f"✅ Restored: current_chapter = {current_chapter}")
-
-        verse = data.get("current_verse")
-        if verse is not None:
-            current_verse = str(verse)
-            logger.info(f"✅ Restored: current_verse = {current_verse}")
-
-        high_water = data.get("session_verse_high_water", {})
-        if isinstance(high_water, dict):
-            _session_verse_high_water = {
-                str(k): int(v)
-                for k, v in high_water.items()
-                if isinstance(v, (int, float))
-            }
-            logger.info(f"✅ Restored: session_verse_high_water ({len(_session_verse_high_water)} keys)")
-
-        offset = data.get("advance_transcript_offset", 0)
-        try:
-            _advance_transcript_offset = int(offset)
-            logger.info(f"✅ Restored: advance_transcript_offset = {_advance_transcript_offset}")
-        except (TypeError, ValueError):
-            _advance_transcript_offset = 0
-
-        _last_explicit_ref_time = float(data.get("last_explicit_ref_time", 0.0))
-        logger.info(f"✅ Restored: last_explicit_ref_time = {_last_explicit_ref_time}")
-
-    except Exception as e:
-        logger.error(f"❌ restore_session failed: {e}")
-
-
 # ── ATEM KEYER TRIGGER ────────────────────────────────────────────────────────
 # ── ATEM IP CACHE ─────────────────────────────────────────────────────────────
 _atem_resolved_ip: str | None = None   # cached after first successful discovery
@@ -1233,7 +1160,13 @@ def configure(
     MISTRAL_API_KEY  = mistral_api_key
     SARVAM_API_KEY   = sarvam_api_key
     ASSEMBLYAI_API_KEY = assemblyai_api_key
-    STT_ENGINE         = stt_engine.lower().strip() if stt_engine else "deepgram"
+    # Normalize "assemblyai_pro" / "assemblyai_multilingual" → "assemblyai" so
+    # main() STT_ENGINE == "assemblyai" branches always match.  The model variant
+    # is conveyed via AAI_LANGUAGE: "multi" → universal-streaming-multilingual,
+    # else → u3-rt-pro (set below in the language routing block).
+    _raw_engine = stt_engine.lower().strip() if stt_engine else "deepgram"
+    STT_ENGINE  = "assemblyai" if _raw_engine.startswith("assemblyai") else _raw_engine
+    _primary_aai_multilingual = (_raw_engine == "assemblyai_multilingual")
     AAI_TURN_CUTOFF_SEC = max(3, min(11, int(aai_turn_cutoff or 5)))
     MALAYALAM_TRANSLITERATION = malayalam_transliteration
 
@@ -1332,7 +1265,8 @@ def configure(
         DEEPGRAM_MODEL         = "nova-3"
         PRIMARY_PARSER         = parse_eng
         normalize_numbers_only = norm_eng
-        AAI_LANGUAGE           = "en"
+        # Use "multi" model when the user chose the Multilingual dropdown option
+        AAI_LANGUAGE           = "multi" if _primary_aai_multilingual else "en"
     elif language == "hi":
         USE_SARVAM             = False
         DEEPGRAM_LANGUAGE      = "hi"
@@ -1382,8 +1316,12 @@ def configure(
             SECONDARY_DEEPGRAM_MODEL    = "nova-3"
             SECONDARY_PARSER            = parse_eng
 
-        # Route secondary stream: Sarvam only for ml+sarvam, AAI for assemblyai, else Deepgram
-        SECONDARY_USE_SARVAM = (secondary_language == "ml" and secondary_stt_engine == "sarvam")
+        # Route secondary stream: Sarvam only for ml+sarvam, AAI for any assemblyai* code, else Deepgram
+        # Normalize "assemblyai_pro" / "assemblyai_multilingual" → "assemblyai" so
+        # main()'s SECONDARY_STT_ENGINE == "assemblyai" check always matches.
+        _raw_sec = secondary_stt_engine.lower().strip() if secondary_stt_engine else "deepgram"
+        SECONDARY_STT_ENGINE = "assemblyai" if _raw_sec.startswith("assemblyai") else _raw_sec
+        SECONDARY_USE_SARVAM = (secondary_language == "ml" and _raw_sec == "sarvam")
 
         logger.info(f"🌐 Dual STT          : ON  (secondary={secondary_language}, engine={secondary_stt_engine})")
     else:
@@ -4566,7 +4504,11 @@ async def main():
     if USE_SARVAM:
         _engine_label = "Sarvam AI (Malayalam)"
     elif STT_ENGINE == "assemblyai":
-        _engine_label = "AssemblyAI Universal-3 Pro"
+        _engine_label = (
+            "AssemblyAI Universal-3 Multilingual"
+            if AAI_LANGUAGE == "multi"
+            else "AssemblyAI Universal-3 Pro"
+        )
     else:
         _engine_label = "Deepgram"
     logger.info(f"   Engine: {_engine_label}")

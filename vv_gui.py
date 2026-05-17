@@ -897,7 +897,7 @@ class VerseViewApp(ctk.CTk):
         ctk.CTkCheckBox(f, text="Smart Schedule (auto-set language by day & time)",
                         variable=self.smart_schedule_var).grid(row=r, column=0, sticky="w", padx=10, pady=(0, 2))
         r += 1
-        ctk.CTkLabel(f, text="  Sat→Malayalam  |  Sun 9:10 AM→English  |  10:40 AM→English  |  11:10 AM→Malayalam  |  4:40 PM→Hindi",
+        ctk.CTkLabel(f, text="  Sat→Malayalam  |  Sun 9:10 AM→English  |  10:40 AM→English  |  4:40 PM→Hindi",
                      text_color=["#666666", "#888888"],
                      font=ctk.CTkFont(size=11)).grid(row=r, column=0, sticky="w", padx=10, pady=(0, 6))
         r += 1
@@ -1773,8 +1773,6 @@ class VerseViewApp(ctk.CTk):
         if wd == 6:  # Sunday — pick the LATEST threshold that has passed
             if t >= datetime.time(16, 40):
                 return "Hindi"
-            if t >= datetime.time(11, 10):
-                return "Malayalam"
             if t >= datetime.time(10, 40):
                 return "English"
             if t >= datetime.time(9, 10):
@@ -2079,9 +2077,13 @@ class VerseViewApp(ctk.CTk):
 
     def _clear_sermon_memory(self):
         if mb.askyesno("Clear Memory", "Are you sure you want to delete the current recorded sermon?\n\nThis cannot be undone!"):
-            engine.clear_sermon_buffer()
+            engine.clear_sermon_buffer()   # clears transcript, verses_cited, and _verse_history
             self._notes_saved = False
             self._notes_generated = False
+            # Wipe the history panel to match the now-empty engine state
+            self._last_history_len = 0
+            for w in self.history_scroll_frame.winfo_children():
+                w.destroy()
             self._append_log("🗑️ Sermon memory wiped clean for the next service.")
 
 
