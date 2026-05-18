@@ -435,6 +435,48 @@ _NARRATIVE_READING_RE = re.compile(
 )
 
 
+def _get_contextual_anchor() -> tuple:
+    """Return (book, chapter, verse) to use for contextual 'verse N' resolution.
+
+    While a cross-reference overlay is active (within _XREF_ANCHOR_TTL seconds),
+    contextual phrases like 'verse nine' should resolve against the *sermon* anchor,
+    not the cross-reference that was just presented.  Once the TTL expires the xref
+    overlay is considered gone and we fall back to current_book/chapter/verse.
+
+    Logs the decision so operators can see why a particular anchor was chosen.
+    """
+    global _xref_anchor_book, _xref_anchor_chapter, _xref_anchor_verse, _xref_anchor_time
+
+    xref_age = time.time() - _xref_anchor_time if _xref_anchor_time else float('inf')
+    xref_active = (
+        _xref_anchor_book is not None
+        and xref_age < _XREF_ANCHOR_TTL
+        and _sermon_anchor_book is not None
+    )
+
+    if xref_active:
+        logger.debug(
+            f"🎯 ANCHOR: using SERMON ANCHOR {_sermon_anchor_book} {_sermon_anchor_chapter}:"
+            f"{_sermon_anchor_verse or '?'} "
+            f"(xref {_xref_anchor_book} {_xref_anchor_chapter}:{_xref_anchor_verse or '?'} "
+            f"active, age={xref_age:.0f}s — contextual 'verse N' stays on sermon)"
+        )
+        return _sermon_anchor_book, _sermon_anchor_chapter, _sermon_anchor_verse
+
+    if _xref_anchor_book is not None and xref_age >= _XREF_ANCHOR_TTL:
+        # TTL expired — quietly drop the xref overlay
+        _xref_anchor_book    = None
+        _xref_anchor_chapter = None
+        _xref_anchor_verse   = None
+        _xref_anchor_time    = 0.0
+        logger.debug("📎 XREF ANCHOR expired — reverting to current context")
+
+    logger.debug(
+        f"🎯 ANCHOR: using CURRENT CONTEXT {current_book} {current_chapter}:{current_verse or '?'}"
+    )
+    return current_book, current_chapter, current_verse
+
+
 def _is_narrative_reading_context(text: str, book_name: str) -> bool:
     """Return True if 'book_name' appears in 'text' as part of a narrative
     description of *someone else* reading (e.g. 'he was reading Isaiah 53')
@@ -555,6 +597,22 @@ SECONDARY_DEEPGRAM_MODEL      = "nova-3"
 SECONDARY_USE_SARVAM          = False
 SECONDARY_STT_ENGINE          = "deepgram"   # "deepgram" | "sarvam" | "assemblyai"
 full_sermon_transcript_secondary = ""  # clean secondary-only buffer
+
+# ── Issue B: SEC-ML repetition / noise detector ───────────────────────────────
+# Detects extreme token-loop degeneration (e.g. "I I I…", "go to go to…").
+# Triggered independently for each stream via _is_degenerate_chunk().
+#
+# Tuning constants:
+#   _REP_MIN_TOKEN_LOOP  – minimum distinct-token repetitions before a 1-token
+#                          or 2-token loop is considered degenerate (default 6).
+#   _REP_MIN_PHRASE_LOOP – same for 3-token phrases (default 4).
+#   _REP_DROP_WINDOW_SEC – after a degenerate chunk is dropped, further chunks
+#                          from the same tag are throttled for this many seconds.
+#
+_REP_MIN_TOKEN_LOOP  : int   = 6    # "I I I I I I" → drop
+_REP_MIN_PHRASE_LOOP : int   = 4    # "go to go to go to go to" → drop
+_REP_DROP_WINDOW_SEC : float = 3.0  # throttle window after a drop (per stream tag)
+_rep_drop_until      : dict  = {}   # tag → timestamp; chunks silenced until then
 
 _sarvam_ignore_until = 0.0
 _blocked_context_hashes = {}
@@ -1126,6 +1184,8 @@ def configure(
     global ATEM_ENABLED, ATEM_IP, ATEM_KEY_DURATION
     global current_book, current_chapter, current_verse, _gui_app
     global BRIDGE_READY_CALLBACK
+    global _sermon_anchor_book, _sermon_anchor_chapter, _sermon_anchor_verse
+    global _xref_anchor_book, _xref_anchor_chapter, _xref_anchor_verse, _xref_anchor_time
     global DUAL_STT_ENABLED, SECONDARY_LANGUAGE, SECONDARY_PARSER
     global SECONDARY_DEEPGRAM_LANGUAGE, SECONDARY_DEEPGRAM_MODEL, SECONDARY_USE_SARVAM
     global SECONDARY_STT_ENGINE
@@ -1138,6 +1198,13 @@ def configure(
     current_book    = None
     current_chapter = None
     current_verse   = None
+    _sermon_anchor_book    = None
+    _sermon_anchor_chapter = None
+    _sermon_anchor_verse   = None
+    _xref_anchor_book    = None
+    _xref_anchor_chapter = None
+    _xref_anchor_verse   = None
+    _xref_anchor_time    = 0.0
     _gui_app               = gui_app
     BRIDGE_READY_CALLBACK  = bridge_ready_callback
     logger.info("📌 Context reset for new session")
@@ -1336,6 +1403,31 @@ def configure(
 current_book    = None
 current_chapter = None
 current_verse   = None
+
+# ── SERMON ANCHOR vs CROSS-REFERENCE ANCHOR ───────────────────────────────────
+# _sermon_anchor_* is the stable main-passage context.  It is only updated when
+# the speaker demonstrably *moves* the sermon to a new book+chapter (different
+# book, or same book but chapter change while no xref is active).
+#
+# _xref_anchor_* is a short-lived overlay set when an explicit cross-reference
+# lands in a *different* book than the sermon anchor.  Contextual phrases like
+# "verse nine" prefer the sermon anchor while a xref is active so they resolve
+# against the main passage, not the cross-reference.
+#
+# After _XREF_ANCHOR_TTL seconds without another explicit xref, the overlay
+# expires and contextual resolution reverts to current_book/current_chapter as
+# normal (which will have been restored to the sermon anchor by then).
+_XREF_ANCHOR_TTL: float    = 120.0   # seconds a cross-ref anchor stays valid
+
+_sermon_anchor_book:    str = None
+_sermon_anchor_chapter: str = None
+_sermon_anchor_verse:   str = None
+
+_xref_anchor_book:    str   = None
+_xref_anchor_chapter: str   = None
+_xref_anchor_verse:   str   = None
+_xref_anchor_time:    float = 0.0   # time.time() when xref anchor was last set
+
 _gui_app               = None   # injected by configure(); used by bot bridge for GUI refresh
 BRIDGE_READY_CALLBACK  = None   # called once the bot bridge starts successfully
 
@@ -1345,17 +1437,77 @@ def get_context() -> dict:
 
 
 def set_context(book: str, chapter: str, verse: str):
+    """Update current sermon context.
+
+    Validation rules (Issue A fix)
+    ──────────────────────────────
+    • book and chapter are required; a call with either missing is rejected so
+      state never contains a half-formed ref like "1 Chronicles 4None".
+    • verse may be absent (chapter-only context is valid).  When absent we store
+      None explicitly — never the string "None" or an empty string in a verse slot.
+    • chapter must look like a plain integer string (e.g. "4", not "4:9").
+    • If validation fails the existing state is left unchanged.
+    """
     global current_book, current_chapter, current_verse
     global _manual_context_set_time, _last_presented_verse_num, _last_presented_verse_book_chap
-    current_book    = book.strip()    or None
-    current_chapter = chapter.strip() or None
-    current_verse   = verse.strip()   or None
+    global _sermon_anchor_book, _sermon_anchor_chapter, _sermon_anchor_verse
+    global _xref_anchor_book, _xref_anchor_chapter, _xref_anchor_verse, _xref_anchor_time
+
+    # ── Normalise inputs ──────────────────────────────────────────────────────
+    _book    = (book    or "").strip()
+    _chapter = (chapter or "").strip()
+    _verse   = (verse   or "").strip()
+
+    # Treat the string literal "None" as absent (guards against Python str(None))
+    if _verse.lower() == "none":
+        _verse = ""
+
+    # ── Validate required fields ──────────────────────────────────────────────
+    if not _book:
+        logger.warning("⛔ set_context rejected: book is empty — state unchanged")
+        return
+    if not _chapter:
+        logger.warning(
+            f"⛔ set_context rejected: chapter is empty for book '{_book}' — state unchanged"
+        )
+        return
+    # chapter must be a bare integer string; a colon indicates the caller has
+    # accidentally passed a "chapter:verse" blob into the chapter slot.
+    if not _chapter.isdigit():
+        logger.warning(
+            f"⛔ set_context rejected: chapter '{_chapter}' for '{_book}' is not a "
+            f"plain integer — state unchanged (possible 'chapter:verse' in wrong slot)"
+        )
+        return
+    # If a verse was provided it must also be a bare integer string.
+    if _verse and not _verse.isdigit():
+        logger.warning(
+            f"⛔ set_context rejected: verse '{_verse}' for '{_book} {_chapter}' is not "
+            f"a plain integer — storing chapter-only context instead"
+        )
+        _verse = ""
+
+    # ── Commit validated state ────────────────────────────────────────────────
+    current_book    = _book
+    current_chapter = _chapter
+    current_verse   = _verse or None   # chapter-only → explicit None, never ""
+
+    # Manual context set is always treated as a sermon anchor update —
+    # it represents intentional operator action, never a cross-reference.
+    _sermon_anchor_book    = current_book
+    _sermon_anchor_chapter = current_chapter
+    _sermon_anchor_verse   = current_verse
+    # Clear any stale xref overlay
+    _xref_anchor_book    = None
+    _xref_anchor_chapter = None
+    _xref_anchor_verse   = None
+    _xref_anchor_time    = 0.0
 
     # Reset the contextual floor so it is relative to the new manual position,
     # not whatever verse was last auto-presented.  If the caller sets Daniel 11:5,
     # contextual detections like "verse 3" should be evaluated against v5, not an
     # older presented verse from a different part of the sermon.
-    if current_book and current_chapter and current_verse:
+    if current_verse:
         _new_key = f"{current_book} {current_chapter}"
         try:
             _last_presented_verse_num       = int(current_verse)
@@ -1365,8 +1517,15 @@ def set_context(book: str, chapter: str, verse: str):
 
     # Stamp the manual-context time so the bypass window activates.
     _manual_context_set_time = time.time()
+
+    # Build a display ref that is never malformed ("Book Ch" or "Book Ch:V")
+    _display_ref = (
+        f"{current_book} {current_chapter}:{current_verse}"
+        if current_verse
+        else f"{current_book} {current_chapter} (chapter-only)"
+    )
     logger.info(
-        f"Context manually set: {current_book} {current_chapter}:{current_verse} "
+        f"📌 Context manually set: {_display_ref} "
         f"— contextual floor reset; bypass window active for "
         f"{_MANUAL_CONTEXT_BYPASS_WINDOW:.0f}s"
     )
@@ -1432,17 +1591,41 @@ def get_verse_history() -> list:
 def add_to_verse_history(ref: str, source: str = "MANUAL") -> None:
     """Add a verse to history without going through deliver_verse / Selenium.
     Used when the GUI sends a verse manually (text box or chapter browser click)
-    so those refs still appear in the history panel and session notes."""
+    so those refs still appear in the history panel and session notes.
+
+    Issue A fix: reject refs that contain "None" or have no colon when they
+    look like they should be verse refs, so history is never polluted with
+    entries like "1 Chronicles 4None".
+    """
     import datetime as _dt2
+    _ref = (ref or "").strip()
+
+    # Guard: refuse any ref that contains the literal string "None"
+    if "None" in _ref:
+        logger.warning(
+            f"⛔ add_to_verse_history rejected malformed ref '{_ref}' "
+            f"(contains 'None') — history unchanged"
+        )
+        return
+
+    # Guard: a non-empty ref must have recognisable structure
+    # (at least "Book N" or "Book N:V")
+    _parts = _ref.split()
+    if len(_parts) < 2:
+        logger.warning(
+            f"⛔ add_to_verse_history rejected ref '{_ref}' — too short to be valid"
+        )
+        return
+
     _verse_history.append({
-        "ref":   ref,
+        "ref":   _ref,
         "time":  _dt2.datetime.now().strftime("%H:%M:%S"),
         "layer": source,
     })
-    if ref not in verses_cited:
-        verses_cited.append(ref)
-    send_to_discord(ref)
-    logger.info(f"📋 Added to history ({source}): {ref}")
+    if _ref not in verses_cited:
+        verses_cited.append(_ref)
+    send_to_discord(_ref)
+    logger.info(f"📋 Added to history ({source}): {_ref}")
 
 def clear_verse_history():
     _verse_history.clear()
@@ -2339,15 +2522,57 @@ class VerseController:
 
                 parts = ref.split()
                 if len(parts) >= 2:
+                    global _sermon_anchor_book, _sermon_anchor_chapter, _sermon_anchor_verse
+                    global _xref_anchor_book, _xref_anchor_chapter, _xref_anchor_verse, _xref_anchor_time
                     old_book_chapter = f"{current_book} {current_chapter}" if current_book and current_chapter else None
+                    new_book    = " ".join(parts[:-1])
                     if ":" in parts[-1]:
-                        current_book    = " ".join(parts[:-1])
-                        current_chapter, current_verse = parts[-1].split(":")
+                        new_chapter, new_verse_str = parts[-1].split(":")
                     else:
-                        current_book    = " ".join(parts[:-1])
-                        current_chapter = parts[-1]
-                        current_verse   = None
-                
+                        new_chapter   = parts[-1]
+                        new_verse_str = None
+
+                    # ── Sermon-anchor vs cross-reference-anchor decision ──────────────
+                    # A ref is treated as a cross-reference (not a sermon move) when:
+                    #   • the sermon anchor is already established, AND
+                    #   • the incoming ref is in a DIFFERENT book than the sermon anchor.
+                    # In that case we park it as a temporary xref and do NOT overwrite
+                    # current_book/chapter/verse so contextual "verse N" keeps resolving
+                    # against the main sermon passage.
+                    _is_xref = (
+                        _sermon_anchor_book is not None
+                        and new_book.lower() != _sermon_anchor_book.lower()
+                    )
+                    if _is_xref:
+                        _xref_anchor_book    = new_book
+                        _xref_anchor_chapter = new_chapter
+                        _xref_anchor_verse   = new_verse_str
+                        _xref_anchor_time    = time.time()
+                        logger.info(
+                            f"📎 XREF ANCHOR set: {new_book} {new_chapter}:{new_verse_str or '?'}  "
+                            f"— sermon anchor stays: "
+                            f"{_sermon_anchor_book} {_sermon_anchor_chapter}:{_sermon_anchor_verse or '?'}  "
+                            f"— contextual 'verse N' will resolve against sermon anchor"
+                        )
+                        # current_book/chapter/verse intentionally NOT updated — stays on sermon
+                    else:
+                        # Sermon is moving (same book, or first explicit ref ever)
+                        current_book    = new_book
+                        current_chapter = new_chapter
+                        current_verse   = new_verse_str
+                        _sermon_anchor_book    = new_book
+                        _sermon_anchor_chapter = new_chapter
+                        _sermon_anchor_verse   = new_verse_str
+                        # Clear stale xref anchor — sermon itself moved
+                        _xref_anchor_book    = None
+                        _xref_anchor_chapter = None
+                        _xref_anchor_verse   = None
+                        _xref_anchor_time    = 0.0
+                        logger.info(
+                            f"📌 SERMON ANCHOR updated: "
+                            f"{_sermon_anchor_book} {_sermon_anchor_chapter}:{_sermon_anchor_verse or '?'}"
+                        )
+
                 # Bug 1: Reset range latch when passage changes
                     new_book_chapter = f"{current_book} {current_chapter}"
                     if old_book_chapter != new_book_chapter:
@@ -3018,22 +3243,66 @@ def detect_verse_hybrid(text, controller, confidence=1.0, parser=None) -> bool:
                     is_blocked = True
 
             if not is_blocked:
-                # Bug Fix 2A: If a verse keyword is present and the ref is chapter-only
-                # and we have active chapter context, the number is likely a verse — not a new chapter
-                if ":" not in verse and current_book and current_chapter:
-                    chap_token = verse.split()[-1]
-                    has_verse_kw = re.search(r'\b(?:verse|verses)\b|വാക്യ|വചന', text, re.IGNORECASE)
-                    try:
-                        chap_int = int(chap_token)
-                        # Only block if the ref's book matches current_book.
-                        # If the parser found a different book explicitly, trust it.
-                        ref_book = " ".join(verse.split()[:-1]).strip().lower()
-                        same_book = (ref_book == (current_book or "").lower())
-                        if has_verse_kw and chap_token != current_chapter and chap_int <= 50 and same_book:
-                            logger.info(f"🚫 BLOCKED: {verse} — chapter looks like verse number in {current_book} {current_chapter} context")
-                            is_blocked = True
-                    except ValueError:
-                        pass
+                # Bug Fix 2A (extended): Verse-keyword takes priority over chapter interpretation.
+                #
+                # If the text contains an explicit verse keyword ("verse", "verses", Malayalam
+                # equivalents) AND we have an active book+chapter anchor, the spoken number is
+                # almost certainly a verse, not a chapter transition.  Block the Layer 1 result
+                # and let Layer 2 resolve it as current_chapter:N.
+                #
+                # Two sub-cases are handled:
+                #
+                # Sub-case A — chapter-only ref (no colon in parsed result, e.g. "Daniel 8"):
+                #   Block whenever verse keyword is present + same book, regardless of whether
+                #   the parsed chapter number matches current_chapter.  The old guard
+                #   `chap_token != current_chapter` missed the case where the chapter number
+                #   equals the active chapter (speaker says "verse eight" in Daniel 8 context
+                #   → parser returns "Daniel 8" → must still block so Layer 2 gives Daniel 8:8).
+                #
+                # Sub-case B — full ref with DIFFERENT chapter (colon present, e.g. "Daniel 2:8"
+                #   when Daniel 12 is active):
+                #   If the text has a verse keyword but NO chapter keyword ("chapter", "chap", "ch"),
+                #   the parser likely grabbed a stale book+chapter from the text blob.  Block it so
+                #   Layer 2 resolves the verse number against the active chapter instead.
+                #   Explicit "Daniel chapter 8 verse 3" is protected by the has_chapter_kw guard.
+                if current_book and current_chapter:
+                    _has_verse_kw  = re.search(r'\b(?:verse|verses)\b|വാക്യ|വചന', text, re.IGNORECASE)
+                    _has_chap_kw   = re.search(r'\b(?:chapter|chap|ch)\b', text, re.IGNORECASE)
+                    _ref_book      = " ".join(verse.split()[:-1]).strip()
+                    # strip verse part for both chapter-only and full refs
+                    if ":" in verse:
+                        _parts_v   = verse.split()
+                        _ref_book  = " ".join(_parts_v[:-1]).strip()
+                        _parsed_ch = _parts_v[-1].split(":")[0]
+                    else:
+                        _parsed_ch = verse.split()[-1]
+                    _same_book = (_ref_book.lower() == (current_book or "").lower())
+
+                    if _has_verse_kw and _same_book and not _has_chap_kw:
+                        try:
+                            _parsed_ch_int = int(_parsed_ch)
+                            if ":" not in verse:
+                                # Sub-case A: chapter-only ref + verse keyword → always block
+                                logger.info(
+                                    f"🚫 BLOCKED (2A-chap): {verse} — chapter-only ref with verse keyword; "
+                                    f"anchor={current_book} {current_chapter} → Layer 2 will resolve verse"
+                                )
+                                is_blocked = True
+                            elif _parsed_ch != current_chapter and _parsed_ch_int <= 150:
+                                # Sub-case B: full ref with different chapter + verse keyword → block
+                                logger.info(
+                                    f"🚫 BLOCKED (2A-full): {verse} — full ref chapter {_parsed_ch} differs "
+                                    f"from anchor chapter {current_chapter}; verse keyword present but no "
+                                    f"chapter keyword → Layer 2 will resolve verse in active chapter"
+                                )
+                                is_blocked = True
+                            else:
+                                logger.debug(
+                                    f"✅ ALLOWED (2A): {verse} — same chapter or chapter keyword present; "
+                                    f"anchor={current_book} {current_chapter}"
+                                )
+                        except ValueError:
+                            pass
 
             if not is_blocked:
                 # Bug Fix 3B: "John the Baptist" is not the book of John
@@ -3119,7 +3388,10 @@ def detect_verse_hybrid(text, controller, confidence=1.0, parser=None) -> bool:
             return True
 
         # Layer 2 — contextual (number only, same book/chapter)
-        if current_book and current_chapter:
+        # Use _get_contextual_anchor() so "verse N" prefers the sermon anchor
+        # over any active cross-reference overlay.
+        _ctx_book, _ctx_chapter, _ctx_verse = _get_contextual_anchor()
+        if _ctx_book and _ctx_chapter:
             text_lower = num_norm.lower()
             # Issue 5: Check if multiple numbers appear in a short phrase
             all_numbers = re.findall(r'\b(\d{1,3})\b', num_norm)
@@ -3140,7 +3412,7 @@ def detect_verse_hybrid(text, controller, confidence=1.0, parser=None) -> bool:
                 # explicitly signals going back (e.g. "let's go back to verse 1").
                 # This prevents the LLM/contextual path from jumping to Hosea 4:1
                 # when the sermon has already progressed to verse 17+.
-                _ctx_key = f"{current_book} {current_chapter}"
+                _ctx_key = f"{_ctx_book} {_ctx_chapter}"
                 _explicit_backward = bool(re.search(
                     r'\b(?:go(?:ing)?\s+back|let\s*[\'s]*\s*(?:go\s+)?back|return\s+to|'
                     r'back\s+to\s+verse|revisit|re-?read|again\s+from)\b',
@@ -3155,25 +3427,53 @@ def detect_verse_hybrid(text, controller, confidence=1.0, parser=None) -> bool:
                         f"manual context was set {time.time() - _manual_context_set_time:.0f}s ago "
                         f"(bypass window = {_MANUAL_CONTEXT_BYPASS_WINDOW:.0f}s)"
                     )
+                elif _sermon_anchor_book and _ctx_key == f"{_sermon_anchor_book} {_sermon_anchor_chapter}":
+                    # ── Same-chapter sermon-anchor bypass (this fix) ──────────
+                    # When the speaker uses clear verse wording ("verse ten",
+                    # "look at verse nine") AND we have an active sermon anchor
+                    # in this exact chapter, treat same-chapter backreferences as
+                    # intentional.  The floor still blocks bare random numbers
+                    # (bare-digit path below) — only the keyword path gets this.
+                    _STRONG_VERSE_RE = re.compile(
+                        r'\b(?:look\s+at\s+verse|read\s+verse|see\s+verse|'
+                        r'at\s+verse|in\s+verse|the\s+verse|verse\s+says?|'
+                        r'verse)\s+(?:\d|one|two|three|four|five|six|seven|eight|nine|ten|'
+                        r'eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|'
+                        r'eighteen|nineteen|twenty|thirty|forty|fifty)',
+                        re.IGNORECASE,
+                    )
+                    # Search both raw text and num_norm so "verse nine" and "verse 9" both match
+                    if _STRONG_VERSE_RE.search(text) or _STRONG_VERSE_RE.search(num_norm):
+                        _floor_bypass_reason = (
+                            f"explicit verse keyword + active sermon anchor "
+                            f"({_sermon_anchor_book} {_sermon_anchor_chapter}) — "
+                            f"same-chapter backreference allowed"
+                        )
                 if (not _explicit_backward
                         and _last_presented_verse_book_chap == _ctx_key
                         and _last_presented_verse_num > 0
                         and int(candidate) < _last_presented_verse_num - 5):
                     if _floor_bypass_reason:
                         logger.info(
-                            f"✅ CONTEXTUAL FLOOR bypassed for {current_book} {current_chapter}:{candidate} "
-                            f"— {_floor_bypass_reason}"
+                            f"✅ CONTEXTUAL FLOOR bypassed for {_ctx_book} {_ctx_chapter}:{candidate} "
+                            f"— {_floor_bypass_reason} "
+                            f"(anchor={_ctx_book} {_ctx_chapter}, "
+                            f"candidate=v{candidate}, last_presented=v{_last_presented_verse_num})"
                         )
                     else:
                         logger.info(
-                            f"🚫 CONTEXTUAL FLOOR (ML-3): {current_book} {current_chapter}:{candidate} "
-                            f"rejected — too far back (last presented v{_last_presented_verse_num}, "
-                            f"floor is v{_last_presented_verse_num - 5}); "
-                            f"this is an inferred/contextual ref, not an explicit book+chapter+verse"
+                            f"🚫 CONTEXTUAL FLOOR (ML-3): {_ctx_book} {_ctx_chapter}:{candidate} "
+                            f"rejected — too far back "
+                            f"(anchor={_ctx_book} {_ctx_chapter}, "
+                            f"candidate=v{candidate}, last_presented=v{_last_presented_verse_num}, "
+                            f"floor=v{_last_presented_verse_num - 5}); "
+                            f"no strong verse keyword or sermon-anchor match — floor enforced"
                         )
                         return False
-                ref = f"{current_book} {current_chapter}:{candidate}"
-                logger.info(f"🔍 CONTEXTUAL: {ref} ({int(confidence*100)}% Acc)")
+                ref = f"{_ctx_book} {_ctx_chapter}:{candidate}"
+                logger.info(f"🔍 CONTEXTUAL: {ref} ({int(confidence*100)}% Acc) "
+                            f"[anchor={_ctx_book} {_ctx_chapter}, floor rule: "
+                            f"{'bypassed: ' + _floor_bypass_reason if _floor_bypass_reason else 'passed normally'}]")
                 deliver_verse(ref, controller, bypass_cooldown=False, confidence=confidence, source="CONTEXTUAL")
                 trigger_onwards_if_needed(ref, text)
                 check_and_queue_range(num_norm, ref, controller)
@@ -3197,7 +3497,7 @@ def detect_verse_hybrid(text, controller, confidence=1.0, parser=None) -> bool:
                 if is_valid:
                     # Bug ML-3 fix: apply the same backward-jump floor to bare-digit path.
                     # Bare digits are the most likely to produce spurious low verse numbers.
-                    _ctx_key2 = f"{current_book} {current_chapter}"
+                    _ctx_key2 = f"{_ctx_book} {_ctx_chapter}"
                     _explicit_bwd2 = bool(re.search(
                         r'\b(?:go(?:ing)?\s+back|let\s*[\'s]*\s*(?:go\s+)?back|return\s+to|'
                         r'back\s+to\s+verse|revisit|re-?read|again\s+from)\b',
@@ -3218,17 +3518,17 @@ def detect_verse_hybrid(text, controller, confidence=1.0, parser=None) -> bool:
                             and int(candidate) < _last_presented_verse_num - 5):
                         if _floor_bypass_reason2:
                             logger.info(
-                                f"✅ CONTEXTUAL FLOOR bypassed (bare) for {current_book} {current_chapter}:{candidate} "
+                                f"✅ CONTEXTUAL FLOOR bypassed (bare) for {_ctx_book} {_ctx_chapter}:{candidate} "
                                 f"— {_floor_bypass_reason2}"
                             )
                         else:
                             logger.info(
-                                f"🚫 CONTEXTUAL FLOOR (ML-3 bare): {current_book} {current_chapter}:{candidate} "
+                                f"🚫 CONTEXTUAL FLOOR (ML-3 bare): {_ctx_book} {_ctx_chapter}:{candidate} "
                                 f"rejected — too far back (last presented v{_last_presented_verse_num}); "
                                 f"bare digits are the highest false-positive risk — floor enforced"
                             )
                             return False
-                    ref = f"{current_book} {current_chapter}:{candidate}"
+                    ref = f"{_ctx_book} {_ctx_chapter}:{candidate}"
                     logger.info(f"🔍 CONTEXTUAL: {ref} ({int(confidence*100)}% Acc)")
                     deliver_verse(ref, controller, bypass_cooldown=False, confidence=confidence, source="CONTEXTUAL")
                     trigger_onwards_if_needed(ref, text)
@@ -3237,8 +3537,8 @@ def detect_verse_hybrid(text, controller, confidence=1.0, parser=None) -> bool:
 
         # Layer 3 — Hindi devanagari digits
         m_hi = re.search(r'([\u0966-\u096F]+)', text)
-        if m_hi and current_book and current_chapter:
-            ref = f"{current_book} {current_chapter}:{m_hi.group(1)}"
+        if m_hi and _ctx_book and _ctx_chapter:
+            ref = f"{_ctx_book} {_ctx_chapter}:{m_hi.group(1)}"
             logger.info(f"🔍 HINDI CTX: {ref} ({int(confidence*100)}% Acc)")
             deliver_verse(ref, controller, bypass_cooldown=False, confidence=confidence, source="CONTEXTUAL")
             trigger_onwards_if_needed(ref, text)
@@ -3246,20 +3546,20 @@ def detect_verse_hybrid(text, controller, confidence=1.0, parser=None) -> bool:
 
         # Layer 4 — Malayalam digits
         m_ml = re.search(r'([\u0D66-\u0D6F]+)', text)
-        if m_ml and current_book and current_chapter:
-            ref = f"{current_book} {current_chapter}:{m_ml.group(1)}"
+        if m_ml and _ctx_book and _ctx_chapter:
+            ref = f"{_ctx_book} {_ctx_chapter}:{m_ml.group(1)}"
             logger.info(f"🔍 MALAYALAM CTX: {ref} ({int(confidence*100)}% Acc)")
             deliver_verse(ref, controller, bypass_cooldown=False, confidence=confidence, source="CONTEXTUAL")
             trigger_onwards_if_needed(ref, text)
             return True
 
         # Layer 5 — sequential (next verse)
-        if current_book and current_chapter and current_verse:
+        if _ctx_book and _ctx_chapter and _ctx_verse:
             m_num = re.search(r'\b(\d{1,3})\b', num_norm)
             if m_num:
                 candidate = m_num.group(1)
                 try:
-                    if int(candidate) == int(current_verse) + 1:
+                    if int(candidate) == int(_ctx_verse) + 1:
                         # Issue 3 fix: don't fire sequential on quantity phrases like
                         # "ten minutes", "ten points", "ten seconds", etc.
                         # Scan 3 tokens after the matched number for blocker words.
@@ -3278,7 +3578,7 @@ def detect_verse_hybrid(text, controller, confidence=1.0, parser=None) -> bool:
                                 f"quantity word in '{text[:60]}'"
                             )
                         else:
-                            ref = f"{current_book} {current_chapter}:{candidate}"
+                            ref = f"{_ctx_book} {_ctx_chapter}:{candidate}"
                             logger.info(f"🔍 SEQUENTIAL: {ref} ({int(confidence*100)}% Acc)")
                             deliver_verse(ref, controller, bypass_cooldown=False, confidence=confidence, source="SEQUENTIAL")
                             trigger_onwards_if_needed(ref, text)
@@ -3451,28 +3751,69 @@ def detect_verse_hybrid(text, controller, confidence=1.0, parser=None) -> bool:
             try:
                 verse = extract_verse_with_llm(text)
                 if verse:
-                    # Bug 5 fix: If the LLM returns a verse that the sermon has already
-                    # progressed past in the same book+chapter, suppress it.  This happens
-                    # when stale transcript context keeps pointing the LLM back to an early
-                    # reference (e.g. Acts 8:26 re-fired 3+ minutes after it was first shown
-                    # while the preacher was already deep into Acts 6 background material).
+                    # Bug 5 fix (refined): Suppress LLM verses that are genuinely stale —
+                    # i.e. the sermon has moved well past them AND they are not a valid
+                    # backreference within the *current* sermon passage.
+                    #
+                    # Original behaviour: suppress whenever high-water > detected verse.
+                    # Problem: that incorrectly dropped valid same-sermon-chapter revisits
+                    # (e.g. preacher at Daniel 12:12 re-emphasises Daniel 12:2).
+                    #
+                    # Refined rule:
+                    #   SUPPRESS  — high-water is ahead AND the detected book+chapter does
+                    #               NOT match the active sermon anchor (i.e. it is from an
+                    #               older/unrelated passage, not the current one).
+                    #   ACCEPT    — same book+chapter as the sermon anchor (backreference or
+                    #               repeated emphasis within the active passage is intentional).
                     _suppress_stale_llm = False
                     if ":" in verse:
                         try:
                             _llm_parts   = verse.rsplit(":", 1)
-                            _llm_book_ch = _llm_parts[0]          # e.g. "Acts 8"
+                            _llm_book_ch = _llm_parts[0].strip()   # e.g. "Daniel 12"
                             _llm_v_num   = int(_llm_parts[1].split()[0])
-                            _hw_key      = _llm_book_ch            # same key format as _session_verse_high_water
+                            _hw_key      = _llm_book_ch             # same key as _session_verse_high_water
                             _hw_verse    = _session_verse_high_water.get(_hw_key, 0)
-                            # Suppress only when the high-water mark is strictly AHEAD of the
-                            # LLM's result (meaning we've already shown a later verse in this
-                            # same chapter).  A same-verse or earlier-high-water is fine.
+
+                            # Active sermon anchor key, e.g. "Daniel 12"
+                            _sa_key = (
+                                f"{_sermon_anchor_book} {_sermon_anchor_chapter}"
+                                if _sermon_anchor_book and _sermon_anchor_chapter
+                                else None
+                            )
+                            _is_same_sermon_passage = (
+                                _sa_key is not None
+                                and _llm_book_ch.lower() == _sa_key.lower()
+                            )
+
                             if _hw_verse > _llm_v_num:
-                                logger.info(
-                                    f"🔕 LLM result suppressed (stale): {verse} — "
-                                    f"sermon already at {_llm_book_ch}:{_hw_verse}"
+                                if _is_same_sermon_passage:
+                                    # Backreference within the active sermon chapter — the
+                                    # preacher is revisiting or re-emphasising an earlier verse.
+                                    # Accept it; do NOT set _suppress_stale_llm.
+                                    logger.info(
+                                        f"✅ LLM stale-check BYPASSED (same sermon passage): {verse} "
+                                        f"| active_sermon={_sa_key} "
+                                        f"| hw={_hw_verse} | extracted_v={_llm_v_num} "
+                                        f"| decision=ACCEPTED "
+                                        f"| reason=same-chapter backreference within active passage"
+                                    )
+                                else:
+                                    # Genuinely stale: belongs to an earlier / unrelated section.
+                                    logger.info(
+                                        f"🔕 LLM result suppressed (stale): {verse} "
+                                        f"| active_sermon={_sa_key or 'none'} "
+                                        f"| hw={_hw_verse} | extracted_v={_llm_v_num} "
+                                        f"| decision=SUPPRESSED "
+                                        f"| reason=sermon has moved past this verse in a different passage"
+                                    )
+                                    _suppress_stale_llm = True
+                            else:
+                                logger.debug(
+                                    f"✅ LLM stale-check passed (verse not behind hw): {verse} "
+                                    f"| active_sermon={_sa_key or 'none'} "
+                                    f"| hw={_hw_verse} | extracted_v={_llm_v_num} "
+                                    f"| decision=ACCEPTED"
                                 )
-                                _suppress_stale_llm = True
                         except (ValueError, IndexError, AttributeError):
                             pass
                     if not _suppress_stale_llm:
@@ -3814,16 +4155,6 @@ async def stream_audio(controller, is_secondary=False):
             logger.info(f"Connected to Deepgram WebSocket {_tag}")
             logger.info("Press Stop to end")
 
-            async def send_audio():
-                try:
-                    while not stop_event.is_set():
-                        data = await loop.run_in_executor(None, read_audio)
-                        await ws.send(data)
-                except asyncio.CancelledError:
-                    pass
-                except Exception as e:
-                    logger.error(f"Send error: {e}")
-
             async def recv_transcripts():
                 global full_sermon_transcript, full_sermon_transcript_secondary, _last_transcript_time
                 try:
@@ -3867,6 +4198,14 @@ async def stream_audio(controller, is_secondary=False):
                                         collapsed = True
                                         break
 
+                                # Issue B: secondary-stream degenerate-loop guard.
+                                # After the existing phrase-collapse above, run the
+                                # heavier token-loop detector.  If the chunk is still
+                                # degenerate after collapsing, drop it entirely rather
+                                # than feeding garbage into the verse pipeline.
+                                if is_secondary and _drop_if_degenerate(sentence, _tag):
+                                    continue   # chunk dropped — do not append or parse
+
                                 if not collapsed:
                                     logger.info(f"📝 {_tag} {sentence}")
 
@@ -3882,6 +4221,32 @@ async def stream_audio(controller, is_secondary=False):
                     pass
                 except Exception as e:
                     logger.warning(f"WebSocket closed {_tag}: {e}")
+
+            async def send_audio():
+                # Issue B: catch websocket send errors gracefully.  A
+                # ConnectionClosed / SendError from the secondary stream used to
+                # bubble up and trigger a full shutdown.  Now we log it and let
+                # the outer reconnect loop handle recovery.
+                try:
+                    while not stop_event.is_set():
+                        data = await loop.run_in_executor(None, read_audio)
+                        try:
+                            await ws.send(data)
+                        except Exception as _send_exc:
+                            _exc_name = type(_send_exc).__name__
+                            if is_secondary:
+                                logger.warning(
+                                    f"⚠️ {_tag} websocket send error ({_exc_name}) — "
+                                    f"graceful fallback: stopping sender, "
+                                    f"reconnect will be attempted by outer loop"
+                                )
+                            else:
+                                logger.error(f"Send error: {_send_exc}")
+                            break   # exit sender; receiver/outer loop handle reconnect
+                except asyncio.CancelledError:
+                    pass
+                except Exception as e:
+                    logger.error(f"Send error: {e}")
 
             sender   = asyncio.create_task(send_audio())
             receiver = asyncio.create_task(recv_transcripts())
@@ -3928,6 +4293,80 @@ async def stream_audio(controller, is_secondary=False):
             audio.terminate()
         except Exception:
             pass
+
+
+# ── Issue B: repetition / noise guard ────────────────────────────────────────
+
+def _is_degenerate_chunk(text: str) -> tuple[bool, str]:
+    """Return (True, reason) when *text* looks like a degenerate token-loop.
+
+    Checks two patterns:
+      1. Single-token or two-token loops repeated >= _REP_MIN_TOKEN_LOOP times.
+         e.g. "I I I I I I" (6× "I") or "go to go to go to go to" (4× "go to")
+      2. Three-token phrase loops repeated >= _REP_MIN_PHRASE_LOOP times.
+         e.g. "and he said and he said and he said and he said"
+
+    Normal speech with incidental repetition (stutters, emphasis) will not trigger
+    because the thresholds are intentionally high.
+    """
+    words = text.strip().split()
+    if len(words) < _REP_MIN_TOKEN_LOOP:
+        return False, ""
+
+    # ── 1-token loop ──────────────────────────────────────────────────────────
+    if len(set(words)) == 1:
+        if len(words) >= _REP_MIN_TOKEN_LOOP:
+            return True, f"single-token loop '{words[0]}' ×{len(words)}"
+
+    # ── 2-token and 3-token phrase loops ─────────────────────────────────────
+    for phrase_len, threshold in ((2, _REP_MIN_TOKEN_LOOP), (3, _REP_MIN_PHRASE_LOOP)):
+        if len(words) < phrase_len * threshold:
+            continue
+        for start in range(phrase_len):
+            chunks = [
+                " ".join(words[i : i + phrase_len])
+                for i in range(start, len(words) - phrase_len + 1, phrase_len)
+            ]
+            if not chunks:
+                continue
+            # All chunks identical → pure loop
+            if len(set(chunks)) == 1 and len(chunks) >= threshold:
+                return True, f"{phrase_len}-token loop '{chunks[0]}' ×{len(chunks)}"
+
+    return False, ""
+
+
+def _drop_if_degenerate(text: str, tag: str) -> bool:
+    """Return True (and log) if *text* is degenerate and should be dropped.
+
+    Also enforces a per-tag throttle window: if a drop was just triggered,
+    the next _REP_DROP_WINDOW_SEC of chunks from the same tag are dropped too,
+    giving the STT model time to recover before we resume processing.
+    """
+    now = time.time()
+
+    # Still inside the throttle window from a previous drop?
+    if now < _rep_drop_until.get(tag, 0.0):
+        logger.debug(
+            f"🔇 {tag} chunk dropped (throttle window active, "
+            f"{_rep_drop_until[tag] - now:.1f}s remaining): '{text[:60]}'"
+        )
+        return True
+
+    degenerate, reason = _is_degenerate_chunk(text)
+    if degenerate:
+        logger.warning(
+            f"♻️ {tag} repetition detected — chunk dropped | "
+            f"reason={reason} | text='{text[:80]}'"
+        )
+        _rep_drop_until[tag] = now + _REP_DROP_WINDOW_SEC
+        logger.info(
+            f"⏳ {tag} throttle window active for {_REP_DROP_WINDOW_SEC:.0f}s "
+            f"(allowing STT model to recover)"
+        )
+        return True
+
+    return False
 
 
 # ── SARVAM STREAMING ──────────────────────────────────────────────────────────
@@ -4010,7 +4449,14 @@ async def stream_audio_sarvam(controller, is_secondary=False):
                         try:
                             while not stop_event.is_set():  # type: ignore
                                 pcm_data = await loop.run_in_executor(None, read_chunk_blocking)  # type: ignore
-                                await ws.transcribe(audio=base64.b64encode(pcm_data).decode("utf-8"))  # type: ignore
+                                try:
+                                    await ws.transcribe(audio=base64.b64encode(pcm_data).decode("utf-8"))  # type: ignore
+                                except Exception as _send_exc:
+                                    logger.warning(
+                                        f"⚠️ {_tag} send error ({type(_send_exc).__name__}) — "
+                                        f"stopping sender; reconnect attempted by outer loop"
+                                    )
+                                    break   # exit sender; reconnect loop handles recovery
                         except asyncio.CancelledError:
                             pass
                         except Exception as e:
@@ -4063,6 +4509,14 @@ async def stream_audio_sarvam(controller, is_secondary=False):
 
                                     # Bug Fix 4: discard garbage audio from reconnect boundary
                                     if time.time() < _sarvam_ignore_until:
+                                        continue
+
+                                    # Issue B: degenerate token-loop guard for SEC-ML stream.
+                                    # Sarvam sometimes enters a hallucination loop ("I I I…",
+                                    # "go to go to…") which precedes websocket collapse.
+                                    # Drop the chunk early and throttle for a few seconds so
+                                    # the model can recover without forcing a full shutdown.
+                                    if _drop_if_degenerate(sentence, _tag):
                                         continue
 
                                     if MALAYALAM_TRANSLITERATION:
