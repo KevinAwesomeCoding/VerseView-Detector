@@ -421,6 +421,8 @@ _BOOK_CONTEXT_CASUAL_RE  = re.compile(
 # Phrases like "he was reading Isaiah 53" or "the Ethiopian found reading the book of Isaiah"
 # are story narration — the current PREACHER is not announcing a passage switch.
 # If one of these phrases precedes a book name we should NOT update context or present a verse.
+# Extended: also catches person-title constructions like "Joel the prophet spoke about..."
+# or "Matthew the tax collector" which are biographical references, not book anchors.
 _NARRATIVE_READING_RE = re.compile(
     r'\b(?:'
     r'(?:he|she|they|the\s+\w+)\s+was\s+reading'       # "he was reading Isaiah"
@@ -430,6 +432,13 @@ _NARRATIVE_READING_RE = re.compile(
     r'|had\s+been\s+reading'
     r'|reading\s+from\s+the\s+(?:scroll|book|passage)\s+of'  # "reading from the scroll of Isaiah"
     r'|the\s+(?:scroll|passage|section|text|portion)\s+(?:he|she|they)\s+was\s+reading'
+    # Person-title constructions that identify a name as a person, not a book:
+    r'|(?:john|matthew|mark|luke|james|ruth|joel|job|amos|jonah|micah|peter|'
+    r'jude|hosea|nahum|philemon|timothy|titus)\s+the\s+'
+    r'(?:baptist|prophet(?:ess)?|apostle|disciple|evangelist|elder|'
+    r'tax\s+collector|zealot|righteous|beloved|just)'
+    r'|(?:the\s+)?(?:prophet|apostle|disciple|evangelist|elder)\s+'
+    r'(?:john|matthew|mark|luke|james|joel|amos|jonah|micah|peter|jude|hosea|nahum)'
     r')\b',
     re.IGNORECASE,
 )
@@ -548,6 +557,229 @@ SPOKEN_NUMERAL_MODE      = False
 WORSHIP_MODE             = False
 _verse_history: list     = []
 
+# ── SCRIPTURE-READ MODE ───────────────────────────────────────────────────────
+# Activated when the speaker signals a live bilingual / line-by-line Bible
+# reading (e.g. "open your Bibles", "let's read", "I will read in English").
+# While active the engine locks to the current book+chapter anchor and only
+# accepts:
+#   • the current verse
+#   • the next verse in sequence
+#   • an explicitly-requested verse in the same passage
+# All stray numerals (sermon point counts, timestamps, crowd noise) and
+# paraphrase fragments are suppressed unless they carry a clear verse signal.
+SCRIPTURE_READ_MODE:          bool = False
+_sr_locked_book:              str  = None   # book locked at entry
+_sr_locked_chapter:           str  = None   # chapter locked at entry
+_sr_expected_verse:           int  = None   # next verse the engine expects
+_sr_entry_time:               float = 0.0   # when SCRIPTURE-READ was entered
+_sr_last_language_hint:       str  = None   # "en" | "ml" | "hi" — current read language
+
+# Phrases that trigger entry into SCRIPTURE-READ mode (case-insensitive)
+_SR_ENTRY_PATTERNS = re.compile(
+    r'\b(?:'
+    r'open\s+your\s+bibles?'
+    r'|let[\'s]*\s+(?:now\s+)?read'
+    r'|(?:I|we)\s+(?:will|shall|am\s+going\s+to)\s+read'
+    r'|read(?:ing)?\s+(?:from|in)\s+(?:english|malayalam|hindi|tamil|kannada|telugu|the\s+bible)'
+    r'|I\s+(?:will|shall)\s+read\s+in\s+(?:english|malayalam|hindi|tamil|kannada|telugu)'
+    r'|read\s+(?:together\s+)?(?:from\s+)?verse'
+    r'|reading\s+(?:together|aloud|now)'
+    r')\b',
+    re.IGNORECASE,
+)
+
+# Stray-numeral patterns suppressed while SCRIPTURE-READ is active:
+#   • timestamps  (12:30, 9:45 am/pm)
+#   • sermon point numbers  (point 1, point one, first point, 1.)
+#   • percentage/statistics  (50%, 30 percent)
+#   • year references  (in 2024, year 1948)
+_SR_STRAY_NUMERAL_RE = re.compile(
+    r'(?:'
+    r'\b\d{1,2}:\d{2}\s*(?:am|pm|a\.m\.|p\.m\.)\b'       # timestamps
+    r'|\bpoint\s+(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten)\b'  # sermon points
+    r'|\b(?:first|second|third)\s+point\b'
+    r'|\b\d+\.\s+(?=[A-Z])'                               # "1. Next idea"
+    r'|\b\d+\s*%'                                         # percentages
+    r'|\b\d+\s+percent\b'
+    r'|\b(?:in\s+the\s+year|in|around|about|since|before|after)\s+\d{3,4}\b'  # year context
+    r')',
+    re.IGNORECASE,
+)
+
+# Exit signals — clear topic shift away from reading (e.g. sermon application)
+_SR_EXIT_PATTERNS = re.compile(
+    r'\b(?:'
+    r'let\s+(?:me|us|\'s)\s+(?:now\s+)?(?:pray|preach|look\s+at|turn\s+to|talk\s+about)'
+    r'|(?:sermon\s+)?(?:point|outline)\s+(?:number\s+)?\d+'
+    r'|in\s+conclusion'
+    r'|in\s+summary'
+    r'|let\s+me\s+explain'
+    r'|(?:this\s+(?:morning|evening|night)\s+)?(?:we\s+are\s+)?(?:going\s+to\s+)?(?:study|preach|teach|discuss)'
+    r')\b',
+    re.IGNORECASE,
+)
+
+
+def _enter_scripture_read_mode(language_hint: str = None) -> None:
+    """Enter SCRIPTURE-READ mode, locking to the current book+chapter anchor."""
+    global SCRIPTURE_READ_MODE, _sr_locked_book, _sr_locked_chapter
+    global _sr_expected_verse, _sr_entry_time, _sr_last_language_hint
+    if SCRIPTURE_READ_MODE:
+        return  # already active
+    anchor_book, anchor_chapter, anchor_verse = _get_contextual_anchor()
+    if not anchor_book or not anchor_chapter:
+        logger.info("📖 SCRIPTURE-READ: no anchor set — mode NOT entered (no book/chapter context)")
+        return
+    SCRIPTURE_READ_MODE     = True
+    _sr_locked_book         = anchor_book
+    _sr_locked_chapter      = anchor_chapter
+    _sr_expected_verse      = (int(anchor_verse) if anchor_verse else None)
+    _sr_entry_time          = time.time()
+    _sr_last_language_hint  = language_hint
+    logger.info(
+        f"📖 SCRIPTURE-READ MODE ENTERED — locked to {_sr_locked_book} {_sr_locked_chapter}"
+        f" (next expected v{_sr_expected_verse or '?'}) lang={language_hint or 'auto'}"
+    )
+
+
+def _exit_scripture_read_mode(reason: str = "manual") -> None:
+    """Exit SCRIPTURE-READ mode and clear locked state."""
+    global SCRIPTURE_READ_MODE, _sr_locked_book, _sr_locked_chapter
+    global _sr_expected_verse, _sr_entry_time, _sr_last_language_hint
+    if not SCRIPTURE_READ_MODE:
+        return
+    SCRIPTURE_READ_MODE    = False
+    _sr_locked_book        = None
+    _sr_locked_chapter     = None
+    _sr_expected_verse     = None
+    _sr_entry_time         = 0.0
+    _sr_last_language_hint = None
+    logger.info(f"📖 SCRIPTURE-READ MODE EXITED ({reason})")
+
+
+def _scripture_read_check_entry_exit(text: str) -> None:
+    """
+    Inspect a raw transcript sentence for SCRIPTURE-READ entry/exit signals.
+    Called early in _process_transcript_blob so the mode flag is up-to-date
+    before the verse-detection layers run.
+    """
+    global _sr_expected_verse, _sr_last_language_hint
+
+    # ── Entry detection ───────────────────────────────────────────────────────
+    if not SCRIPTURE_READ_MODE:
+        m_entry = _SR_ENTRY_PATTERNS.search(text)
+        if m_entry:
+            # Detect language hint if present
+            lang_hint = None
+            if re.search(r'\bmalayalam\b', text, re.IGNORECASE):
+                lang_hint = "ml"
+            elif re.search(r'\bhindi\b', text, re.IGNORECASE):
+                lang_hint = "hi"
+            elif re.search(r'\benglish\b', text, re.IGNORECASE):
+                lang_hint = "en"
+            _enter_scripture_read_mode(language_hint=lang_hint)
+        return
+
+    # ── Already in SCRIPTURE-READ — check for exit signals ───────────────────
+
+    # 1. Language-switch hint update (bilingual reading — no exit, just update)
+    if re.search(r'\b(?:now\s+)?(?:in|I\s+will\s+read\s+in)\s+(english|malayalam|hindi|tamil|kannada|telugu)\b',
+                 text, re.IGNORECASE):
+        m_lang = re.search(r'\b(english|malayalam|hindi|tamil|kannada|telugu)\b', text, re.IGNORECASE)
+        if m_lang:
+            new_lang = {"english": "en", "malayalam": "ml", "hindi": "hi",
+                        "tamil": "ta", "kannada": "kn", "telugu": "te"}.get(m_lang.group(1).lower())
+            if new_lang and new_lang != _sr_last_language_hint:
+                _sr_last_language_hint = new_lang
+                logger.info(f"📖 SCRIPTURE-READ: language hint updated → {new_lang}")
+        return  # Never exit on a language-switch mid-reading
+
+    # 2. Clear new anchor in a DIFFERENT book or chapter → exit
+    # (handled externally in set_context / deliver_verse — see deliver_verse patch below)
+
+    # 3. Explicit exit keywords (topic shift)
+    if _SR_EXIT_PATTERNS.search(text):
+        _exit_scripture_read_mode(reason="topic-shift keyword")
+        return
+
+
+def _scripture_read_filter(text: str) -> str:
+    """
+    When SCRIPTURE-READ is active, scrub stray numerals that are NOT verse
+    signals before handing the text to the detection layers.
+    Returns the cleaned text (may be unchanged if nothing was scrubbed).
+    """
+    if not SCRIPTURE_READ_MODE:
+        return text
+    cleaned = _SR_STRAY_NUMERAL_RE.sub("", text)
+    if cleaned != text:
+        logger.debug(f"📖 SR-FILTER: scrubbed stray numerals → '{cleaned.strip()}'")
+    return cleaned
+
+
+def _scripture_read_verse_allowed(ref: str) -> bool:
+    """
+    Returns True if *ref* is admissible while SCRIPTURE-READ is active.
+    Admissible means:
+      • Same locked book and chapter   AND
+      • Verse is the expected next verse, the current verse, or at most 2 ahead
+        (to handle minor mis-transcriptions), OR
+      • Verse was explicitly stated in the current transcript excerpt
+        (caller responsibility — just call with any explicitly-parsed ref).
+    Cross-book or cross-chapter refs are blocked.
+    """
+    if not SCRIPTURE_READ_MODE:
+        return True  # no restriction outside the mode
+    if not _sr_locked_book or not _sr_locked_chapter:
+        return True  # guard: mode entered without anchor — be permissive
+
+    parts = ref.split()
+    if ":" not in parts[-1]:
+        # Chapter-only ref — allow if same locked book/chapter
+        ref_book    = " ".join(parts)
+        ref_chapter = None
+    else:
+        ref_chapter = parts[-1].split(":")[0]
+        ref_book    = " ".join(parts[:-1])
+        verse_str   = parts[-1].split(":")[1]
+
+    # Book must match
+    if ref_book.lower() != _sr_locked_book.lower():
+        logger.debug(f"📖 SR-BLOCK: {ref} — wrong book (locked={_sr_locked_book})")
+        return False
+
+    # Chapter must match
+    if ref_chapter and ref_chapter != _sr_locked_chapter:
+        logger.debug(f"📖 SR-BLOCK: {ref} — wrong chapter (locked={_sr_locked_chapter})")
+        return False
+
+    # Verse window check
+    if ref_chapter:
+        try:
+            v = int(verse_str)
+            if _sr_expected_verse is not None:
+                # Allow: expected, expected-1 (current), expected+1, expected+2
+                if not (_sr_expected_verse - 1 <= v <= _sr_expected_verse + 2):
+                    logger.debug(
+                        f"📖 SR-BLOCK: {ref} — verse {v} outside window "
+                        f"[{max(1,_sr_expected_verse-1)}..{_sr_expected_verse+2}] "
+                        f"(expected={_sr_expected_verse})"
+                    )
+                    return False
+        except ValueError:
+            pass  # non-numeric verse — let through
+
+    return True
+
+
+def scripture_read_advance_expected(verse_num: int) -> None:
+    """Called by deliver_verse when a verse is shown during SCRIPTURE-READ mode
+    to advance the expected-next-verse pointer."""
+    global _sr_expected_verse
+    if SCRIPTURE_READ_MODE and verse_num is not None:
+        _sr_expected_verse = verse_num + 1
+        logger.debug(f"📖 SR: expected verse advanced → {_sr_expected_verse}")
+
 # ── LLM CLIENTS (initialised in configure()) ─────────────────────────────────
 groq_client     = None   # verse extraction only            (Groq llama-3.1-8b-instant)
 cerebras_client = None   # live outline + summary fallback  (Cerebras gpt-oss-120b)
@@ -562,6 +794,20 @@ _session_verse_high_water: dict = {}  # "Book chapter" → highest verse int see
 _last_presented_verse_num: int = 0        # ordinal of last verse sent to display
 _last_presented_verse_book_chap: str = "" # "Book chapter" key matching the above
 
+# ── HARD CONFIRMATION GATE ────────────────────────────────────────────────────
+# A verse may only be presented when ONE of these conditions is true:
+#   A) Source is FAST-PATH or TRANSLATION-PATH  →  explicit book+chapter+verse was parsed
+#   B) The system is in ONWARDS (locked sequential reading) mode
+#   C) Source is QUEUE or NEXT VERSE            →  already approved range continuation
+#   D) The same ref has been seen ≥2 times within _GATE_WINDOW_SECS
+#
+# All other inferred detections (PARSER, CONTEXTUAL, SEQUENTIAL, LLM, RANGE,
+# READ-INTENT, VERSE-RANGE-FIRST, VERSE-OF-CHAPTER, SIMPLE) must pass through
+# the window check. First occurrence is silently held; no guess is made.
+_GATE_WINDOW_SECS: float = 45.0   # local confirmation window length
+# {ref → (count, first_seen_time)}  — reset whenever a ref is finally presented
+_gate_pending: dict = {}
+
 # ── Contextual-floor bypass flags ──────────────────────────────────────────────
 # CONTEXT_FLOOR_EXPLICIT_BYPASS: when True, the ML-3 backward-jump floor is
 # skipped for any transcript that contains an explicit book + chapter + verse
@@ -569,13 +815,31 @@ _last_presented_verse_book_chap: str = "" # "Book chapter" key matching the abov
 # always allowed regardless of what verse was last presented.
 CONTEXT_FLOOR_EXPLICIT_BYPASS: bool = True
 
-# CONTEXT_FLOOR_MANUAL_CONTEXT_BYPASS: when True, the floor is also skipped for
-# a short window after set_context() is called from the GUI (manual context
-# change), so that contextual detections immediately following a manual context
-# update are evaluated against the NEW position rather than the old floor.
-CONTEXT_FLOOR_MANUAL_CONTEXT_BYPASS: bool = True
-_MANUAL_CONTEXT_BYPASS_WINDOW: float = 30.0  # seconds the bypass stays active
-_manual_context_set_time: float = 0.0         # timestamp of last set_context() call
+# ── SYSTEM-ACTION QUARANTINE ──────────────────────────────────────────────────
+# When the operator performs a manual context change, clicks the chapter browser,
+# injects verse history, or restores a session snapshot, the engine enters a
+# short quarantine window.  During that window all *inferred* detections
+# (CONTEXTUAL, SEQUENTIAL, LLM, RANGE, READ-INTENT, PARSER, SIMPLE …) are
+# suppressed unless fresh spoken evidence arrives — i.e. the live transcript has
+# grown by at least _QUARANTINE_MIN_NEW_CHARS characters AND the new tail
+# contains an explicit verse signal (full ref, or "verse N" keyword).
+#
+# This is the OPPOSITE of the old CONTEXT_FLOOR_MANUAL_CONTEXT_BYPASS behaviour.
+# Previously set_context() LOWERED the contextual floor for 30 s (making it
+# easier to fire inferred detections).  That caused system-side navigation to
+# silently steer the parser.  The quarantine instead RAISES the bar: manual /
+# system events are metadata only; spoken intent is still required.
+#
+# Sources that ALWAYS bypass the quarantine (no change):
+#   FAST-PATH, TRANSLATION-PATH, QUEUE, NEXT VERSE, ONWARDS
+# (These require either an explicit spoken ref or are already in locked mode.)
+#
+# The old flag is kept with its name so callers compile; its logic is inverted.
+CONTEXT_FLOOR_MANUAL_CONTEXT_BYPASS: bool = True   # now means "quarantine on manual set"
+_MANUAL_CONTEXT_BYPASS_WINDOW: float       = 45.0  # quarantine length in seconds
+_manual_context_set_time: float            = 0.0   # timestamp of last quarantine-opening event
+_quarantine_transcript_offset: int         = 0     # len(full_sermon_transcript) when quarantine opened
+_QUARANTINE_MIN_NEW_CHARS: int             = 40    # chars of new speech needed to clear quarantine early
 LIVE_POINTS_ENABLED  = False   # Bug 8: guard — True only when LLM outline is enabled
 SILENCE_TIMEOUT      = 60      # Feature 6: auto-stop after N seconds without a transcript line
 _last_transcript_time = 0.0    # Feature 6: timestamp of last received transcript line
@@ -1195,6 +1459,7 @@ def configure(
     global full_sermon_transcript_secondary
     global ASSEMBLYAI_API_KEY, STT_ENGINE, AAI_LANGUAGE, AAI_TURN_CUTOFF_SEC
     WORSHIP_MODE = False
+    _exit_scripture_read_mode(reason="session-reset")
     if not _verse_history:          # only wipe on a true fresh launch
         _verse_history.clear()
     # Reset context so stale chapter from previous session never bleeds in
@@ -1224,6 +1489,13 @@ def configure(
     # BUG 2: Reset shutdown flag and thread registry so new session starts clean
     _shutdown_flag.clear()
     _active_bg_threads.clear()
+    # Hard confirmation gate: clear any pending-verse hints from a previous session
+    global _gate_pending
+    _gate_pending.clear()
+    # Quarantine: reset so a fresh session starts clean
+    global _manual_context_set_time, _quarantine_transcript_offset
+    _manual_context_set_time        = 0.0
+    _quarantine_transcript_offset   = 0
 
     DEEPGRAM_API_KEY = deepgram_api_key
     GROQ_API_KEY     = groq_api_key
@@ -1311,6 +1583,7 @@ def configure(
     SPOKEN_NUMERAL_MODE      = spoken_numeral_mode
     WORSHIP_MODE             = worship_mode
     logger.info(f"🎸 Worship Mode       : {'ON' if WORSHIP_MODE else 'OFF'}")
+    logger.info(f"📖 Scripture-Read Mode: {'ON' if SCRIPTURE_READ_MODE else 'STANDBY (auto-triggered by speech)'}")
     # ── Discord: citations ──
     set_spoken_numeral_mode(spoken_numeral_mode)
     logger.info(f"🔣 Spoken Numeral Mode: {'ON' if spoken_numeral_mode else 'OFF'}")
@@ -1435,8 +1708,98 @@ _gui_app               = None   # injected by configure(); used by bot bridge fo
 BRIDGE_READY_CALLBACK  = None   # called once the bot bridge starts successfully
 
 
+
 def get_context() -> dict:
     return {"book": current_book or "", "chapter": current_chapter or "", "verse": current_verse or ""}
+
+
+# ── SYSTEM-ACTION QUARANTINE HELPERS ─────────────────────────────────────────
+
+def _open_system_quarantine(reason: str) -> None:
+    """Open the quarantine window.
+
+    Called by set_context(), restore_session_snapshot(), and
+    add_to_verse_history() for system-sourced events.  While the
+    quarantine is active, deliver_verse() blocks all inferred detections
+    (CONTEXTUAL, SEQUENTIAL, LLM, RANGE, READ-INTENT, PARSER, SIMPLE)
+    until fresh spoken evidence arrives.
+
+    Does NOT affect FAST-PATH, TRANSLATION-PATH, QUEUE, NEXT VERSE, or
+    ONWARDS — those carry their own evidence of explicit speech.
+    """
+    global _manual_context_set_time, _quarantine_transcript_offset
+    _manual_context_set_time      = time.time()
+    _quarantine_transcript_offset = len(full_sermon_transcript)
+    logger.info(
+        f"🔒 QUARANTINE OPENED ({reason}) — inferred detections suppressed "
+        f"until {_MANUAL_CONTEXT_BYPASS_WINDOW:.0f}s elapses or "
+        f"≥{_QUARANTINE_MIN_NEW_CHARS} chars of fresh spoken evidence arrive"
+    )
+
+
+def _in_system_quarantine(text: str) -> bool:
+    """Return True when the quarantine is active AND the transcript has not
+    yet accumulated enough fresh spoken content to clear it early.
+
+    Early-clear rules (any one is sufficient):
+      1. An explicit full reference (book + chapter + verse) appears in
+         *text* — the speaker clearly said something unambiguous.
+      2. The sermon transcript has grown by ≥ _QUARANTINE_MIN_NEW_CHARS
+         characters since the quarantine opened, AND the new tail contains
+         a verse-keyword signal ("verse N", "N:N" colon notation, etc.).
+
+    If the quarantine window has simply expired (_MANUAL_CONTEXT_BYPASS_WINDOW
+    seconds), we also return False (quarantine over).
+    """
+    if not CONTEXT_FLOOR_MANUAL_CONTEXT_BYPASS:
+        return False          # feature disabled
+    if _manual_context_set_time == 0.0:
+        return False          # never opened
+
+    age = time.time() - _manual_context_set_time
+    if age >= _MANUAL_CONTEXT_BYPASS_WINDOW:
+        return False          # expired naturally
+
+    # Early-clear check 1: explicit full ref in current transcript chunk
+    if _is_explicit_full_ref(text):
+        logger.info(
+            f"✅ QUARANTINE CLEARED EARLY — explicit full ref found in transcript "
+            f"(age={age:.1f}s)"
+        )
+        return False
+
+    # Early-clear check 2: enough new spoken text with a verse signal
+    new_chars = len(full_sermon_transcript) - _quarantine_transcript_offset
+    if new_chars >= _QUARANTINE_MIN_NEW_CHARS:
+        # Look for a verse signal in the most-recent portion of the transcript
+        tail = full_sermon_transcript[-max(new_chars, 120):]
+        _VERSE_SIGNAL_RE = re.compile(
+            r'(?:'
+            r'\b[A-Za-z]\w*\s+\d{1,3}:\d{1,3}\b'           # colon notation
+            r'|'
+            r'\bverse[s]?\s+\d+'                             # "verse N"
+            r'|'
+            r'\b(?:chapter|chap|ch)\s+\d+\s+verse\s+\d+'    # spoken form
+            r'|'
+            r'[\u0D66-\u0D6F]+'                              # Malayalam digits
+            r'|'
+            r'[\u0966-\u096F]+'                              # Devanagari digits
+            r')',
+            re.IGNORECASE,
+        )
+        if _VERSE_SIGNAL_RE.search(tail):
+            logger.info(
+                f"✅ QUARANTINE CLEARED EARLY — {new_chars} new chars + verse "
+                f"signal in transcript tail (age={age:.1f}s)"
+            )
+            return False
+
+    # Still in quarantine
+    logger.debug(
+        f"🔒 QUARANTINE ACTIVE — age={age:.1f}s, "
+        f"new_chars={len(full_sermon_transcript) - _quarantine_transcript_offset}"
+    )
+    return True
 
 
 def set_context(book: str, chapter: str, verse: str):
@@ -1518,8 +1881,9 @@ def set_context(book: str, chapter: str, verse: str):
         except (ValueError, TypeError):
             pass
 
-    # Stamp the manual-context time so the bypass window activates.
-    _manual_context_set_time = time.time()
+    # Open a quarantine window: manual context is metadata only.
+    # Inferred detections are suppressed until fresh spoken evidence arrives.
+    _open_system_quarantine("set_context")
 
     # Build a display ref that is never malformed ("Book Ch" or "Book Ch:V")
     _display_ref = (
@@ -1529,8 +1893,8 @@ def set_context(book: str, chapter: str, verse: str):
     )
     logger.info(
         f"📌 Context manually set: {_display_ref} "
-        f"— contextual floor reset; bypass window active for "
-        f"{_MANUAL_CONTEXT_BYPASS_WINDOW:.0f}s"
+        f"— inferred detections quarantined for up to "
+        f"{_MANUAL_CONTEXT_BYPASS_WINDOW:.0f}s (metadata only; spoken evidence required)"
     )
 
 
@@ -1581,11 +1945,135 @@ def deliver_verse(ref: str, controller, bypass_cooldown=False, confidence=1.0, s
     Deliver a detected verse: if Verse Interrupt is on, wait for the speaker to say the verse
     (fetch text via Bible API, listen for trigger words, 60s timeout; new ref cancels current).
     Otherwise send directly to controller.
+
+    ── HARD CONFIRMATION GATE ────────────────────────────────────────────────
+    A verse is presented ONLY when one of these conditions is satisfied:
+
+      A) Source is FAST-PATH or TRANSLATION-PATH
+            → The parser found an explicit book + chapter + verse in the
+              transcript.  These paths already require colon notation or
+              full spoken form; no guessing involved.
+
+      B) The system is in ONWARDS mode (locked sequential verse-reading)
+            → The preacher is working through a passage verse-by-verse.
+              The next verse is the only valid continuation, so no
+              confirmation window is needed.
+
+      C) Source is QUEUE or NEXT VERSE
+            → The verse was already confirmed and queued during a range
+              announcement.  No re-confirmation needed.
+
+      D) The same reference has been independently detected ≥2 times
+         within _GATE_WINDOW_SECS seconds
+            → Two independent hits from the layered detectors (parser,
+              contextual, sequential, LLM, etc.) arriving in a short
+              window constitutes strong corroboration.
+
+    ALL other detections — including single-hit PARSER, CONTEXTUAL,
+    SEQUENTIAL, READ-INTENT, RANGE, LLM — are held on the first
+    occurrence.  No verse is guessed, no nearby verse is substituted.
+    Prefer silence over a wrong presentation.
+
+    ── SYSTEM-ACTION QUARANTINE ─────────────────────────────────────────────
+    When a manual context change, chapter-browser click, history injection,
+    or session restore has recently occurred, a quarantine window is active.
+    During that window all inferred detections (conditions B/D above) are
+    additionally suppressed until fresh spoken evidence clears the quarantine.
+    Sources that carry explicit spoken evidence (A, plus any bypass_cooldown
+    path) are NOT affected by the quarantine.
+    ──────────────────────────────────────────────────────────────────────────
     """
-    if VERSE_INTERRUPT_ENABLED:
-        _start_vtc(ref, controller, source=source)
+    global _gate_pending
+
+    # ── SCRIPTURE-READ MODE GATE ──────────────────────────────────────────────
+    # While SCRIPTURE-READ is active, only verses within the locked passage
+    # are allowed.  Verses in a different book or chapter, or too far outside
+    # the expected sequential position, are silently dropped so that sermon
+    # numbers, timestamps, and paraphrase fragments never reach the display.
+    # Explicitly-parsed FAST-PATH refs in the same passage always pass through.
+    if SCRIPTURE_READ_MODE and not _scripture_read_verse_allowed(ref):
+        logger.info(f"📖 SR-GATE BLOCKED: {ref} [{source}] — outside locked passage "
+                    f"({_sr_locked_book} {_sr_locked_chapter}, expected v{_sr_expected_verse})")
+        _gate_pending.pop(ref, None)
+        return
+
+    # ── GATE CONDITIONS A / B / C: always pass through ──
+    _BYPASS_SOURCES = {"FAST-PATH", "TRANSLATION-PATH", "QUEUE", "NEXT VERSE"}
+    if source in _BYPASS_SOURCES or bypass_cooldown:
+        # Condition A / C: explicit ref already verified upstream, or range/queue continuation
+        # Condition B: bypass_cooldown=True is also set by ONWARDS in controller.send_verse
+        _gate_pending.pop(ref, None)   # clear any pending entry for this ref
+        # ── SCRIPTURE-READ: advance expected verse pointer ──────────────────
+        if SCRIPTURE_READ_MODE and ":" in ref:
+            try:
+                _v = int(ref.rsplit(":", 1)[1])
+                scripture_read_advance_expected(_v)
+                # Exit SR mode if a clear new anchor in a DIFFERENT chapter arrives
+                ref_chapter = ref.rsplit(":", 1)[0].split()[-1]
+                if _sr_locked_chapter and ref_chapter != _sr_locked_chapter:
+                    _exit_scripture_read_mode(reason="new-chapter-anchor")
+            except (ValueError, IndexError):
+                pass
+        if VERSE_INTERRUPT_ENABLED:
+            _start_vtc(ref, controller, source=source)
+        else:
+            controller.send_verse(ref, bypass_cooldown=bypass_cooldown, confidence=confidence, source=source)
+        return
+
+    # ── SYSTEM-ACTION QUARANTINE CHECK ──
+    # This must run before the confirmation-window check so that even a
+    # "confirmed twice" hit is blocked when no fresh spoken evidence has
+    # arrived since a system-side action.  The quarantine helper also
+    # implements the early-clear logic (explicit full ref, or enough new
+    # transcript chars with a verse signal).
+    if _in_system_quarantine(ref if ref else ""):
+        logger.info(
+            f"🔒 QUARANTINE BLOCKED inferred detection: {ref} [{source}] — "
+            f"waiting for fresh spoken evidence after system action"
+        )
+        # Do NOT add to _gate_pending — we don't want stale quarantine hits
+        # building up a false confirmation count that fires the moment
+        # the quarantine expires.
+        return
+
+    # ── GATE CONDITION D: confirmation window ──
+    now = time.time()
+    # Expire any stale entries (older than the window) while we have the GIL
+    stale = [k for k, (_, t0) in list(_gate_pending.items()) if now - t0 > _GATE_WINDOW_SECS]
+    for k in stale:
+        del _gate_pending[k]
+        logger.debug(f"🔒 GATE expired unconfirmed ref: {k}")
+
+    if ref in _gate_pending:
+        count, first_seen = _gate_pending[ref]
+        new_count = count + 1
+        if new_count >= 2:
+            # Second independent detection within the window — confirmed
+            del _gate_pending[ref]
+            logger.info(
+                f"✅ GATE PASSED (confirmed ×{new_count} in "
+                f"{now - first_seen:.1f}s): {ref} [{source}]"
+            )
+            # ── SCRIPTURE-READ: advance expected verse pointer ───────────
+            if SCRIPTURE_READ_MODE and ":" in ref:
+                try:
+                    scripture_read_advance_expected(int(ref.rsplit(":", 1)[1]))
+                except (ValueError, IndexError):
+                    pass
+            if VERSE_INTERRUPT_ENABLED:
+                _start_vtc(ref, controller, source=source)
+            else:
+                controller.send_verse(ref, bypass_cooldown=bypass_cooldown, confidence=confidence, source=source)
+        else:
+            _gate_pending[ref] = (new_count, first_seen)
+            logger.info(
+                f"🔒 GATE HOLDING (seen ×{new_count}/{2}, "
+                f"{_GATE_WINDOW_SECS:.0f}s window): {ref} [{source}]"
+            )
     else:
-        controller.send_verse(ref, bypass_cooldown=bypass_cooldown, confidence=confidence, source=source)
+        # First occurrence — hold it
+        _gate_pending[ref] = (1, now)
+        logger.info(f"🔒 GATE HOLDING (first occurrence): {ref} [{source}]")
 
 
 def get_verse_history() -> list:
@@ -1644,6 +2132,12 @@ def restore_session_snapshot(data: dict) -> None:
     current_book    = data.get("current_book")    or _sermon_anchor_book
     current_chapter = data.get("current_chapter") or _sermon_anchor_chapter
     current_verse   = data.get("current_verse")   or _sermon_anchor_verse
+
+    # Session restore injects context from outside the live audio stream.
+    # Open a quarantine so the restored context is metadata only — the
+    # operator must speak a reference before the engine will present anything.
+    _open_system_quarantine("restore_session_snapshot")
+
     logger.info(
         f"📂 Session restored — anchor: {_sermon_anchor_book} {_sermon_anchor_chapter}:"
         f"{_sermon_anchor_verse}, {len(_verse_history)} verse(s) in history"
@@ -1657,6 +2151,11 @@ def add_to_verse_history(ref: str, source: str = "MANUAL") -> None:
     Issue A fix: reject refs that contain "None" or have no colon when they
     look like they should be verse refs, so history is never polluted with
     entries like "1 Chronicles 4None".
+
+    Quarantine rule: system-side injections (MANUAL-ENTRY, CHAPTER-BROWSER,
+    or any source that is not a live detection layer) open a quarantine window
+    so the injected reference is metadata only and cannot silently steer the
+    parser into presenting a verse.
     """
     import datetime as _dt2
     _ref = (ref or "").strip()
@@ -1687,6 +2186,12 @@ def add_to_verse_history(ref: str, source: str = "MANUAL") -> None:
         verses_cited.append(_ref)
     send_to_discord(_ref)
     logger.info(f"📋 Added to history ({source}): {_ref}")
+
+    # System-side events are metadata only — open a quarantine so this
+    # injection cannot steer subsequent inferred detections.
+    _SYSTEM_SOURCES = {"MANUAL-ENTRY", "CHAPTER-BROWSER", "MANUAL", "RESTORE"}
+    if source in _SYSTEM_SOURCES:
+        _open_system_quarantine(f"add_to_verse_history({source})")
 
 def clear_verse_history():
     _verse_history.clear()
@@ -3026,11 +3531,243 @@ def _is_john_surname(text: str) -> bool:
     if re.search(r'\bJohn\w+', text, re.IGNORECASE):
         return True
     return False
-    """Helper function to deliver a verse, potentially with VTC."""
-    if VERSE_INTERRUPT_ENABLED:
-        _start_vtc(ref, controller, source=source)
-    else:
-        controller.send_verse(ref, bypass_cooldown=bypass_cooldown, confidence=confidence, source=source)
+
+
+# ── Ambiguous-book-as-person guard ───────────────────────────────────────────
+# Many Bible book names double as common personal names (John, Matthew, Mark,
+# Luke, James, Ruth, Joel, Job, Amos, Jonah, Micah, Peter …).  Without an
+# unambiguous chapter/verse signal these tokens must be treated as person or
+# topic words, NOT as a book anchor or verse lookup trigger.
+
+# Title/role words that can precede a person's name
+_PERSON_TITLE_RE = re.compile(
+    r'\b(?:'
+    r'pastor|rev(?:erend)?|bishop|elder|deacon|minister|'
+    r'apostle|prophet(?:ess)?|evangelist|preacher|teacher|'
+    r'brother|bro|sister|sis|'
+    r'dr|mr|mrs|ms|miss|mister|prof(?:essor)?|'
+    r'saint|st'
+    r')\b',
+    re.IGNORECASE,
+)
+
+# Relational/descriptive suffixes that identify a person rather than a book
+# e.g. "John the Baptist", "Joel the prophet", "Matthew the tax collector",
+#       "Peter the apostle", "James the brother of the Lord"
+_PERSON_SUFFIX_RE = re.compile(
+    r'\b(?:'
+    r'the\s+(?:baptist|prophet(?:ess)?|apostle|disciple|evangelist|elder|'
+    r'tax\s+collector|zealot|son\s+of|brother\s+of|daughter\s+of|'
+    r'king|priest|servant|scribe|pharisee|sadducee|'
+    r'righteous|blessed|holy|great|good)'
+    r'|(?:his|her|their|the)\s+(?:son|daughter|wife|mother|father|brother|sister|servant|disciple)'
+    r'|said|spoke|answered|replied|wept|prayed|wrote|declared|preached'
+    r'|\'s\s+(?:letter|gospel|epistle|vision|book|prophecy|account|narrative)'
+    r')\b',
+    re.IGNORECASE,
+)
+
+# Possessive/biographical patterns:  "John's mother",  "the ministry of Joel",
+# "the book of Matthew" as narrative description (not an explicit reading command)
+_PERSON_POSSESSIVE_RE = re.compile(
+    r'\b(?:john|matthew|mark|luke|james|ruth|joel|job|amos|jonah|micah|peter|'
+    r'jude|hosea|nahum|philemon|timothy|titus)\b'
+    r'(?:\'s\b)',
+    re.IGNORECASE,
+)
+
+# Dual-use tokens that require extra evidence before being treated as Bible books
+_AMBIGUOUS_BOOK_TOKENS = frozenset({
+    "john", "matthew", "mark", "luke", "james", "ruth",
+    "joel", "job", "amos", "jonah", "micah", "peter",
+    "jude", "hosea", "nahum", "philemon", "timothy", "titus",
+})
+
+# Evidence patterns that confirm a token IS being used as a Bible-book reference
+# (chapter keyword, colon-verse notation, explicit reading command, or digit-after-name)
+_BOOK_EVIDENCE_RE = re.compile(
+    r'(?:'
+    r'\b(?:chapter|chap|ch|verse|verses)\b'               # chapter/verse keyword
+    r'|:\s*\d'                                             # colon-verse notation
+    r'|\b(?:gospel|epistle|book|letter)\s+of\b'           # "gospel of John"
+    r'|\b(?:open|turn|read(?:ing)?)\s+(?:your\s+)?bibles?' # reading command
+    r'|\b(?:let[\'s]*\s+(?:now\s+)?read|I\s+will\s+read)'
+    r')',
+    re.IGNORECASE,
+)
+
+
+def _is_book_as_person(book_name: str, text: str) -> bool:
+    """Return True if *book_name* appears in *text* as a person/topic reference
+    rather than as a Bible-book anchor, making any verse lookup invalid.
+
+    A token is treated as a person unless the text contains unambiguous
+    book-reference evidence (chapter keyword, colon-verse, reading command,
+    or a digit directly following the name).
+
+    Rule priority (first match wins):
+      1. A digit immediately follows the name  →  book reference (allow).
+      2. A chapter/verse keyword or reading command is present  →  book reference (allow).
+      3. A person-title prefix (Pastor John, Apostle Peter) is present  →  person (block).
+      4. A person-suffix phrase (John the Baptist, Joel the prophet) is present  →  person (block).
+      5. A possessive form (<name>'s) is present  →  person (block).
+      6. Token is in _AMBIGUOUS_BOOK_TOKENS AND no book evidence → person (block).
+    """
+    if not book_name:
+        return False
+    token = book_name.strip().lower()
+    if token not in _AMBIGUOUS_BOOK_TOKENS:
+        return False  # unambiguous book name (e.g. Philippians, Revelation) — allow
+
+    # Rule 1: digit immediately following the name → book reference
+    if re.search(rf'\b{re.escape(book_name)}\s+\d', text, re.IGNORECASE):
+        return False
+
+    # Rule 2: chapter/verse keyword or reading command present → book reference
+    if _BOOK_EVIDENCE_RE.search(text):
+        return False
+
+    # Rule 3: person-title prefix preceding the name
+    m_title = _PERSON_TITLE_RE.search(text)
+    if m_title:
+        # Title must appear at or before the book-name token
+        m_name = re.search(rf'\b{re.escape(book_name)}\b', text, re.IGNORECASE)
+        if m_name and m_title.start() <= m_name.start():
+            logger.debug(
+                f"🚫 PERSON-GUARD: '{book_name}' preceded by title '{m_title.group(0)}'"
+                f" in '{text[:80]}'"
+            )
+            return True
+
+    # Rule 4: person-suffix phrase following the name
+    m_name = re.search(rf'\b{re.escape(book_name)}\b', text, re.IGNORECASE)
+    if m_name:
+        suffix_window = text[m_name.end():m_name.end() + 60]
+        if _PERSON_SUFFIX_RE.search(suffix_window):
+            logger.debug(
+                f"🚫 PERSON-GUARD: '{book_name}' followed by person-suffix"
+                f" in '{text[:80]}'"
+            )
+            return True
+
+    # Rule 5: possessive form
+    if _PERSON_POSSESSIVE_RE.search(text):
+        logger.debug(
+            f"🚫 PERSON-GUARD: possessive form of '{book_name}'"
+            f" in '{text[:80]}'"
+        )
+        return True
+
+    # Rule 6: ambiguous token with no book evidence → default to person
+    logger.debug(
+        f"🚫 PERSON-GUARD (default): '{book_name}' in _AMBIGUOUS_BOOK_TOKENS"
+        f" with no chapter/verse evidence in '{text[:80]}'"
+    )
+    return True
+
+
+# ── Structural-impossibility check ───────────────────────────────────────────
+# If the current anchor makes a parsed ref structurally impossible — e.g. the
+# engine is at Matthew 28 and the parser returns Matthew 29 (which doesn't
+# exist) — the ref is rejected outright.  No "nearby valid verse" substitution
+# is attempted; silence is always preferable to a wrong presentation.
+
+def _is_structurally_impossible(ref: str, text: str) -> bool:
+    """Return True if *ref* is structurally impossible given what we know about
+    the Bible's verse counts AND the current anchor context.
+
+    This is a stronger form of _reject_verse_out_of_range:
+      • _reject_verse_out_of_range checks only the ref itself (per-chapter table).
+      • This function additionally checks whether the parsed chapter is plausible
+        given the active anchor — e.g. a parser artefact producing Matthew 29
+        when the active context is Matthew 28 (Matthew only has 28 chapters).
+
+    Returns True (impossible) and logs the reason.  Returns False (plausible).
+    No substitution is ever performed here; callers must drop the ref entirely.
+    """
+    if ":" not in ref:
+        return False  # chapter-only refs are handled elsewhere
+    try:
+        ref_parts   = ref.split()
+        book_key    = " ".join(ref_parts[:-1]).lower().strip()
+        chap_str, verse_str = ref_parts[-1].split(":")
+        chap_num    = int(chap_str)
+        verse_num   = int(verse_str.split()[0])
+    except (ValueError, IndexError):
+        return False
+
+    # Reuse the per-chapter table already defined in _reject_verse_out_of_range
+    # (we access it inline to avoid code duplication)
+    _CHAPTER_VERSE_COUNTS: dict = {
+        "genesis":       [31,25,24,26,32,22,24,22,29,32,32,20,18,24,21,16,27,33,38,18,34,24,20,67,34,35,46,22,35,43,55,32,20,31,29,43,36,30,23,23,57,38,34,34,28,34,31,22,33,26],
+        "job":           [22,13,26,21,27,30,21,22,35,22,20,25,28,22,35,22,16,21,29,29,34,30,17,25,6,14,23,28,25,31,40,22,33,37,16,33,24,41,30,24,34,17],
+        "joel":          [20,32,21],
+        "jonah":         [17,10,10,11],
+        "matthew":       [25,23,17,25,48,34,29,34,38,42,30,50,58,36,39,28,27,35,30,34,46,46,39,51,46,75,66,20],
+        "mark":          [45,28,35,41,43,56,37,38,50,52,33,44,37,72,47,20],
+        "luke":          [80,52,38,44,39,49,50,56,62,42,54,59,35,35,32,31,37,43,48,47,38,71,56,53],
+        "john":          [51,25,36,54,47,71,53,59,41,42,57,50,38,31,27,33,26,40,42,31,25],
+        "acts":          [26,47,26,37,42,15,60,40,43,48,30,25,52,28,41,40,34,28,41,38,40,30,35,27,27,32,44,31],
+        "romans":        [32,29,31,25,21,23,25,39,33,21,36,21,14,23,33,27],
+        "revelation":    [20,29,22,11,14,17,17,13,21,11,19,17,18,20,8,21,18,24,21,15,27,21],
+        "ruth":          [22,23,18,22],
+        "hosea":         [11,23,5,19,15,11,16,14,17,15,12,14,16,9],
+        "amos":          [15,16,15,13,27,14,17,14,15],
+        "micah":         [16,13,12,13,15,16,20],
+        "nahum":         [15,13,19],
+        "philemon":      [25],
+        "james":         [27,26,18,17,20],
+        "1 peter":       [25,25,22,19,14],
+        "2 peter":       [21,22,18],
+        "1 john":        [10,29,24,21,21],
+        "2 john":        [13],
+        "3 john":        [15],
+        "jude":          [25],
+        "1 timothy":     [20,15,16,16,25,21],
+        "2 timothy":     [18,26,17,22],
+        "titus":         [16,15,15],
+    }
+
+    counts = _CHAPTER_VERSE_COUNTS.get(book_key)
+
+    # 1. Chapter exceeds total chapters for the book
+    if counts and chap_num > len(counts):
+        logger.info(
+            f"🚫 STRUCTURALLY IMPOSSIBLE: {ref} — {book_key.title()} only has "
+            f"{len(counts)} chapter(s) (got ch{chap_num}); dropping without substitution"
+        )
+        return True
+
+    # 2. Verse exceeds the chapter's verse count
+    if counts and 1 <= chap_num <= len(counts):
+        max_v = counts[chap_num - 1]
+        if verse_num > max_v:
+            logger.info(
+                f"🚫 STRUCTURALLY IMPOSSIBLE: {ref} — {book_key.title()} {chap_num} "
+                f"only has {max_v} verses (got v{verse_num}); dropping without substitution"
+            )
+            return True
+
+    # 3. Active anchor contradicts the parsed chapter (parser artefact)
+    #    Only fire when: same book, explicit anchor, chapter clearly wrong,
+    #    AND no chapter keyword in text (so "Matthew chapter 5" is never blocked).
+    if (current_book and current_chapter and
+            book_key == current_book.lower() and
+            not re.search(r'\b(?:chapter|chap|ch)\b', text, re.IGNORECASE)):
+        try:
+            anchor_ch = int(current_chapter)
+            # Block if the parsed chapter is more than 2 ahead of the anchor
+            # with no forward-advance evidence, or simply non-existent for the book
+            if counts and chap_num > len(counts):
+                logger.info(
+                    f"🚫 STRUCTURALLY IMPOSSIBLE (anchor): {ref} — anchor "
+                    f"{current_book} {current_chapter}, parsed ch{chap_num} doesn't exist"
+                )
+                return True
+        except ValueError:
+            pass
+
+    return False
 
 def detect_verse_hybrid(text, controller, confidence=1.0, parser=None) -> bool:
     # NOTE: WORSHIP_MODE does NOT bail here — detection runs fully for debug logging.
@@ -3366,29 +4103,27 @@ def detect_verse_hybrid(text, controller, confidence=1.0, parser=None) -> bool:
                             pass
 
             if not is_blocked:
-                # Bug Fix 3B: "John the Baptist" is not the book of John
-                if "John" in verse and (_is_john_the_baptist(text) or _is_john_surname(text)):
-                    logger.info(f"🚫 BLOCKED: 'John the Baptist' is not the book of John in '{text[:60]}'")
+                # Unified ambiguous-book-as-person guard (covers John, Matthew, Mark,
+                # Luke, James, Ruth, Joel, Job, Amos, Jonah, Micah, Peter, Jude, …).
+                # Replaces the old "John the Baptist" + "John gospel cue" pair with a
+                # single call that applies the same logic to all dual-use name tokens.
+                _ref_book_token = " ".join(verse.split()[:-1]).strip() if ":" in verse else " ".join(verse.split())
+                # Take just the last word of the book name for single-word books
+                _book_last_word = _ref_book_token.split()[-1] if _ref_book_token else ""
+                if _is_book_as_person(_book_last_word, text):
+                    if _dedup_blocked(text, f"person-guard-{_book_last_word.lower()}"):
+                        logger.info(
+                            f"🚫 BLOCKED (person-guard): '{verse}' — "
+                            f"'{_book_last_word}' treated as person/topic name in '{text[:80]}'"
+                        )
                     is_blocked = True
 
             if not is_blocked:
-                # Issue 5 fix: "John" as a standalone personal name (not Gospel reference).
-                # Require at least one of: "gospel of", "book of", a chapter/verse keyword,
-                # or a digit following "John" before we treat it as the Gospel of John.
-                if "John" in verse and not is_blocked:
-                    _has_gospel_cue = bool(
-                        re.search(r'\b(?:gospel|book)\s+of\s+john\b', text, re.IGNORECASE) or
-                        re.search(r'\bjohn\s+(?:chapter|chap|ch|\d)', text, re.IGNORECASE) or
-                        re.search(r'\bjohn\s+\d', text, re.IGNORECASE) or
-                        ':' in text
-                    )
-                    if not _has_gospel_cue:
-                        if _dedup_blocked(text, "john-name"):
-                            logger.info(
-                                f"🚫 BLOCKED: 'John' appears without chapter/gospel cue "
-                                f"— likely a person name in '{text[:60]}'"
-                            )
-                        is_blocked = True
+                # Structural-impossibility check — verse/chapter doesn't exist for this book.
+                # Unlike _reject_verse_out_of_range (which already ran above), this also
+                # considers anchor context and logs explicitly that NO substitution is made.
+                if _is_structurally_impossible(verse, text):
+                    is_blocked = True
 
             if not is_blocked:
                 chap_num = verse.split()[-1]
@@ -3482,12 +4217,10 @@ def detect_verse_hybrid(text, controller, confidence=1.0, parser=None) -> bool:
                 _floor_bypass_reason = None
                 if CONTEXT_FLOOR_EXPLICIT_BYPASS and _is_explicit_full_ref(text):
                     _floor_bypass_reason = "explicit full ref (book+chapter+verse) in transcript"
-                elif (CONTEXT_FLOOR_MANUAL_CONTEXT_BYPASS
-                        and (time.time() - _manual_context_set_time) < _MANUAL_CONTEXT_BYPASS_WINDOW):
-                    _floor_bypass_reason = (
-                        f"manual context was set {time.time() - _manual_context_set_time:.0f}s ago "
-                        f"(bypass window = {_MANUAL_CONTEXT_BYPASS_WINDOW:.0f}s)"
-                    )
+                # NOTE: The old CONTEXT_FLOOR_MANUAL_CONTEXT_BYPASS floor-lowering
+                # branch has been removed.  Manual context events are now metadata
+                # only; they open a quarantine (checked in deliver_verse) rather
+                # than lowering the detection floor here.
                 elif _sermon_anchor_book and _ctx_key == f"{_sermon_anchor_book} {_sermon_anchor_chapter}":
                     # ── Same-chapter sermon-anchor bypass (this fix) ──────────
                     # When the speaker uses clear verse wording ("verse ten",
@@ -3567,12 +4300,12 @@ def detect_verse_hybrid(text, controller, confidence=1.0, parser=None) -> bool:
                     _floor_bypass_reason2 = None
                     if CONTEXT_FLOOR_EXPLICIT_BYPASS and _is_explicit_full_ref(text):
                         _floor_bypass_reason2 = "explicit full ref (book+chapter+verse) in transcript"
-                    elif (CONTEXT_FLOOR_MANUAL_CONTEXT_BYPASS
-                            and (time.time() - _manual_context_set_time) < _MANUAL_CONTEXT_BYPASS_WINDOW):
-                        _floor_bypass_reason2 = (
-                            f"manual context was set {time.time() - _manual_context_set_time:.0f}s ago "
-                            f"(bypass window = {_MANUAL_CONTEXT_BYPASS_WINDOW:.0f}s)"
-                        )
+                    # NOTE: The old CONTEXT_FLOOR_MANUAL_CONTEXT_BYPASS branch
+                    # has been removed from the bare-digit path.  Manual/system
+                    # context events open a quarantine (checked in deliver_verse)
+                    # and must not lower the backward-jump floor here — bare
+                    # digits are the highest false-positive risk and need the
+                    # strongest protection during a quarantine window.
                     if (not _explicit_bwd2
                             and _last_presented_verse_book_chap == _ctx_key2
                             and _last_presented_verse_num > 0
@@ -3952,20 +4685,21 @@ def _detect_explicit_reference(sentence: str, controller) -> bool:
             if _is_book_count_number(sentence, chap):
                 logger.debug(f"⚡ FAST-PATH skipped: '{ref}' chapter is a book-count in '{sentence[:60]}'")
                 continue
-            if "John" in ref and (_is_john_the_baptist(sentence) or _is_john_surname(sentence)):
-                logger.debug(f"⚡ FAST-PATH skipped: 'John the Baptist' is not the book of John")
-                continue
-            # Issue 5 fix: also block John refs without a gospel/chapter cue
-            if "John" in ref:
-                _fp_gospel_cue = bool(
-                    re.search(r'\b(?:gospel|book)\s+of\s+john\b', sentence, re.IGNORECASE) or
-                    re.search(r'\bjohn\s+(?:chapter|chap|ch|\d)', sentence, re.IGNORECASE) or
-                    re.search(r'\bjohn\s+\d', sentence, re.IGNORECASE) or
-                    ':' in sentence
+            # Unified ambiguous-book-as-person guard (replaces John-only checks).
+            # Covers John, Matthew, Mark, Luke, James, Ruth, Joel, Job, Amos, Jonah,
+            # Micah, Peter, Jude, Hosea, Nahum, Philemon, Timothy, Titus.
+            _fp_ref_book      = " ".join(ref.split()[:-1])
+            _fp_book_last     = _fp_ref_book.split()[-1] if _fp_ref_book else ""
+            if _is_book_as_person(_fp_book_last, sentence):
+                logger.debug(
+                    f"⚡ FAST-PATH skipped: '{_fp_book_last}' is a person/topic name"
+                    f" in '{sentence[:60]}'"
                 )
-                if not _fp_gospel_cue:
-                    logger.debug(f"⚡ FAST-PATH skipped: 'John' without gospel cue in '{sentence[:60]}'")
-                    continue
+                continue
+            # Structural-impossibility check — no substitution; drop entirely.
+            if _is_structurally_impossible(ref, sentence):
+                logger.debug(f"⚡ FAST-PATH skipped: '{ref}' is structurally impossible")
+                continue
             if _reject_verse_out_of_range(ref):
                 continue
 
@@ -4070,18 +4804,19 @@ def _detect_from_translation(english_text: str, controller) -> bool:
             continue
         if _reject_verse_out_of_range(ref):
             continue
-        if "John" in ref and (_is_john_the_baptist(english_text) or _is_john_surname(english_text)):
-            continue
-        # Issue 5 fix: translation path — same John guard
-        if "John" in ref:
-            _tr_gospel_cue = bool(
-                re.search(r'\b(?:gospel|book)\s+of\s+john\b', english_text, re.IGNORECASE) or
-                re.search(r'\bjohn\s+(?:chapter|chap|ch|\d)', english_text, re.IGNORECASE) or
-                re.search(r'\bjohn\s+\d', english_text, re.IGNORECASE) or
-                ':' in english_text
+        # Unified ambiguous-book-as-person guard — same logic as FAST-PATH.
+        _tr_ref_book  = " ".join(ref.split()[:-1])
+        _tr_book_last = _tr_ref_book.split()[-1] if _tr_ref_book else ""
+        if _is_book_as_person(_tr_book_last, english_text):
+            logger.debug(
+                f"⚡ TRANSLATION-PATH skipped: '{_tr_book_last}' is a person/topic"
+                f" name in translated text '{english_text[:60]}'"
             )
-            if not _tr_gospel_cue:
-                continue
+            continue
+        # Structural-impossibility check — no substitution; drop the ref entirely.
+        if _is_structurally_impossible(ref, english_text):
+            logger.debug(f"⚡ TRANSLATION-PATH skipped: '{ref}' is structurally impossible")
+            continue
         logger.info(f"⚡ TRANSLATION-PATH ref: {ref}")
         deliver_verse(ref, controller, bypass_cooldown=True, confidence=1.0, source="TRANSLATION-PATH")
         trigger_onwards_if_needed_standalone(ref, english_text)
@@ -4092,6 +4827,21 @@ def _detect_from_translation(english_text: str, controller) -> bool:
 def _process_transcript_blob(sentence: str, partial_context_ref: list, controller, parser=None):
     # NOTE: WORSHIP_MODE does NOT bail here — detection runs fully for debug logging.
     # The display gate is inside send_verse / VerseController.send_verse.
+
+    # ── SCRIPTURE-READ: check entry/exit triggers on every sentence ──────────
+    # Runs before any detection so the mode flag is correct for all downstream
+    # filtering.  Entry phrases like "open your Bibles" or "let's read" flip the
+    # flag on; exit phrases (topic shift, new anchor in a different book) flip it
+    # off.  This does NOT short-circuit the detection pipeline — WORSHIP_MODE
+    # semantics apply here too: the run completes, the gate decides what shows.
+    _scripture_read_check_entry_exit(sentence)
+
+    # ── SCRIPTURE-READ: scrub stray numerals from the sentence ────────────────
+    # Timestamps, sermon point numbers, statistics, year references and similar
+    # noise are stripped so the detection layers never see them as verse numbers
+    # while the mode is active.
+    sentence = _scripture_read_filter(sentence)
+
     # Bug 5: Self-correction detector — if the speaker says 'sorry' / 'I mean' / 'I meant',
     # discard the text before the correction and only parse what follows it.
     _corr_m = _CORRECTION_RE.search(sentence)
