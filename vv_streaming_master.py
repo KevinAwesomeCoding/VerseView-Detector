@@ -645,6 +645,7 @@ _active_bg_threads: list = []  # Registry of all spawned background threading.Th
 
 # ── GLOBALS & SERMON BUFFER ──────────────────────────────────────────────────
 stop_event             = None
+_force_stopped         = False   # set by force_stop(); cleared in configure()
 engine_loop            = None
 _controller            = None
 full_sermon_transcript = ""
@@ -1188,6 +1189,8 @@ def configure(
     global _xref_anchor_book, _xref_anchor_chapter, _xref_anchor_verse, _xref_anchor_time
     global DUAL_STT_ENABLED, SECONDARY_LANGUAGE, SECONDARY_PARSER
     global SECONDARY_DEEPGRAM_LANGUAGE, SECONDARY_DEEPGRAM_MODEL, SECONDARY_USE_SARVAM
+    global _force_stopped
+    _force_stopped = False
     global SECONDARY_STT_ENGINE
     global full_sermon_transcript_secondary
     global ASSEMBLYAI_API_KEY, STT_ENGINE, AAI_LANGUAGE, AAI_TURN_CUTOFF_SEC
@@ -1587,6 +1590,64 @@ def deliver_verse(ref: str, controller, bypass_cooldown=False, confidence=1.0, s
 
 def get_verse_history() -> list:
     return list(_verse_history)
+
+
+def force_stop() -> None:
+    """Immediate, no-cleanup stop of the STT engine loop.
+    Sets stop_event just like request_stop(), but also sets a flag that
+    the GUI can check to know the engine was force-killed (so it can skip
+    summarisation and post-processing).  Does NOT call os._exit — the GUI
+    decides whether to exit the process.
+    """
+    global stop_event, engine_loop, _force_stopped
+    _force_stopped = True
+    if engine_loop and stop_event:
+        engine_loop.call_soon_threadsafe(stop_event.set)
+
+
+def was_force_stopped() -> bool:
+    return _force_stopped
+
+
+def get_session_snapshot() -> dict:
+    """Return a dict capturing the current live sermon state for session restore."""
+    return {
+        "transcript":       full_sermon_transcript or "",
+        "verses_cited":     list(verses_cited),
+        "verse_history":    list(_verse_history),
+        "current_book":     current_book,
+        "current_chapter":  current_chapter,
+        "current_verse":    current_verse,
+        "sermon_anchor": {
+            "book":    _sermon_anchor_book,
+            "chapter": _sermon_anchor_chapter,
+            "verse":   _sermon_anchor_verse,
+        },
+    }
+
+
+def restore_session_snapshot(data: dict) -> None:
+    """Restore engine state from a saved session snapshot dict."""
+    global full_sermon_transcript, verses_cited, _verse_history
+    global current_book, current_chapter, current_verse
+    global _sermon_anchor_book, _sermon_anchor_chapter, _sermon_anchor_verse
+
+    full_sermon_transcript = data.get("transcript", "")
+    verses_cited           = list(data.get("verses_cited", []))
+    _verse_history         = list(data.get("verse_history", []))
+
+    anchor = data.get("sermon_anchor", {})
+    _sermon_anchor_book    = anchor.get("book")
+    _sermon_anchor_chapter = anchor.get("chapter")
+    _sermon_anchor_verse   = anchor.get("verse")
+
+    current_book    = data.get("current_book")    or _sermon_anchor_book
+    current_chapter = data.get("current_chapter") or _sermon_anchor_chapter
+    current_verse   = data.get("current_verse")   or _sermon_anchor_verse
+    logger.info(
+        f"📂 Session restored — anchor: {_sermon_anchor_book} {_sermon_anchor_chapter}:"
+        f"{_sermon_anchor_verse}, {len(_verse_history)} verse(s) in history"
+    )
 
 def add_to_verse_history(ref: str, source: str = "MANUAL") -> None:
     """Add a verse to history without going through deliver_verse / Selenium.

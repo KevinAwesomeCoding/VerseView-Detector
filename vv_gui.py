@@ -17,6 +17,7 @@ import atexit
 import signal
 import settings as cfg  # type: ignore
 import vv_streaming_master as engine  # type: ignore
+import session_state as _session  # type: ignore
 from live_points_app import LivePointsController  # type: ignore
 try:
     import updater as _updater  # type: ignore
@@ -82,6 +83,8 @@ class VerseViewApp(ctk.CTk):
         self.bind("<Shift-Escape>", lambda e: self._panic_shortcut())
         # Trigger auto-start / smart schedule after window is ready
         self.after(500, self._check_auto_start)
+        # Check for a saved session from an emergency quit and offer to restore
+        self.after(800, self._check_restore_session)
         self._last_history_len = 0
         self.after(1000, self._update_history_loop)
         self.after(1500, self._update_chapter_browser_loop)
@@ -178,6 +181,16 @@ class VerseViewApp(ctk.CTk):
             command=self._toggle_pin
         )
         self.btn_pin.pack(side="right", padx=(4, 0))
+
+        # Emergency Quit button — force-kills STT, saves session, skips summariser
+        self.btn_eq = ctk.CTkButton(
+            top, text="⏻", width=36,
+            fg_color="#7a1a1a", border_color="#cc2222", border_width=1,
+            text_color="white", hover_color="#a02020",
+            font=ctk.CTkFont(size=15, weight="bold"),
+            command=self._emergency_quit
+        )
+        self.btn_eq.pack(side="right", padx=(4, 0))
 
 
         # ── SPLIT FRAME FOR LOGS AND HISTORY ──
@@ -853,6 +866,7 @@ class VerseViewApp(ctk.CTk):
 
         def _update_conf(val):
             self.conf_val_label.configure(text=f"Confidence Threshold: {int(float(val)*100)}%")
+            engine.CONFIDENCE_THRESHOLD = float(val)
 
         self.conf_slider = ctk.CTkSlider(f, from_=0.5, to=1.0, variable=self.conf_var, command=_update_conf)
         self.conf_slider.grid(row=r, column=0, sticky="ew", padx=10, pady=(0, 4))
@@ -861,27 +875,37 @@ class VerseViewApp(ctk.CTk):
         # ── Checkboxes ──
         self.manual_var = ctk.BooleanVar(value=True)
         ctk.CTkCheckBox(f, text="Require Manual Confirmation (Ask Y/N for low-confidence verses)",
-                        variable=self.manual_var).grid(row=r, column=0, sticky="w", padx=10, pady=(8, 3))
+                        variable=self.manual_var,
+                        command=lambda: setattr(engine, "REQUIRE_MANUAL_CONFIRM", self.manual_var.get())
+                        ).grid(row=r, column=0, sticky="w", padx=10, pady=(8, 3))
         r += 1
 
         self.verify_var = ctk.BooleanVar(value=True)
         ctk.CTkCheckBox(f, text="Require Verification (Hear verse twice before displaying)",
-                        variable=self.verify_var).grid(row=r, column=0, sticky="w", padx=10, pady=(0, 3))
+                        variable=self.verify_var,
+                        command=lambda: setattr(engine, "REQUIRE_VERIFY", self.verify_var.get())
+                        ).grid(row=r, column=0, sticky="w", padx=10, pady=(0, 3))
         r += 1
 
         self.verse_interrupt_var = ctk.BooleanVar(value=False)
         ctk.CTkCheckBox(f, text="Verse Interrupt (wait for speaker to say verse; 60s timeout; new ref cancels)",
-                        variable=self.verse_interrupt_var).grid(row=r, column=0, sticky="w", padx=10, pady=(0, 3))
+                        variable=self.verse_interrupt_var,
+                        command=lambda: setattr(engine, "VERSE_INTERRUPT_ENABLED", self.verse_interrupt_var.get())
+                        ).grid(row=r, column=0, sticky="w", padx=10, pady=(0, 3))
         r += 1
 
         self.spoken_numeral_var = ctk.BooleanVar(value=False)
         ctk.CTkCheckBox(f, text="Spoken Numeral Mode ('John three sixteen' → John 3:16, no 'verse' keyword needed)",
-                        variable=self.spoken_numeral_var).grid(row=r, column=0, sticky="w", padx=10, pady=(0, 3))
+                        variable=self.spoken_numeral_var,
+                        command=lambda: setattr(engine, "SPOKEN_NUMERAL_MODE", self.spoken_numeral_var.get())
+                        ).grid(row=r, column=0, sticky="w", padx=10, pady=(0, 3))
         r += 1
 
         self.smart_amen_var = ctk.BooleanVar(value=True)
         ctk.CTkCheckBox(f, text="Smart Amen (auto-clear screen on 'Let us pray')",
-                        variable=self.smart_amen_var).grid(row=r, column=0, sticky="w", padx=10, pady=(0, 3))
+                        variable=self.smart_amen_var,
+                        command=lambda: setattr(engine, "SMART_AMEN_ENABLED", self.smart_amen_var.get())
+                        ).grid(row=r, column=0, sticky="w", padx=10, pady=(0, 3))
         r += 1
 
         # ── Malayalam Transliteration (Manglish) ──
@@ -890,6 +914,7 @@ class VerseViewApp(ctk.CTk):
             f, text="Malayalam Transliteration — Manglish/Romanized output (Sarvam translit mode)",
             variable=self.ml_translit_var,
             state="disabled",  # enabled only when language is Malayalam
+            command=lambda: setattr(engine, "MALAYALAM_TRANSLITERATION", self.ml_translit_var.get()),
         )
         self.ml_translit_cb.grid(row=r, column=0, sticky="w", padx=10, pady=(0, 3))
         r += 1
@@ -918,7 +943,9 @@ class VerseViewApp(ctk.CTk):
 
         self.atem_var = ctk.BooleanVar(value=False)
         ctk.CTkCheckBox(f, text="Enable ATEM Keyer on Verse Display",
-                        variable=self.atem_var).grid(
+                        variable=self.atem_var,
+                        command=self._on_atem_toggle
+                        ).grid(
             row=r, column=0, sticky="w", padx=10, pady=(0, 4))
         r += 1
 
@@ -1848,6 +1875,51 @@ class VerseViewApp(ctk.CTk):
                 f"(primary={lang}, secondary=English [{sec_label}])"
             )
 
+    def _check_restore_session(self):
+        """On launch, if a saved emergency-quit session exists, offer to restore it."""
+        data = _session.load_session()
+        if not data:
+            return
+        # Need at least some transcript or verse history to be worth restoring
+        if not data.get("transcript") and not data.get("verse_history"):
+            _session.clear_session()
+            return
+
+        verse_count   = len(data.get("verse_history", []))
+        anchor        = data.get("sermon_anchor", {})
+        anchor_str    = ""
+        if anchor.get("book") and anchor.get("chapter"):
+            anchor_str = f"\nLast passage: {anchor['book']} {anchor['chapter']}"
+            if anchor.get("verse"):
+                anchor_str += f":{anchor['verse']}"
+
+        msg = (
+            f"A session was saved from an Emergency Quit.\n"
+            f"{verse_count} verse(s) detected.{anchor_str}\n\n"
+            f"Restore this session?"
+        )
+        if mb.askyesno("Restore Last Session", msg):
+            try:
+                engine.restore_session_snapshot(data)
+                # If settings were saved, re-apply language/context silently
+                saved_settings = data.get("settings", {})
+                if saved_settings:
+                    lang = saved_settings.get("language")
+                    if lang and hasattr(self, "lang_var"):
+                        self.lang_var.set(lang)
+                self._append_log(
+                    f"📂 Session restored — {verse_count} verse(s), "
+                    f"anchor: {anchor.get('book', '—')} {anchor.get('chapter', '')}. "
+                    f"Press Start to resume detection."
+                )
+            except Exception as e:
+                self._append_log(f"⚠️ Session restore failed: {e}")
+        else:
+            self._append_log("🗑️ Last session discarded.")
+
+        # Always clear the session file after the user has decided
+        _session.clear_session()
+
     def _check_auto_start(self):
         """Called once after the window opens. Applies smart schedule then auto-starts if enabled."""
         if self.smart_schedule_var.get():
@@ -2277,6 +2349,25 @@ class VerseViewApp(ctk.CTk):
             on_done=on_done,
             on_error=on_error,
         )
+
+    def _on_atem_toggle(self):
+        """Real-time toggle of the ATEM keyer enable flag.
+        Turning it OFF immediately prevents any further keyer triggers.
+        Turning it ON re-reads the current IP/duration fields so the next
+        verse display picks them up without needing a Stop/Start cycle.
+        """
+        enabled = self.atem_var.get()
+        engine.ATEM_ENABLED = enabled
+        if enabled:
+            # Re-apply IP and duration from the live fields
+            engine.ATEM_IP = self.atem_ip_entry.get().strip()
+            try:
+                engine.ATEM_KEY_DURATION = float(self.atem_dur_entry.get().strip() or "5.0")
+            except ValueError:
+                pass
+            self._append_log("🎬 ATEM Keyer enabled — will trigger on next verse display.")
+        else:
+            self._append_log("🎬 ATEM Keyer disabled — keyer will not trigger until re-enabled.")
 
     def _scan_atem_ip(self):
         """Run ATEM auto-discovery in the background and fill the IP field if found."""
@@ -2749,6 +2840,48 @@ class VerseViewApp(ctk.CTk):
             print(f"[VerseView] Emergency save written: {filepath}")
         except Exception as e:
             print(f"[VerseView] Emergency save failed: {e}")
+
+    def _emergency_quit(self):
+        """Force-quit: save session, kill STT immediately, skip summariser, exit.
+
+        This is a hard pause of the whole system.  On next launch VerseView will
+        detect the saved session and ask whether to restore it.
+        """
+        if not mb.askyesno(
+            "Emergency Quit",
+            "Force-quit VerseView?\n\n"
+            "• The current session will be saved so you can restore it next launch.\n"
+            "• The AI summariser will NOT run.\n"
+            "• STT engines will be stopped immediately.\n\n"
+            "Continue?",
+        ):
+            return
+
+        # ── 1. Save session snapshot ──────────────────────────────────────────
+        try:
+            cfg.save(self._collect_settings())
+            snapshot = engine.get_session_snapshot()
+            snapshot["settings"] = self._collect_settings()
+            _session.save_session(snapshot)
+            print(f"[VerseView] Emergency session saved → {_session.get_session_path()}")
+        except Exception as e:
+            print(f"[VerseView] Session save error: {e}")
+
+        # ── 2. Force-stop STT engine (no clean drain, no summariser) ─────────
+        try:
+            engine.force_stop()
+        except Exception as e:
+            print(f"[VerseView] Force-stop error: {e}")
+
+        # ── 3. Kill the Discord bot subprocess if running ─────────────────────
+        try:
+            if self._bot_process and self._bot_process.poll() is None:
+                self._bot_process.kill()
+        except Exception:
+            pass
+
+        # ── 4. Hard exit — bypass atexit/summariser ───────────────────────────
+        os._exit(0)
 
     def on_closing(self):
         cfg.save(self._collect_settings())
