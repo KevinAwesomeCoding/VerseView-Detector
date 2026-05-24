@@ -795,18 +795,18 @@ _last_presented_verse_num: int = 0        # ordinal of last verse sent to displa
 _last_presented_verse_book_chap: str = "" # "Book chapter" key matching the above
 
 # ── HARD CONFIRMATION GATE ────────────────────────────────────────────────────
-# A verse may only be presented when ONE of these conditions is true:
-#   A) Source is FAST-PATH or TRANSLATION-PATH  →  explicit book+chapter+verse was parsed
-#   B) The system is in ONWARDS (locked sequential reading) mode
-#   C) Source is QUEUE or NEXT VERSE            →  already approved range continuation
-#   D) The same ref has been seen ≥2 times within _GATE_WINDOW_SECS
+# The hard confirmation gate has been REMOVED.  Previously, inferred detections
+# (PARSER, CONTEXTUAL, SEQUENTIAL, LLM, RANGE, READ-INTENT, etc.) were held in a
+# 45-second confirmation window and required two independent hits before firing.
+# This caused unacceptable latency — the preacher would say a verse and the
+# display would not update until the second hit (or not at all).
 #
-# All other inferred detections (PARSER, CONTEXTUAL, SEQUENTIAL, LLM, RANGE,
-# READ-INTENT, VERSE-RANGE-FIRST, VERSE-OF-CHAPTER, SIMPLE) must pass through
-# the window check. First occurrence is silently held; no guess is made.
-_GATE_WINDOW_SECS: float = 45.0   # local confirmation window length
-# {ref → (count, first_seen_time)}  — reset whenever a ref is finally presented
-_gate_pending: dict = {}
+# Now, all detections pass straight through.  The individual layers have their
+# own internal guards (e.g. LLM has anchor-match suppression + hardened prompt).
+# The gate variables below are kept as no-ops for backward compatibility with
+# any external code that might reference them, but they are no longer used.
+_GATE_WINDOW_SECS: float = 0.0    # DEPRECATED — gate removed
+_gate_pending: dict = {}          # DEPRECATED — gate removed
 
 # ── Contextual-floor bypass flags ──────────────────────────────────────────────
 # CONTEXT_FLOOR_EXPLICIT_BYPASS: when True, the ML-3 backward-jump floor is
@@ -1998,11 +1998,13 @@ def deliver_verse(ref: str, controller, bypass_cooldown=False, confidence=1.0, s
         return
 
     # ── GATE CONDITIONS A / B / C: always pass through ──
-    _BYPASS_SOURCES = {"FAST-PATH", "TRANSLATION-PATH", "QUEUE", "NEXT VERSE"}
+    # LLM added to bypass — the LLM path now has its own internal guards
+    # (anchor-match suppression + hardened prompt + paraphrase-content guard)
+    # so the external gate withholding is no longer needed.
+    _BYPASS_SOURCES = {"FAST-PATH", "TRANSLATION-PATH", "QUEUE", "NEXT VERSE", "LLM"}
     if source in _BYPASS_SOURCES or bypass_cooldown:
         # Condition A / C: explicit ref already verified upstream, or range/queue continuation
         # Condition B: bypass_cooldown=True is also set by ONWARDS in controller.send_verse
-        _gate_pending.pop(ref, None)   # clear any pending entry for this ref
         # ── SCRIPTURE-READ: advance expected verse pointer ──────────────────
         if SCRIPTURE_READ_MODE and ":" in ref:
             try:
@@ -2021,59 +2023,34 @@ def deliver_verse(ref: str, controller, bypass_cooldown=False, confidence=1.0, s
         return
 
     # ── SYSTEM-ACTION QUARANTINE CHECK ──
-    # This must run before the confirmation-window check so that even a
-    # "confirmed twice" hit is blocked when no fresh spoken evidence has
-    # arrived since a system-side action.  The quarantine helper also
-    # implements the early-clear logic (explicit full ref, or enough new
-    # transcript chars with a verse signal).
+    # When a manual context change, chapter-browser click, history injection,
+    # or session restore has recently occurred, a quarantine window is active.
+    # During that window all *inferred* detections are suppressed unless fresh
+    # spoken evidence arrives.
     if _in_system_quarantine(ref if ref else ""):
         logger.info(
             f"🔒 QUARANTINE BLOCKED inferred detection: {ref} [{source}] — "
             f"waiting for fresh spoken evidence after system action"
         )
-        # Do NOT add to _gate_pending — we don't want stale quarantine hits
-        # building up a false confirmation count that fires the moment
-        # the quarantine expires.
         return
 
-    # ── GATE CONDITION D: confirmation window ──
-    now = time.time()
-    # Expire any stale entries (older than the window) while we have the GIL
-    stale = [k for k, (_, t0) in list(_gate_pending.items()) if now - t0 > _GATE_WINDOW_SECS]
-    for k in stale:
-        del _gate_pending[k]
-        logger.debug(f"🔒 GATE expired unconfirmed ref: {k}")
-
-    if ref in _gate_pending:
-        count, first_seen = _gate_pending[ref]
-        new_count = count + 1
-        if new_count >= 2:
-            # Second independent detection within the window — confirmed
-            del _gate_pending[ref]
-            logger.info(
-                f"✅ GATE PASSED (confirmed ×{new_count} in "
-                f"{now - first_seen:.1f}s): {ref} [{source}]"
-            )
-            # ── SCRIPTURE-READ: advance expected verse pointer ───────────
-            if SCRIPTURE_READ_MODE and ":" in ref:
-                try:
-                    scripture_read_advance_expected(int(ref.rsplit(":", 1)[1]))
-                except (ValueError, IndexError):
-                    pass
-            if VERSE_INTERRUPT_ENABLED:
-                _start_vtc(ref, controller, source=source)
-            else:
-                controller.send_verse(ref, bypass_cooldown=bypass_cooldown, confidence=confidence, source=source)
-        else:
-            _gate_pending[ref] = (new_count, first_seen)
-            logger.info(
-                f"🔒 GATE HOLDING (seen ×{new_count}/{2}, "
-                f"{_GATE_WINDOW_SECS:.0f}s window): {ref} [{source}]"
-            )
+    # ── INFERRED DETECTIONS: pass straight through ──
+    # The hard confirmation gate has been removed.  When the engine hears a
+    # verse via PARSER, CONTEXTUAL, SEQUENTIAL, RANGE, READ-INTENT, or LLM,
+    # it now passes directly to the display — no 45-second withholding window,
+    # no "hear twice" requirement.  The individual detection layers have their
+    # own guards (e.g. the LLM path has anchor-match suppression + prompt
+    # hardening).  This makes the engine responsive: when the preacher says a
+    # verse, it shows immediately.
+    if SCRIPTURE_READ_MODE and ":" in ref:
+        try:
+            scripture_read_advance_expected(int(ref.rsplit(":", 1)[1]))
+        except (ValueError, IndexError):
+            pass
+    if VERSE_INTERRUPT_ENABLED:
+        _start_vtc(ref, controller, source=source)
     else:
-        # First occurrence — hold it
-        _gate_pending[ref] = (1, now)
-        logger.info(f"🔒 GATE HOLDING (first occurrence): {ref} [{source}]")
+        controller.send_verse(ref, bypass_cooldown=bypass_cooldown, confidence=confidence, source=source)
 
 
 def get_verse_history() -> list:
@@ -2705,6 +2682,25 @@ def extract_verse_with_llm(text):
     if not groq_client:
         return None
 
+    # ── Anchor-match suppression ────────────────────────────────────────────
+    # If the active sermon anchor is already set to this book+chapter, and the
+    # text contains no explicit reference signal (no colon, no "chapter N verse N"),
+    # skip LLM extraction entirely. The preacher is expounding a known passage,
+    # not announcing a new one.  This prevents paraphrase-content false positives
+    # where the LLM reverse-engineers a reference from verse text the preacher is
+    # already explaining.
+    _has_explicit_ref_signal = bool(
+        re.search(r'[A-Za-z]\w*\s+\d{1,3}:\d{1,3}', text)  # colon notation
+        or re.search(r'(?:chapter|chap|ch)\s+\d{1,3}\s+(?:verse|v)\s+\d{1,3}', text, re.IGNORECASE)  # spoken form
+    )
+    if current_book and current_chapter and not _has_explicit_ref_signal:
+        # No explicit reference signal — the text is likely exposition/paraphrase
+        logger.debug(
+            f"🤖 LLM extraction SKIPPED (anchor-match suppression): "
+            f"active anchor {current_book} {current_chapter} — no explicit ref signal in text"
+        )
+        return None
+
     context_hint = ""
     if current_book and current_chapter:
         # Bug ML-1 fix: include how far through the chapter the sermon has progressed.
@@ -2732,9 +2728,19 @@ def extract_verse_with_llm(text):
             messages=[{
                 "role": "user",
                 "content": (
-                    f"Extract the Bible verse reference from this text. "
-                    f"Return ONLY in format Book Chapter:Verse (e.g., John 3:16). "
-                    f"If no verse found, return exactly NONE.{context_hint}\nText: {text}"
+                    f"You are a Bible reference detector for a live sermon. "
+                    f"Your ONLY job is to detect when the SPEAKER EXPLICITLY NAMES or READS "
+                    f"a Bible reference — NOT when the text merely resembles or paraphrases "
+                    f"verse content.\n\n"
+                    f"STRICT RULES:\n"
+                    f"1. Return a reference ONLY if the speaker explicitly says a book name "
+                    f"   followed by chapter and verse (e.g. 'Acts chapter 1 verse 8', 'Acts 1:8').\n"
+                    f"2. If the text is a PARAPHRASE, EXPOSITION, or SERMON ILLUSTRATION "
+                    f"   that happens to match verse content (e.g. 'you will be my witnesses' "
+                    f"   or 'to the ends of the earth'), return NONE — this is NOT a citation.\n"
+                    f"3. Return ONLY in format 'Book Chapter:Verse' (e.g., John 3:16).\n"
+                    f"4. If no explicit reference is found, return exactly NONE.{context_hint}\n\n"
+                    f"Text: {text}"
                 ),
             }],
         )
@@ -4509,6 +4515,37 @@ def detect_verse_hybrid(text, controller, confidence=1.0, parser=None) -> bool:
         # Need at least 6 words so context is rich enough for LLM
         if len(text.split()) < 6:
             return False
+
+        # ── Paraphrase-content guard ──────────────────────────────────────────
+        # If the active anchor is set and the text contains known verse-content
+        # phrases (especially for a recently-displayed verse), skip LLM entirely.
+        # This prevents the LLM from reverse-engineering a reference from
+        # exposition text that merely resembles the verse being preached.
+        _PARAPHRASE_PHRASES = [
+            # Acts 1:8 family
+            "you will be my witnesses", "you shall be my witnesses",
+            "to the ends of the earth", "unto the uttermost part of the earth",
+            "receive power when the holy spirit",
+            # Common exposition patterns
+            "jesus said", "the lord said", "god said",
+            "in the beginning", "thus saith the lord",
+        ]
+        if current_book and current_chapter:
+            text_lower_guard = text.lower()
+            for phrase in _PARAPHRASE_PHRASES:
+                if phrase in text_lower_guard:
+                    # Only skip if there's NO explicit reference signal in the text
+                    has_explicit = bool(
+                        re.search(r'[A-Za-z]\w*\s+\d{1,3}:\d{1,3}', text)
+                        or re.search(r'(?:chapter|chap|ch)\s+\d{1,3}\s+(?:verse|v)\s+\d{1,3}', text, re.IGNORECASE)
+                    )
+                    if not has_explicit:
+                        logger.debug(
+                            f"🤖 LLM call BLOCKED (paraphrase-content guard): "
+                            f"matched phrase '{phrase}' — no explicit ref signal in text"
+                        )
+                        return False
+                    break  # explicit signal found, allow LLM to proceed
 
         global _llm_in_flight
         if _llm_in_flight:
