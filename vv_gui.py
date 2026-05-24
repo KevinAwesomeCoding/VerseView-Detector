@@ -1893,9 +1893,13 @@ class VerseViewApp(ctk.CTk):
             if anchor.get("verse"):
                 anchor_str += f":{anchor['verse']}"
 
+        # Tell the user whether a log was also captured
+        has_log = bool(data.get("gui_log", "").strip())
+        log_note = "\nActivity log from before will be restored." if has_log else ""
+
         msg = (
             f"A session was saved from an Emergency Quit.\n"
-            f"{verse_count} verse(s) detected.{anchor_str}\n\n"
+            f"{verse_count} verse(s) detected.{anchor_str}{log_note}\n\n"
             f"Restore this session?"
         )
         if mb.askyesno("Restore Last Session", msg):
@@ -1907,10 +1911,40 @@ class VerseViewApp(ctk.CTk):
                     lang = saved_settings.get("language")
                     if lang and hasattr(self, "lang_var"):
                         self.lang_var.set(lang)
+
+                # ── Replay the saved GUI log into the log box ──────────────────────
+                saved_gui_log = data.get("gui_log", "").strip()
+                if saved_gui_log:
+                    try:
+                        self.log_box.configure(state="normal")
+                        # Insert the old log with a clear visual divider
+                        self.log_box.insert("1.0",
+                            saved_gui_log
+                            + "\n\n"
+                            + "─" * 60
+                            + "  RESTORED FROM EMERGENCY QUIT  "
+                            + "─" * 60
+                            + "\n\n"
+                        )
+                        self.log_box.configure(state="disabled")
+                        # Scroll to the bottom so the most-recent (new) lines are visible
+                        self.log_box.see("end")
+                    except Exception as _le:
+                        logger.warning(f"⚠️ Could not replay GUI log: {_le}")
+
+                # ── Resume Discord live log on the same message ──────────────────
+                # If a Discord message ID was saved, resume() will re-attach
+                # the flush loop to the same embed rather than creating a new one.
+                saved_msg_id = data.get("discord_msg_id")
+                try:
+                    engine._discord_live_log.resume(saved_msg_id)
+                except Exception as _de:
+                    logger.warning(f"⚠️ Could not resume Discord live log: {_de}")
+
                 self._append_log(
                     f"📂 Session restored — {verse_count} verse(s), "
                     f"anchor: {anchor.get('book', '—')} {anchor.get('chapter', '')}. "
-                    f"Press Start to resume detection."
+                    f"Log replayed. Press Start to resume detection."
                 )
             except Exception as e:
                 self._append_log(f"⚠️ Session restore failed: {e}")
@@ -2766,6 +2800,63 @@ class VerseViewApp(ctk.CTk):
             command=_resend
         ).pack(pady=(0, 12))
 
+    def _emergency_quit(self):
+        """Force-quit: save session, kill STT immediately, skip summariser, exit.
+
+        This is a hard pause of the whole system.  On next launch VerseView will
+        detect the saved session and ask whether to restore it.
+        """
+        if not mb.askyesno(
+            "Emergency Quit",
+            "Force-quit VerseView?\n\n"
+            "• The current session will be saved so you can restore it next launch.\n"
+            "• The AI summariser will NOT run.\n"
+            "• STT engines will be stopped immediately.\n\n"
+            "Continue?",
+        ):
+            return
+
+        # ── 1. Save session snapshot ─────────────────────────────────────────────
+        try:
+            cfg.save(self._collect_settings())
+            snapshot = engine.get_session_snapshot()
+            snapshot["settings"] = self._collect_settings()
+            # Capture the GUI log box text so it can be replayed on restore
+            try:
+                snapshot["gui_log"] = self.log_box.get("1.0", "end").strip()
+            except Exception:
+                snapshot["gui_log"] = ""
+            _session.save_session(snapshot)
+            print(f"[VerseView] Emergency session saved → {_session.get_session_path()}")
+        except Exception as e:
+            print(f"[VerseView] Session save error: {e}")
+
+        # ── 2. Pause Discord live log ────────────────────────────────────────────
+        # pause() stops the flush loop but does NOT delete the Discord embed
+        # message and does NOT upload the log file.  The live message stays
+        # visible in Discord with a ⏸️ notice; it will be resumed on next launch.
+        try:
+            engine._discord_live_log.pause()
+        except Exception as e:
+            print(f"[VerseView] Discord pause error: {e}")
+
+        # ── 3. Force-stop STT engine (no clean drain, no summariser) ──────────
+        try:
+            engine.force_stop()
+        except Exception as e:
+            print(f"[VerseView] Force-stop error: {e}")
+
+        # ── 4. Kill the Discord bot subprocess if running ─────────────────────
+        try:
+            if self._bot_process and self._bot_process.poll() is None:
+                self._bot_process.kill()
+        except Exception:
+            pass
+
+        # ── 5. Hard exit — bypass atexit/summariser ─────────────────────────────
+        os._exit(0)
+
+
     def _update_history_loop(self):
         try:
             hist = engine.get_verse_history()
@@ -2841,47 +2932,6 @@ class VerseViewApp(ctk.CTk):
         except Exception as e:
             print(f"[VerseView] Emergency save failed: {e}")
 
-    def _emergency_quit(self):
-        """Force-quit: save session, kill STT immediately, skip summariser, exit.
-
-        This is a hard pause of the whole system.  On next launch VerseView will
-        detect the saved session and ask whether to restore it.
-        """
-        if not mb.askyesno(
-            "Emergency Quit",
-            "Force-quit VerseView?\n\n"
-            "• The current session will be saved so you can restore it next launch.\n"
-            "• The AI summariser will NOT run.\n"
-            "• STT engines will be stopped immediately.\n\n"
-            "Continue?",
-        ):
-            return
-
-        # ── 1. Save session snapshot ──────────────────────────────────────────
-        try:
-            cfg.save(self._collect_settings())
-            snapshot = engine.get_session_snapshot()
-            snapshot["settings"] = self._collect_settings()
-            _session.save_session(snapshot)
-            print(f"[VerseView] Emergency session saved → {_session.get_session_path()}")
-        except Exception as e:
-            print(f"[VerseView] Session save error: {e}")
-
-        # ── 2. Force-stop STT engine (no clean drain, no summariser) ─────────
-        try:
-            engine.force_stop()
-        except Exception as e:
-            print(f"[VerseView] Force-stop error: {e}")
-
-        # ── 3. Kill the Discord bot subprocess if running ─────────────────────
-        try:
-            if self._bot_process and self._bot_process.poll() is None:
-                self._bot_process.kill()
-        except Exception:
-            pass
-
-        # ── 4. Hard exit — bypass atexit/summariser ───────────────────────────
-        os._exit(0)
 
     def on_closing(self):
         cfg.save(self._collect_settings())

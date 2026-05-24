@@ -308,6 +308,34 @@ class _DiscordLiveLog:
         self._delete()
         self._upload_log_file()
 
+    def pause(self):
+        """Emergency-quit pause: stop the flush loop but leave the Discord message
+        alive (no delete, no log upload).  Appends a visible pause notice to the
+        live embed so channel viewers know the operator will return.
+        """
+        self._stop_evt.set()
+        with self._lock:
+            self._lines.append("⏸️  Session paused — operator will resume shortly")
+            self._dirty = True
+        # One last synchronous edit so the pause line actually appears
+        self._edit()
+
+    def resume(self, msg_id: str | None = None):
+        """Restart the flush loop, optionally re-attaching to an existing Discord
+        message (via the saved msg_id from the session snapshot) so new log lines
+        are appended to the same embed rather than creating a new one.
+        """
+        with self._lock:
+            if msg_id:
+                self._msg_id = msg_id
+            self._lines.append("▶️  Session resumed")
+            self._dirty = True
+            self._close_message = ""
+        self._stop_evt.clear()
+        t = threading.Thread(target=self._flush_loop, daemon=True)
+        t.daemon = True
+        t.start()
+
     def reset(self):
         """Re-arm for a new session: clear state and restart the flush thread."""
         with self._lock:
@@ -2075,7 +2103,17 @@ def was_force_stopped() -> bool:
 
 
 def get_session_snapshot() -> dict:
-    """Return a dict capturing the current live sermon state for session restore."""
+    """Return a dict capturing the current live sermon state for session restore.
+
+    New keys added for the pause/resume feature:
+      stt_log       — full in-memory session log stream text (same content that
+                      gets uploaded to Discord on normal stop).  Restored into
+                      session_log_stream on resume so the final upload includes
+                      everything from before and after the pause.
+      discord_msg_id — the live Discord embed message ID.  Restored into
+                      _discord_live_log so the flush loop continues editing the
+                      same message rather than creating a new one.
+    """
     return {
         "transcript":       full_sermon_transcript or "",
         "verses_cited":     list(verses_cited),
@@ -2088,11 +2126,24 @@ def get_session_snapshot() -> dict:
             "chapter": _sermon_anchor_chapter,
             "verse":   _sermon_anchor_verse,
         },
+        # ── Pause/resume additions ────────────────────────────────────────────
+        "stt_log":         session_log_stream.getvalue(),
+        "discord_msg_id":  _discord_live_log._msg_id,
     }
 
 
 def restore_session_snapshot(data: dict) -> None:
-    """Restore engine state from a saved session snapshot dict."""
+    """Restore engine state from a saved session snapshot dict.
+
+    In addition to transcript / verse state this also restores:
+      • session_log_stream  — so the Discord log upload after the resumed
+                              session includes everything from before the pause.
+      • _discord_live_log._msg_id — so the flush loop re-attaches to the same
+                              Discord embed message instead of creating a new one.
+        The caller (GUI) is responsible for calling
+        _discord_live_log.resume(data["discord_msg_id"]) once the engine is
+        started so the flush loop actually picks up the restored ID.
+    """
     global full_sermon_transcript, verses_cited, _verse_history
     global current_book, current_chapter, current_verse
     global _sermon_anchor_book, _sermon_anchor_chapter, _sermon_anchor_verse
@@ -2109,6 +2160,20 @@ def restore_session_snapshot(data: dict) -> None:
     current_book    = data.get("current_book")    or _sermon_anchor_book
     current_chapter = data.get("current_chapter") or _sermon_anchor_chapter
     current_verse   = data.get("current_verse")   or _sermon_anchor_verse
+
+    # ── Restore in-memory session log stream ─────────────────────────────────
+    # This ensures that when the session eventually ends normally the Discord
+    # log upload contains all lines from both before and after the pause.
+    saved_log = data.get("stt_log", "")
+    if saved_log:
+        try:
+            session_log_stream.truncate(0)
+            session_log_stream.seek(0)
+            session_log_stream.write(saved_log)
+            # Leave the position at the end so new log lines append naturally
+            session_log_stream.seek(0, 2)
+        except Exception as _e:
+            logger.warning(f"⚠️ Could not restore session log stream: {_e}")
 
     # Session restore injects context from outside the live audio stream.
     # Open a quarantine so the restored context is metadata only — the
