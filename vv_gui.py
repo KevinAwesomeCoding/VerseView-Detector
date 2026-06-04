@@ -447,13 +447,13 @@ class VerseViewApp(ctk.CTk):
             # Hindi can use Deepgram (Nova-3) or Sarvam AI — user picks in STT Engine.
             # Multi-Language can only use the Multilingual model.
             if is_ml:
-                new_opts = ["Sarvam AI"]
+                new_opts = ["Sarvam AI", "Gladia", "Google Cloud STT", "Local Whisper"]
             elif is_hi:
-                new_opts = ["Deepgram", "Sarvam AI"]
+                new_opts = ["Deepgram", "Sarvam AI", "Gladia", "Google Cloud STT", "Local Whisper"]
             elif is_multi:
-                new_opts = ["Deepgram", "AssemblyAI (Universal-3 Multilingual)"]
+                new_opts = ["Deepgram", "AssemblyAI (Universal-3 Multilingual)", "Gladia", "Google Cloud STT", "Local Whisper"]
             else:
-                new_opts = ["Deepgram", "AssemblyAI (Universal-3 Pro)", "AssemblyAI (Universal-3 Multilingual)"]
+                new_opts = ["Deepgram", "AssemblyAI (Universal-3 Pro)", "AssemblyAI (Universal-3 Multilingual)", "Gladia", "Google Cloud STT", "Local Whisper"]
 
             self.stt_engine_menu.configure(values=new_opts)
             # Reset to the first (default) option for the new language
@@ -469,6 +469,9 @@ class VerseViewApp(ctk.CTk):
             "Deepgram",
             "AssemblyAI (Universal-3 Pro)",
             "AssemblyAI (Universal-3 Multilingual)",
+            "Gladia",
+            "Google Cloud STT",
+            "Local Whisper",
         ])
 
         # Live-update headers when engine changes
@@ -1142,6 +1145,9 @@ class VerseViewApp(ctk.CTk):
             ("Gemini API Key",            "gm_key_entry"),
             ("Sarvam Key",                "sv_key_entry"),
             ("AssemblyAI Key",            "aai_key_entry"),
+            ("Gladia API Key",            "gladia_key_entry"),
+            ("GCP Credentials Path",      "gcp_path_entry"),
+            ("Local Whisper Endpoint",    "whisper_url_entry"),
             ("Discord Webhook URL",       "dc_key_entry"),
             ("Discord Log Webhook URL",   "dc_log_key_entry"),
             ("Discord Notes Webhook URL", "dc_notes_key_entry"),
@@ -1301,6 +1307,9 @@ class VerseViewApp(ctk.CTk):
             "assemblyai_multilingual":  "AssemblyAI (Universal-3 Multilingual)",
             "assemblyai":               "AssemblyAI (Universal-3 Pro)",  # backward compat
             "sarvam":                   "Sarvam AI",
+            "gladia":                   "Gladia",
+            "gcp":                      "Google Cloud STT",
+            "local_whisper":            "Local Whisper",
             "deepgram":                 "Deepgram",
         }
         if hasattr(self, "sec_engine_var"):
@@ -1333,6 +1342,9 @@ class VerseViewApp(ctk.CTk):
             "assemblyai_multilingual":  "AssemblyAI (Universal-3 Multilingual)",
             "assemblyai":               "AssemblyAI (Universal-3 Pro)",  # backward compat
             "sarvam":                   "Sarvam AI",
+            "gladia":                   "Gladia",
+            "gcp":                      "Google Cloud STT",
+            "local_whisper":            "Local Whisper",
             "deepgram":                 "Deepgram",
         }.get(saved_engine, "Deepgram")
         if hasattr(self, "stt_engine_var"):
@@ -1402,6 +1414,9 @@ class VerseViewApp(ctk.CTk):
             ("gm_key_entry",       "gemini_api_key"),
             ("sv_key_entry",       "sarvam_api_key"),
             ("aai_key_entry",      "assemblyai_api_key"),
+            ("gladia_key_entry",   "gladia_api_key"),
+            ("gcp_path_entry",     "gcp_credentials_path"),
+            ("whisper_url_entry",  "local_whisper_endpoint"),
             ("dc_key_entry",       "discord_webhook_url"),
             ("dc_log_key_entry",   "discord_log_webhook_url"),
             ("dc_notes_key_entry", "discord_notes_webhook_url"),
@@ -1452,6 +1467,9 @@ class VerseViewApp(ctk.CTk):
             "cerebras_api_key":           self.cb_key_entry.get(),
             "mistral_api_key":            self.ms_key_entry.get(),
             "sarvam_api_key":             self.sv_key_entry.get(),
+            "gladia_api_key":             self.gladia_key_entry.get().strip(),
+            "gcp_credentials_path":       self.gcp_path_entry.get().strip(),
+            "local_whisper_endpoint":     self.whisper_url_entry.get().strip(),
             # ── all 3 Discord webhook URLs ──
             "discord_webhook_url":        self.dc_key_entry.get(),
             "discord_log_webhook_url":    self.dc_log_key_entry.get(),
@@ -1746,6 +1764,12 @@ class VerseViewApp(ctk.CTk):
             return "assemblyai_multilingual" if "multilingual" in label.lower() else "assemblyai_pro"
         if "sarvam" in label.lower():
             return "sarvam"
+        if "gladia" in label.lower():
+            return "gladia"
+        if "google cloud" in label.lower() or "gcp" in label.lower():
+            return "gcp"
+        if "whisper" in label.lower():
+            return "local_whisper"
         return "deepgram"
 
     def _sec_engine_code(self) -> str:
@@ -1755,6 +1779,12 @@ class VerseViewApp(ctk.CTk):
             return "assemblyai_multilingual" if "multilingual" in label.lower() else "assemblyai_pro"
         if "sarvam" in label.lower():
             return "sarvam"
+        if "gladia" in label.lower():
+            return "gladia"
+        if "google cloud" in label.lower() or "gcp" in label.lower():
+            return "gcp"
+        if "whisper" in label.lower():
+            return "local_whisper"
         return "deepgram"
 
 
@@ -1994,9 +2024,21 @@ class VerseViewApp(ctk.CTk):
             if _engine == "sarvam":
                 if not s["sarvam_api_key"]:
                     missing.append("Sarvam API Key")
+            if _engine == "gladia":
+                if not s.get("gladia_api_key"):
+                    missing.append("Gladia API Key")
             if _engine in ("assemblyai", "assemblyai_pro", "assemblyai_multilingual"):
                 if not s.get("assemblyai_api_key"):
                     missing.append("AssemblyAI API Key")
+            if _engine == "gcp":
+                _gcp_path = s.get("gcp_credentials_path", "")
+                if not _gcp_path:
+                    missing.append("Google Cloud Credentials Path")
+                elif not os.path.isfile(_gcp_path):
+                    missing.append(f"Google Cloud credentials file not found: {_gcp_path}")
+            if _engine == "local_whisper":
+                if not s.get("local_whisper_endpoint"):
+                    missing.append("Local Whisper Endpoint URL")
 
             # Secondary stream key validation
             if s.get("dual_stt_enabled") and _sec_lang:
@@ -2004,8 +2046,18 @@ class VerseViewApp(ctk.CTk):
                     missing.append("Deepgram API Key (required for secondary stream)")
                 if _sec_engine == "sarvam" and not s["sarvam_api_key"]:
                     missing.append("Sarvam API Key (required for secondary Malayalam stream)")
+                if _sec_engine == "gladia" and not s.get("gladia_api_key"):
+                    missing.append("Gladia API Key (required for secondary stream)")
                 if _sec_engine in ("assemblyai", "assemblyai_pro", "assemblyai_multilingual") and not s.get("assemblyai_api_key"):
                     missing.append("AssemblyAI API Key (required for secondary stream)")
+                if _sec_engine == "gcp":
+                    _gcp_path = s.get("gcp_credentials_path", "")
+                    if not _gcp_path:
+                        missing.append("Google Cloud Credentials Path (required for secondary stream)")
+                    elif not os.path.isfile(_gcp_path):
+                        missing.append(f"Google Cloud credentials file not found (secondary): {_gcp_path}")
+                if _sec_engine == "local_whisper" and not s.get("local_whisper_endpoint"):
+                    missing.append("Local Whisper Endpoint URL (required for secondary stream)")
 
             if missing:
                 mb.showwarning("Missing Keys", f"Please enter in Advanced Settings:\n\n{chr(10).join(missing)}")
@@ -2030,6 +2082,9 @@ class VerseViewApp(ctk.CTk):
                 cerebras_api_key          = s["cerebras_api_key"],
                 mistral_api_key           = s["mistral_api_key"],
                 sarvam_api_key            = s["sarvam_api_key"],
+                gladia_api_key            = s.get("gladia_api_key", ""),
+                gcp_credentials_path      = s.get("gcp_credentials_path", ""),
+                local_whisper_endpoint    = s.get("local_whisper_endpoint", ""),
                 discord_webhook_url       = s["discord_webhook_url"],
                 discord_log_webhook_url   = s["discord_log_webhook_url"],
                 discord_notes_webhook_url = s["discord_notes_webhook_url"],

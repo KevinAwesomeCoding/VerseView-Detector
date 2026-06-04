@@ -24,6 +24,13 @@ from parse_reference_hindi import parse_references as parse_hindi, normalize_num
 from parse_reference_ml import parse_references as parse_ml, normalize_numbers_only as norm_ml
 from bible_fetcher import fetch_verse as multi_fetch, fetch_chapter as _fetch_chapter_raw
 
+from stt_providers.deepgram_provider import DeepgramProvider
+from stt_providers.assemblyai_provider import AssemblyAIProvider
+from stt_providers.sarvam_provider import SarvamProvider
+from stt_providers.gladia_provider import GladiaProvider
+from stt_providers.google_cloud_provider import GoogleCloudProvider
+from stt_providers.local_whisper_provider import LocalWhisperProvider
+
 def fetch_chapter_verses(book: str, chapter: str) -> list:
     """GUI-callable: returns [{num, text}] for the current translation."""
     return _fetch_chapter_raw(book, chapter, BIBLE_TRANSLATION)
@@ -552,6 +559,9 @@ DISCORD_LOG_WEBHOOK_URL     = ""
 DISCORD_NOTES_WEBHOOK_URL   = ""
 SARVAM_API_KEY        = ""
 ASSEMBLYAI_API_KEY    = ""
+GLADIA_API_KEY        = ""
+GCP_CREDENTIALS_PATH  = ""
+LOCAL_WHISPER_ENDPOINT = ""
 STT_ENGINE            = "deepgram"   # "deepgram" | "assemblyai"
 AAI_LANGUAGE          = "en"         # "en" | "hi" | "ml" | "multi"
 AAI_TURN_CUTOFF_SEC   = 5            # force_endpoint interval in seconds (3–11)
@@ -878,7 +888,6 @@ _range_latch_ref = None  # Track which reference triggered the range latch
 _last_presented_book_chapter = None
 _last_presented_time = 0.0
 # Bug 3: track last processed sentence to detect repetitions
-_last_sentence = None
 
 # ── DUAL STT GLOBALS ──────────────────────────────────────────────────────────
 DUAL_STT_ENABLED              = False
@@ -1446,6 +1455,7 @@ def configure(
     bible_translation="kjv", deepgram_api_key="",
     groq_api_key="", gemini_api_key="", cerebras_api_key="",
     mistral_api_key="", sarvam_api_key="",
+    gladia_api_key="", gcp_credentials_path="", local_whisper_endpoint="",
     discord_webhook_url="", discord_log_webhook_url="", discord_notes_webhook_url="",
     confidence=0.75, manual_confirm=True,
     confirm_callback=None, verify=True, verse_interrupt=False,
@@ -1462,6 +1472,7 @@ def configure(
     malayalam_transliteration=False,
 ):
     global DEEPGRAM_API_KEY, GROQ_API_KEY, GEMINI_API_KEY, CEREBRAS_API_KEY, MISTRAL_API_KEY, SARVAM_API_KEY
+    global GLADIA_API_KEY, GCP_CREDENTIALS_PATH, LOCAL_WHISPER_ENDPOINT
     global DISCORD_WEBHOOK_URL, DISCORD_LOG_WEBHOOK_URL, DISCORD_NOTES_WEBHOOK_URL
     global USE_SARVAM, DEEPGRAM_LANGUAGE, DEEPGRAM_MODEL, SARVAM_LANGUAGE
     global PRIMARY_PARSER, MIC_INDEX, RATE, CHUNK, REMOTE_URL
@@ -1531,6 +1542,9 @@ def configure(
     CEREBRAS_API_KEY = cerebras_api_key
     MISTRAL_API_KEY  = mistral_api_key
     SARVAM_API_KEY   = sarvam_api_key
+    GLADIA_API_KEY   = gladia_api_key
+    GCP_CREDENTIALS_PATH = gcp_credentials_path
+    LOCAL_WHISPER_ENDPOINT = local_whisper_endpoint
     ASSEMBLYAI_API_KEY = assemblyai_api_key
     # Normalize "assemblyai_pro" / "assemblyai_multilingual" → "assemblyai" so
     # main() STT_ENGINE == "assemblyai" branches always match.  The model variant
@@ -4986,227 +5000,6 @@ def _process_transcript_blob(sentence: str, partial_context_ref: list, controlle
     partial_context_ref[0] = partial_context
 
 
-# ── DEEPGRAM STREAMING ────────────────────────────────────────────────────────
-async def stream_audio(controller, is_secondary=False):
-    global full_sermon_transcript, full_sermon_transcript_secondary
-    import websockets
-    import json
-
-    # Resolve which config to use based on primary vs secondary
-    if is_secondary:
-        _lang    = SECONDARY_DEEPGRAM_LANGUAGE
-        _model   = SECONDARY_DEEPGRAM_MODEL
-        _parser  = SECONDARY_PARSER
-        _tag     = "[SEC]"
-    else:
-        _lang    = DEEPGRAM_LANGUAGE
-        _model   = DEEPGRAM_MODEL
-        _parser  = None   # None → detect_verse_hybrid uses PRIMARY_PARSER
-        _tag     = "[PRI]"
-
-    partial_context = [""]
-
-    import pyaudio
-    audio  = pyaudio.PyAudio()
-    stream = None
-
-    try:
-        mic_info = audio.get_device_info_by_index(MIC_INDEX)
-        logger.info(f"Using: [{MIC_INDEX}] {mic_info['name']}")
-        if "stereo mix" in mic_info['name'].lower():
-            logger.warning("⚠️ Stereo Mix selected — ALL desktop audio will be captured. Non-church audio may trigger false detections.")
-        stream = audio.open(
-            format=pyaudio.paInt16, channels=1, rate=RATE,
-            input=True, input_device_index=MIC_INDEX,
-            frames_per_buffer=CHUNK,
-        )
-        logger.info("Microphone opened")
-    except Exception as e:
-        logger.error(f"Microphone error: {e}")
-        return
-
-    # ── Deepgram keywords boosting — helps Nova-3 Hindi recognise accented
-    # English Bible book names (e.g. "Corintens" → "Corinthians") ──────────
-    _BIBLE_KEYWORDS = [
-        "Genesis", "Exodus", "Leviticus", "Numbers", "Deuteronomy",
-        "Joshua", "Judges", "Ruth", "Samuel", "Kings", "Chronicles",
-        "Ezra", "Nehemiah", "Esther", "Job", "Psalms", "Proverbs",
-        "Ecclesiastes", "Isaiah", "Jeremiah", "Lamentations", "Ezekiel",
-        "Daniel", "Hosea", "Joel", "Amos", "Obadiah", "Jonah", "Micah",
-        "Nahum", "Habakkuk", "Zephaniah", "Haggai", "Zechariah", "Malachi",
-        "Matthew", "Mark", "Luke", "John", "Acts", "Romans",
-        "Corinthians", "Galatians", "Ephesians", "Philippians", "Colossians",
-        "Thessalonians", "Timothy", "Titus", "Philemon", "Hebrews",
-        "James", "Peter", "Jude", "Revelation",
-    ]
-    _kw_params = "".join(
-        f"&keyterm={kw}" for kw in _BIBLE_KEYWORDS
-    ) if _lang == "hi" else ""
-
-    url = (
-        f"wss://api.deepgram.com/v1/listen"
-        f"?language={_lang}"
-        f"&model={_model}"
-        f"&punctuate=true"
-        f"&smart_format=false"
-        f"&interim_results=true"
-        f"&utterance_end_ms=1000"
-        f"&endpointing=300"
-        f"&encoding=linear16"
-        f"&sample_rate={RATE}"
-        f"{_kw_params}"
-    )
-    headers = {"Authorization": f"Token {DEEPGRAM_API_KEY}"}
-    loop    = asyncio.get_event_loop()
-
-    def read_audio():
-        return stream.read(CHUNK, exception_on_overflow=False)
-
-    try:
-        async with websockets.connect(url, additional_headers=headers) as ws:
-            logger.info(f"🎤 {_tag} Language: {_lang.upper()} | Model: {_model.upper()}")
-            logger.info(f"Connected to Deepgram WebSocket {_tag}")
-            logger.info("Press Stop to end")
-
-            async def recv_transcripts():
-                global full_sermon_transcript, full_sermon_transcript_secondary, _last_transcript_time
-                try:
-                    async for msg in ws:
-                        try:
-                            data     = json.loads(msg)
-                            msg_type = data.get("type", "Results")
-                            if msg_type != "Results":
-                                continue
-                            channel = data.get("channel", {})
-                            if isinstance(channel, list):
-                                continue
-                            alts = channel.get("alternatives", [])
-                            if not alts or not isinstance(alts[0], dict):
-                                continue
-                            sentence = alts[0].get("transcript", "")
-                            if not sentence.strip():
-                                continue
-                            check_verse_queue(sentence, controller)
-                            if data.get("is_final"):
-                                # Bug 3: Detect and collapse repeated phrases
-                                global _last_sentence
-                                collapsed = False
-                                words = sentence.strip().split()
-                                # Check for phrases repeated more than 3 times consecutively
-                                for i in range(len(words) - 6):
-                                    phrase = " ".join(words[i:i+3])
-                                    repeat_count = 1
-                                    j = i + 3
-                                    while j <= len(words) - 3:
-                                        next_phrase = " ".join(words[j:j+3])
-                                        if next_phrase == phrase:
-                                            repeat_count += 1
-                                            j += 3
-                                        else:
-                                            break
-                                    if repeat_count > 3:
-                                        logger.info(f"📝 {_tag} {phrase}... (repeated {repeat_count}x, collapsed)")
-                                        logger.warning(f"⚠️ Transcript repetition detected and collapsed")
-                                        sentence = phrase + "..."
-                                        collapsed = True
-                                        break
-
-                                # Issue B: secondary-stream degenerate-loop guard.
-                                # After the existing phrase-collapse above, run the
-                                # heavier token-loop detector.  If the chunk is still
-                                # degenerate after collapsing, drop it entirely rather
-                                # than feeding garbage into the verse pipeline.
-                                if is_secondary and _drop_if_degenerate(sentence, _tag):
-                                    continue   # chunk dropped — do not append or parse
-
-                                if not collapsed:
-                                    logger.info(f"📝 {_tag} {sentence}")
-
-                                # Append to the appropriate transcript buffer
-                                full_sermon_transcript += " " + sentence.strip()
-                                if is_secondary:
-                                    full_sermon_transcript_secondary += " " + sentence.strip()
-                                _last_transcript_time = time.time()  # Feature 6
-                                _process_transcript_blob(sentence, partial_context, controller, parser=_parser)
-                        except Exception as e:
-                            logger.error(f"Recv error {_tag}: {e}")
-                except asyncio.CancelledError:
-                    pass
-                except Exception as e:
-                    logger.warning(f"WebSocket closed {_tag}: {e}")
-
-            async def send_audio():
-                # Issue B: catch websocket send errors gracefully.  A
-                # ConnectionClosed / SendError from the secondary stream used to
-                # bubble up and trigger a full shutdown.  Now we log it and let
-                # the outer reconnect loop handle recovery.
-                try:
-                    while not stop_event.is_set():
-                        data = await loop.run_in_executor(None, read_audio)
-                        try:
-                            await ws.send(data)
-                        except Exception as _send_exc:
-                            _exc_name = type(_send_exc).__name__
-                            if is_secondary:
-                                logger.warning(
-                                    f"⚠️ {_tag} websocket send error ({_exc_name}) — "
-                                    f"graceful fallback: stopping sender, "
-                                    f"reconnect will be attempted by outer loop"
-                                )
-                            else:
-                                logger.error(f"Send error: {_send_exc}")
-                            break   # exit sender; receiver/outer loop handle reconnect
-                except asyncio.CancelledError:
-                    pass
-                except Exception as e:
-                    logger.error(f"Send error: {e}")
-
-            sender   = asyncio.create_task(send_audio())
-            receiver = asyncio.create_task(recv_transcripts())
-            await stop_event.wait()
-            sender.cancel()
-            receiver.cancel()
-            await asyncio.gather(sender, receiver, return_exceptions=True)
-            try:
-                await ws.send(json.dumps({"type": "CloseStream"}))  # type: ignore
-            except Exception:
-                pass
-    except Exception as e:
-        err_str = str(e)
-        if "401" in err_str:
-            logger.error("❌ Deepgram API key rejected (HTTP 401). Check your key in Advanced Settings.")
-        else:
-            logger.error(f"Deepgram WebSocket error: {e}")
-    finally:
-        # On macOS/Intel the CoreAudio callback runs in a separate PortAudio thread.
-        # Calling stop_stream() while run_in_executor(read_audio) is still in-flight
-        # causes a SIGSEGV (zsh: segmentation fault). Fix:
-        #   1. Wait one CHUNK period so the in-flight blocking read() can return.
-        #   2. Use abort_stream() on macOS — it kills the stream immediately without
-        #      waiting to drain the buffer, which prevents the re-entrancy crash.
-        #   3. Sleep between each PortAudio call to let the OS callback thread settle.
-        import time as _pa_t
-        _chunk_secs = CHUNK / max(RATE, 1)
-        _pa_t.sleep(_chunk_secs + 0.05)   # let in-flight executor read() return
-        if stream:
-            try:
-                if sys.platform == "darwin":
-                    stream.abort_stream()   # immediate — no drain wait
-                else:
-                    stream.stop_stream()
-            except Exception:
-                pass
-            _pa_t.sleep(0.05)
-            try:
-                stream.close()
-            except Exception:
-                pass
-        _pa_t.sleep(0.1)  # give PortAudio callback thread time to exit
-        try:
-            audio.terminate()
-        except Exception:
-            pass
-
 
 # ── Issue B: repetition / noise guard ────────────────────────────────────────
 
@@ -5282,517 +5075,6 @@ def _drop_if_degenerate(text: str, tag: str) -> bool:
     return False
 
 
-# ── SARVAM STREAMING ──────────────────────────────────────────────────────────
-async def stream_audio_sarvam(controller, is_secondary=False):
-    global full_sermon_transcript, full_sermon_transcript_secondary
-    import base64
-    from sarvamai import AsyncSarvamAI
-    import pyaudio
-
-    _parser = SECONDARY_PARSER if is_secondary else None
-    _tag    = "[SEC-ML]" if is_secondary else "[PRI-ML]"
-
-    audio  = pyaudio.PyAudio()
-    stream = None
-
-    try:
-        mic_info = audio.get_device_info_by_index(MIC_INDEX)
-        logger.info(f"Using: [{MIC_INDEX}] {mic_info['name']}")
-        stream = audio.open(
-            format=pyaudio.paInt16, channels=1, rate=RATE,
-            input=True, input_device_index=MIC_INDEX, frames_per_buffer=CHUNK,
-        )
-        logger.info("Microphone opened")
-    except Exception as e:
-        logger.error(f"Microphone error: {e}")
-        return
-
-    def read_chunk_blocking():
-        frames = []
-        for _ in range(max(1, int(RATE * 0.5 / CHUNK))):
-            frames.append(stream.read(CHUNK, exception_on_overflow=False))
-        return b"".join(frames)
-
-    client = AsyncSarvamAI(api_subscription_key=SARVAM_API_KEY)
-    loop   = asyncio.get_event_loop()
-
-    try:
-        while not stop_event.is_set():
-            logger.info("Connecting to Sarvam AI...")
-            try:
-                async with client.speech_to_text_streaming.connect(
-                    model="saaras:v3",
-                    # [Q1] mode="transcribe" is correct for live church sermon transcription.
-                    #      Sarvam V3's streaming WebSocket is inherently real-time (sub-150ms latency)
-                    #      regardless of mode.  The `mode` param only controls OUTPUT FORMAT:
-                    #        "transcribe"  → high-accuracy Malayalam text  ✅ (correct for sermons)
-                    #        "translate"   → Malayalam speech → English text
-                    #        "translit"    → Malayalam speech → Roman/Manglish script
-                    #        "codemix"     → code-switched audio (e.g. Malayalam+English mixed)
-                    #      There is NO "realtime" or "realtime_accurate" mode value in V3's core API;
-                    #      those strings only appear in third-party wrappers (Bolna, Pipecat, etc.).
-                    mode="translit" if MALAYALAM_TRANSLITERATION else "transcribe",
-                    # [Q3] language_code="ml-IN" — V3 natively supports all 22 scheduled Indian
-                    #      languages including Malayalam.  Accuracy on Malayalam (including
-                    #      Malayalam-English code-mix) is significantly improved over V2:
-                    #      V2 required explicit language hints; V3 was trained end-to-end on
-                    #      native Indian language data.  No code change needed; "ml-IN" is optimal.
-                    language_code=SARVAM_LANGUAGE, sample_rate=RATE,
-                    # [Q2] high_vad_sensitivity=True is the correct choice for sermon audio.
-                    #      Sarvam V3 docs recommend True for responsive speech detection; the
-                    #      tradeoff is that ~0.5s of silence marks a segment boundary (vs ~1s when
-                    #      False).  For a preacher who pauses between sentences this is fine:
-                    #      0.5s is shorter than a natural breath pause, so sentences are segmented
-                    #      cleanly without early cut-off.  Setting False would only help if the
-                    #      audio has persistent background noise that triggers false endpoints.
-                    high_vad_sensitivity=True, vad_signals=False,
-                    input_audio_codec="pcm_s16le",
-                ) as ws:
-                    logger.info(
-                        f"Sarvam AI connected — {SARVAM_LANGUAGE} saaras:v3 "
-                        f"({'translit/Manglish' if MALAYALAM_TRANSLITERATION else 'transcribe/Malayalam'})"
-                    )
-                    global _sarvam_ignore_until
-                    _sarvam_ignore_until = time.time() + 3.0
-                    logger.info("⏳ Ignoring post-reconnect audio (3s cooldown)")
-
-                    partial_context = [""]
-
-                    async def send_audio():
-                        try:
-                            while not stop_event.is_set():  # type: ignore
-                                pcm_data = await loop.run_in_executor(None, read_chunk_blocking)  # type: ignore
-                                try:
-                                    await ws.transcribe(audio=base64.b64encode(pcm_data).decode("utf-8"))  # type: ignore
-                                except Exception as _send_exc:
-                                    logger.warning(
-                                        f"⚠️ {_tag} send error ({type(_send_exc).__name__}) — "
-                                        f"stopping sender; reconnect attempted by outer loop"
-                                    )
-                                    break   # exit sender; reconnect loop handles recovery
-                        except asyncio.CancelledError:
-                            pass
-                        except Exception as e:
-                            logger.error(f"Sarvam send error: {e}")
-
-                    async def keepalive():
-                        try:
-                            while not stop_event.is_set():  # type: ignore
-                                # Wait up to 25 s for stop — this makes the task
-                                # respond instantly to cancellation and to stop_event,
-                                # unlike asyncio.sleep() whose internal Future can be
-                                # left pending when the event loop tears down.
-                                try:
-                                    await asyncio.wait_for(
-                                        stop_event.wait(),  # type: ignore
-                                        timeout=25,
-                                    )
-                                    break  # stop_event fired — exit cleanly
-                                except asyncio.TimeoutError:
-                                    pass  # 25 s elapsed; fall through to send keepalive
-                                if stop_event.is_set():  # type: ignore
-                                    break
-                                silence = b'\x00' * CHUNK * 2
-                                await ws.transcribe(audio=base64.b64encode(silence).decode("utf-8"))  # type: ignore
-                        except asyncio.CancelledError:
-                            pass   # explicit cancel from shutdown — exit cleanly
-                        except Exception:
-                            pass
-
-                    async def recv_transcripts():
-                        global full_sermon_transcript, full_sermon_transcript_secondary, _last_transcript_time
-                        try:
-                            async for message in ws:
-                                try:
-                                    if isinstance(message, dict):
-                                        sentence = message.get("transcript", message.get("text", ""))
-                                    else:
-                                        # Bug 7: Sarvam Python SDK returns SpeechToTextStreamingResponse objects.
-                                        # The transcript may be in message.data.transcript or message.transcript.
-                                        sentence = (
-                                            getattr(message.data, "transcript", "")
-                                            if hasattr(message, "data")
-                                            else getattr(message, "transcript",
-                                                         getattr(message, "text", ""))
-                                        )
-                                    
-                                    sentence = str(sentence).strip()
-                                    if not sentence or sentence == "None":
-                                        continue
-
-                                    # Bug Fix 4: discard garbage audio from reconnect boundary
-                                    if time.time() < _sarvam_ignore_until:
-                                        continue
-
-                                    # Issue B: degenerate token-loop guard for SEC-ML stream.
-                                    # Sarvam sometimes enters a hallucination loop ("I I I…",
-                                    # "go to go to…") which precedes websocket collapse.
-                                    # Drop the chunk early and throttle for a few seconds so
-                                    # the model can recover without forcing a full shutdown.
-                                    if _drop_if_degenerate(sentence, _tag):
-                                        continue
-
-                                    if MALAYALAM_TRANSLITERATION:
-                                        # ── Translit mode: Sarvam outputs Roman/Manglish directly.
-                                        # The text is Latin-script but the WORDS are still Malayalam
-                                        # (e.g. "Yohannaan muunnu padhinaaru" = "John 3:16").
-                                        # We must still translate to English so that:
-                                        #   • check_verse_queue can track verse progression correctly
-                                        #   • _detect_from_translation can catch colon-notation refs
-                                        # We parse the original Manglish blob too (catches any English
-                                        # book names the preacher said aloud in English).
-                                        manglish_text = sentence
-                                        english_text  = translate_to_english(manglish_text)
-                                        display_text  = manglish_text
-                                        logger.info(f"📝 {_tag} [Manglish] {display_text}")
-                                        if english_text and english_text != manglish_text:
-                                            logger.info(f"🔤 {_tag} [Manglish→EN] {english_text}")
-                                        check_verse_queue(english_text, controller)
-                                        full_sermon_transcript += " " + english_text.strip()
-                                        if is_secondary:
-                                            full_sermon_transcript_secondary += " " + english_text.strip()
-                                        _last_transcript_time = time.time()
-                                        # Parse original Manglish — catches English book names spoken directly
-                                        _process_transcript_blob(manglish_text, partial_context, controller, parser=_parser)
-                                        # Also run translation-path detection on the English translation
-                                        _detect_from_translation(english_text, controller)
-                                    else:
-                                        # ── Transcribe mode: native Malayalam script (original behaviour).
-                                        malayalam_text = sentence
-                                        english_text = translate_to_english(sentence)
-                                        display_text = malayalam_text if show_malayalam_raw else english_text
-                                        
-                                        logger.info(f"📝 {_tag} {display_text}")
-                                        if show_malayalam_raw and english_text != malayalam_text:
-                                            logger.info(f"🔤 {_tag} {english_text}")
-
-                                        check_verse_queue(english_text, controller)
-                                        full_sermon_transcript += " " + english_text.strip()
-                                        if is_secondary:
-                                            full_sermon_transcript_secondary += " " + english_text.strip()
-                                        _last_transcript_time = time.time()
-                                        # Bug Fix 3A: Parse the original transcript (which preserves
-                                        # English book names the preacher actually said) rather than
-                                        # Sarvam's English translation, which can hallucinate names
-                                        # like "John the Baptist" from Malayalam context words.
-                                        _process_transcript_blob(malayalam_text, partial_context, controller, parser=_parser)
-                                        # Bug 1 Fix: Also detect colon-notation references that only
-                                        # appear in the auto-translation (e.g. "Matthew 3:5", "John 12:27").
-                                        # _detect_from_translation uses parse_eng and requires a colon
-                                        # so false positives from hallucinated names are minimal.
-                                        _detect_from_translation(english_text, controller)
-                                        
-                                except Exception as e:
-                                    logger.error(f"Sarvam message processing error {_tag}: {e}")
-                        except asyncio.CancelledError:
-                            pass
-                        except Exception as e:
-                            if not stop_event.is_set():
-                                logger.warning(f"Sarvam session ended {_tag}, reconnecting: {e}")
-
-                    sender   = asyncio.create_task(send_audio())
-                    pinger   = asyncio.create_task(keepalive())
-                    receiver = asyncio.create_task(recv_transcripts())
-                    await asyncio.wait(
-                        [asyncio.ensure_future(stop_event.wait()), receiver],  # type: ignore
-                        return_when=asyncio.FIRST_COMPLETED,
-                    )
-                    sender.cancel()
-                    pinger.cancel()
-                    receiver.cancel()
-                    await asyncio.gather(sender, pinger, receiver, return_exceptions=True)
-                    if stop_event.is_set():
-                        break
-                    logger.info("🔄 Sarvam session ended. Reconnecting in 2s...")
-                    await asyncio.sleep(2)
-            except Exception as e:
-                if stop_event.is_set():
-                    break
-                logger.error(f"Sarvam error: {e} — retrying in 5s...")
-                await asyncio.sleep(5)
-    finally:
-        import time as _pa_t
-        _chunk_secs = CHUNK / max(RATE, 1)
-        _pa_t.sleep(_chunk_secs + 0.05)   # let in-flight executor read() return
-        if stream:
-            try:
-                if sys.platform == "darwin":
-                    stream.abort_stream()   # immediate — no drain wait
-                else:
-                    stream.stop_stream()
-            except Exception:
-                pass
-            _pa_t.sleep(0.05)
-            try:
-                stream.close()
-            except Exception:
-                pass
-        _pa_t.sleep(0.1)
-        try:
-            audio.terminate()
-        except Exception:
-            pass
-
-
-# ── ASSEMBLYAI UNIVERSAL-3 PRO STREAMING ─────────────────────────────────────
-async def stream_audio_assemblyai(controller, is_secondary: bool = False):
-    """Stream audio to AssemblyAI and feed transcripts through the detection pipeline.
-
-    When is_secondary=True, uses the secondary language/parser globals so it can
-    run in parallel with a primary stream (Dual STT mode).
-    """
-    global full_sermon_transcript, full_sermon_transcript_secondary, _last_transcript_time
-
-    import pyaudio
-
-    # ── Resolve which language + parser to use for this stream ────────────────
-    if is_secondary:
-        _lang   = SECONDARY_LANGUAGE or "en"
-        _parser = SECONDARY_PARSER
-    else:
-        _lang   = AAI_LANGUAGE
-        _parser = None   # _process_transcript_blob uses PRIMARY_PARSER internally
-
-    audio  = pyaudio.PyAudio()
-    stream = None
-
-    try:
-        mic_info = audio.get_device_info_by_index(MIC_INDEX)
-        logger.info(f"Using: [{MIC_INDEX}] {mic_info['name']}")
-        if "stereo mix" in mic_info["name"].lower():
-            logger.warning(
-                "⚠️ Stereo Mix selected — ALL desktop audio will be captured. "
-                "Non-church audio may trigger false detections."
-            )
-        stream = audio.open(
-            format=pyaudio.paInt16, channels=1, rate=RATE,
-            input=True, input_device_index=MIC_INDEX,
-            frames_per_buffer=CHUNK,
-        )
-        logger.info("Microphone opened")
-    except Exception as e:
-        logger.error(f"Microphone error: {e}")
-        return
-
-    # ── Import AssemblyAI SDK (lazy — not everyone installs it) ──────────────
-    try:
-        import assemblyai as aai
-        from assemblyai.streaming.v3 import (
-            StreamingClient,
-            StreamingClientOptions,
-            StreamingParameters,
-            StreamingEvents,
-            TurnEvent,
-            BeginEvent,
-        )
-    except ImportError as _aai_err:
-        logger.error(
-            f"❌ AssemblyAI SDK not installed or version too old. Run: pip install -U assemblyai  (detail: {_aai_err})"
-        )
-        return
-
-    loop          = asyncio.get_event_loop()
-    partial_context = [""]
-
-    # threading.Event mirror of stop_event so the blocking audio generator can
-    # exit cleanly without polling the asyncio Event from a non-async thread.
-    _stop_mirror  = threading.Event()
-
-    # asyncio.Queue bridges transcript strings from the SDK callback thread to
-    # the async consumer loop below.
-    _transcript_queue: asyncio.Queue = asyncio.Queue()
-
-    # ── Reconnect loop — mirrors Sarvam's pattern ─────────────────────────────
-    while not stop_event.is_set():
-
-        # Reset stop mirror for this attempt
-        _stop_mirror.clear()
-
-        # ── Audio generator (runs inside the executor thread) ─────────────────
-        def _audio_generator():
-            """Yield raw PCM chunks from the mic until stop is requested."""
-            while not _stop_mirror.is_set() and not stop_event.is_set():
-                try:
-                    yield stream.read(CHUNK, exception_on_overflow=False)
-                except Exception:
-                    break
-
-        # ── Event callbacks (called from SDK thread) ──────────────────────────
-        def _on_turn(client: StreamingClient, event: TurnEvent):
-            """Fired by the SDK on every word addition AND at end of turn.
-            We only want the final formatted sentence — ignore partials."""
-            if not event.end_of_turn:
-                return
-            sentence = (event.transcript or "").strip()
-            if not sentence:
-                return
-            # Bridge to the asyncio event loop safely
-            loop.call_soon_threadsafe(_transcript_queue.put_nowait, sentence)
-
-        def _on_error(client: StreamingClient, error: Exception):
-            logger.error(f"⚠️ AssemblyAI streaming error: {error}")
-            # Signal the audio generator to stop; outer loop will reconnect
-            _stop_mirror.set()
-
-        def _on_session_information(client: StreamingClient, info: BeginEvent):
-            logger.info(f"🎤 AssemblyAI session: {info.id}")
-
-        # ── Speech model selection based on language ──────────────────────────
-        # u3-rt-pro is English-only; multilingual model handles hi / ml / multi.
-        if _lang in ("hi", "ml", "multi"):
-            _aai_model   = "universal-streaming-multilingual"
-            _lang_detect = _lang == "multi"   # auto-detect for multi mode
-        else:
-            _aai_model   = "u3-rt-pro"
-            _lang_detect = False
-
-        params = StreamingParameters(
-            sample_rate=RATE,
-            speech_model=_aai_model,
-            format_turns=True,
-            language_detection=_lang_detect or None,
-            min_turn_silence=300,   # 300 ms of silence commits the turn naturally
-        )
-        client_opts = StreamingClientOptions(
-            api_key=ASSEMBLYAI_API_KEY,
-            base_url="wss://streaming.assemblyai.com/v3/ws",
-        )
-        client = StreamingClient(client_opts)
-        client.on(StreamingEvents.Turn,               _on_turn)
-        client.on(StreamingEvents.Error,              _on_error)
-        client.on(StreamingEvents.Begin,               _on_session_information)
-
-        _model_label = {
-            "u3-rt-pro":                      "Universal-3 Pro (English)",
-            "universal-streaming-multilingual":"Universal-3 Multilingual",
-        }.get(_aai_model, _aai_model)
-        _stream_tag = "AAI-SEC" if is_secondary else "AAI"
-        logger.info(f"🎤 [{_stream_tag}] Connecting — {_model_label} / lang={_lang}...")
-
-        # ── Run blocking SDK call in executor ─────────────────────────────────
-        def _run_client():
-            try:
-                client.connect(params)
-                client.stream(_audio_generator())
-            except Exception as exc:
-                if not stop_event.is_set():
-                    logger.error(f"AssemblyAI client error: {exc}")
-            finally:
-                _stop_mirror.set()   # unblock generator if still running
-
-        executor_future = loop.run_in_executor(None, _run_client)
-
-        # ── Periodic force_endpoint task ──────────────────────────────────────
-        # AAI's universal-3 model only fires end_of_turn when the speaker
-        # pauses naturally.  For continuous speech (long sentences, preachers
-        # who don't breathe), we kick force_endpoint() every N seconds so
-        # the turn is always committed within AAI_TURN_CUTOFF_SEC.
-        async def _force_endpoint_loop():
-            """Every AAI_TURN_CUTOFF_SEC seconds, force the current turn to close."""
-            try:
-                while not stop_event.is_set() and not _stop_mirror.is_set():
-                    await asyncio.sleep(AAI_TURN_CUTOFF_SEC)
-                    if stop_event.is_set() or _stop_mirror.is_set():
-                        break
-                    try:
-                        await loop.run_in_executor(None, client.force_endpoint)
-                    except Exception:
-                        pass  # ignore if session already closed
-            except asyncio.CancelledError:
-                pass
-
-        _force_task = asyncio.ensure_future(_force_endpoint_loop())
-
-        # ── Async consumer: drain the transcript queue ────────────────────────
-        try:
-            while not stop_event.is_set():
-                try:
-                    # Use a short timeout so we notice stop_event promptly
-                    sentence = await asyncio.wait_for(
-                        _transcript_queue.get(), timeout=0.5
-                    )
-                except asyncio.TimeoutError:
-                    # No transcript yet; check if the executor finished (error/disconnect)
-                    if  executor_future.done():
-                        break
-                    continue
-
-                if not sentence:
-                    continue
-
-                _stream_tag = "AAI-SEC" if is_secondary else "AAI"
-                logger.info(f"📝 [{_stream_tag}] {sentence}")
-                _last_transcript_time = time.time()
-
-                if is_secondary:
-                    full_sermon_transcript_secondary += " " + sentence.strip()
-                    _process_transcript_blob(
-                        sentence, partial_context, controller,
-                        is_secondary=True
-                    )
-                else:
-                    full_sermon_transcript += " " + sentence.strip()
-                    _process_transcript_blob(sentence, partial_context, controller)
-
-        finally:
-            # Cancel the periodic force_endpoint task first
-            _force_task.cancel()
-            try:
-                await asyncio.wait_for(asyncio.shield(_force_task), timeout=1.0)
-            except Exception:
-                pass
-            # Stop audio generator first so stream() returns quickly
-            _stop_mirror.set()
-            # disconnect(terminate=True) sends a TerminateSession message which
-            # causes the server to close the WebSocket, unblocking the SDK's
-            # internal read/write threads so join() returns cleanly.
-            # Run in executor because join() can take up to ~1s even when clean.
-            async def _safe_disconnect():
-                try:
-                    await loop.run_in_executor(
-                        None, lambda: client.disconnect(terminate=True)
-                    )
-                except Exception:
-                    pass
-            try:
-                await asyncio.wait_for(_safe_disconnect(), timeout=4.0)
-            except Exception:
-                pass
-            try:
-                await asyncio.wait_for(executor_future, timeout=3.0)
-            except Exception:
-                pass
-
-        if stop_event.is_set():
-            break
-
-        _stream_tag = "AAI-SEC" if is_secondary else "AAI"
-        logger.info(f"🔄 [{_stream_tag}] Session ended. Reconnecting in 2s...")
-        await asyncio.sleep(2)
-
-    # ── Microphone teardown — identical to stream_audio() ────────────────────
-    import time as _pa_t
-    _chunk_secs = CHUNK / max(RATE, 1)
-    _pa_t.sleep(_chunk_secs + 0.05)
-    if stream:
-        try:
-            if sys.platform == "darwin":
-                stream.abort_stream()
-            else:
-                stream.stop_stream()
-        except Exception:
-            pass
-        _pa_t.sleep(0.05)
-        try:
-            stream.close()
-        except Exception:
-            pass
-    _pa_t.sleep(0.1)
-    try:
-        audio.terminate()
-    except Exception:
-        pass
-
 
 # ── SILENCE WATCHDOG (Feature 6) ──────────────────────────────────────────────
 async def _silence_watchdog():
@@ -5806,6 +5088,244 @@ async def _silence_watchdog():
             _shutdown_flag.set()  # BUG 2: Signal all background threads to exit before teardown
             stop_event.set()
             return
+
+
+# ── STT LAUNCH HELPERS ────────────────────────────────────────────────────────
+
+def create_transcript_handler(controller, is_secondary: bool, tag: str, parser):
+    """Return a callback with the on_transcript(sentence, is_final, metadata) signature.
+
+    Partials are fed to check_verse_queue only (no pipeline, no log).
+    Finals go through the degenerate-chunk guard → full transcript pipeline.
+    """
+    partial_context = [""]
+
+    def handle_transcript(sentence: str, is_final: bool, metadata: dict = None):
+        global full_sermon_transcript, full_sermon_transcript_secondary, _last_transcript_time
+
+        if not sentence or not sentence.strip():
+            return
+
+        # Partial transcripts: feed verse-queue hints only.
+        check_verse_queue(sentence, controller)
+
+        if not is_final:
+            return
+
+        # Finals: degenerate-chunk guard, then full detection pipeline.
+        if _drop_if_degenerate(sentence, tag):
+            return
+
+        logger.info(f"📝 {tag} {sentence}")
+        if is_secondary:
+            full_sermon_transcript_secondary += " " + sentence.strip()
+        else:
+            full_sermon_transcript += " " + sentence.strip()
+
+        _last_transcript_time = time.time()
+        _process_transcript_blob(sentence, partial_context, controller, parser=parser)
+
+    return handle_transcript
+
+
+def create_sarvam_transcript_handler(controller, is_secondary: bool, tag: str, parser):
+    """Return a Sarvam-specific on_transcript callback.
+
+    The SarvamProvider emits raw Malayalam or Manglish text.  This handler:
+      • translates raw → English via translate_to_english()
+      • logs in a mode-aware format (Manglish / Malayalam / translated)
+      • feeds check_verse_queue on the English translation
+      • appends English to full_sermon_transcript
+      • runs _process_transcript_blob on the RAW text (preserves English book
+        names the preacher spoke; avoids hallucinated names in the translation)
+      • runs _detect_from_translation on the English translation for
+        colon-notation references that only surface after translation
+    """
+    partial_context = [""]
+
+    def handle_transcript(sentence: str, is_final: bool, metadata: dict = None):
+        global full_sermon_transcript, full_sermon_transcript_secondary, _last_transcript_time
+
+        if not sentence or not sentence.strip():
+            return
+
+        mode            = (metadata or {}).get("mode", "transcribe")
+        transliteration = (mode == "translit")
+
+        # Translate raw Malayalam/Manglish → English for verse detection.
+        english_text = translate_to_english(sentence)
+
+        if transliteration:
+            logger.info(f"📝 {tag} [Manglish] {sentence}")
+            if english_text and english_text != sentence:
+                logger.info(f"🔤 {tag} [Manglish→EN] {english_text}")
+        else:
+            display = sentence if show_malayalam_raw else english_text
+            logger.info(f"📝 {tag} {display}")
+            if show_malayalam_raw and english_text != sentence:
+                logger.info(f"🔤 {tag} {english_text}")
+
+        check_verse_queue(english_text, controller)
+
+        if not is_final:
+            return
+
+        if is_secondary:
+            full_sermon_transcript_secondary += " " + english_text.strip()
+        else:
+            full_sermon_transcript += " " + english_text.strip()
+
+        _last_transcript_time = time.time()
+
+        # Parse the raw transcript for references (English book names survive here).
+        _process_transcript_blob(sentence, partial_context, controller, parser=parser)
+
+        # Also run colon-notation detection on the English translation.
+        _detect_from_translation(english_text, controller)
+
+    return handle_transcript
+
+
+def launch_stt_task(controller, is_secondary: bool = False):
+    engine_name = _stream_engine(is_secondary)
+
+    try:
+        provider = build_stt_provider(engine_name, controller, is_secondary=is_secondary)
+    except ValueError as exc:
+        logger.error(f"❌ Cannot start {'secondary' if is_secondary else 'primary'} STT: {exc}")
+        async def _noop():
+            pass
+        return asyncio.create_task(_noop())
+
+    parser = _stream_parser(is_secondary)
+    tag    = _stt_tag(engine_name, is_secondary)
+
+    if engine_name == "sarvam":
+        handler = create_sarvam_transcript_handler(controller, is_secondary, tag, parser)
+    else:
+        handler = create_transcript_handler(controller, is_secondary, tag, parser)
+
+    logger.info(
+        f"🎤 Starting {'secondary' if is_secondary else 'primary'} STT via {engine_name}"
+    )
+    return asyncio.create_task(provider.stream_audio(MIC_INDEX, stop_event, handler))
+
+
+def _stt_tag(engine: str, is_secondary: bool = False) -> str:
+    prefix = "SEC" if is_secondary else "PRI"
+    code = {
+        "deepgram":      "DG",
+        "assemblyai":    "AAI",
+        "sarvam":        "ML",   # Malayalam — preserves [PRI-ML]/[SEC-ML] log format
+        "gladia":        "GL",
+        "gcp":           "GCP",
+        "local_whisper": "WH",
+    }.get((engine or "").lower(), (engine or "UNK").upper())
+    return f"[{prefix}-{code}]"
+
+
+def _stream_parser(is_secondary: bool = False):
+    return SECONDARY_PARSER if is_secondary else PRIMARY_PARSER
+
+
+def _stream_engine(is_secondary: bool = False) -> str:
+    # Sarvam is selected via USE_SARVAM / SECONDARY_USE_SARVAM flags (set when
+    # language == "ml") rather than STT_ENGINE, so normalise that here.
+    if SECONDARY_USE_SARVAM if is_secondary else USE_SARVAM:
+        return "sarvam"
+    return (SECONDARY_STT_ENGINE if is_secondary else STT_ENGINE or "deepgram").lower().strip()
+
+
+def _gcp_language_code(lang: str) -> str:
+    """Map a short session language code to the full BCP-47 code GCP STT requires.
+
+    GCP's RecognitionConfig rejects bare codes like "en" or "hi"; it needs
+    region-qualified codes like "en-US" or "hi-IN".  Unknown codes are passed
+    through unchanged so non-Latin script codes (e.g. "cmn-Hans-CN") work too.
+    """
+    _MAP = {
+        "en":    "en-US",
+        "hi":    "hi-IN",
+        "ml":    "ml-IN",
+        "ta":    "ta-IN",
+        "te":    "te-IN",
+        "kn":    "kn-IN",
+        "mr":    "mr-IN",
+        "multi": "en-US",   # GCP has no single universal auto-detect mode
+    }
+    lang = (lang or "en").lower().strip()
+    return _MAP.get(lang, lang)
+
+
+def build_stt_provider(engine_name: str, controller, is_secondary: bool = False):
+    engine_name = (engine_name or "deepgram").lower().strip()
+    tag = _stt_tag(engine_name, is_secondary)
+
+    if engine_name == "deepgram":
+        return DeepgramProvider({
+            "api_key":  DEEPGRAM_API_KEY,
+            "language": SECONDARY_DEEPGRAM_LANGUAGE if is_secondary else DEEPGRAM_LANGUAGE,
+            "model":    SECONDARY_DEEPGRAM_MODEL    if is_secondary else DEEPGRAM_MODEL,
+            "rate":     RATE,
+            "chunk":    CHUNK,
+            "tag":      tag,
+        })
+
+    if engine_name == "assemblyai":
+        return AssemblyAIProvider({
+            "api_key":     ASSEMBLYAI_API_KEY,
+            "language":    (SECONDARY_LANGUAGE or "en") if is_secondary else AAI_LANGUAGE,
+            "turn_cutoff": AAI_TURN_CUTOFF_SEC,
+            "rate":        RATE,
+            "chunk":       CHUNK,
+            "tag":         tag,
+        })
+
+    if engine_name == "sarvam":
+        return SarvamProvider({
+            "api_key":        SARVAM_API_KEY,
+            "language_code":  SARVAM_LANGUAGE,
+            "transliteration": MALAYALAM_TRANSLITERATION,
+            "rate":           RATE,
+            "chunk":          CHUNK,
+            "tag":            tag,
+            # Pass the degenerate-chunk guard so the provider can filter
+            # hallucination garbage before making a translation API call.
+            "drop_fn":        _drop_if_degenerate,
+        })
+
+    if engine_name == "gladia":
+        return GladiaProvider({
+            "api_key":  GLADIA_API_KEY,
+            "language": SECONDARY_DEEPGRAM_LANGUAGE if is_secondary else DEEPGRAM_LANGUAGE,
+            "rate":     RATE,
+            "chunk":    CHUNK,
+            "tag":      tag,
+        })
+
+    if engine_name == "gcp":
+        _lang = SECONDARY_LANGUAGE if is_secondary else DEEPGRAM_LANGUAGE
+        return GoogleCloudProvider({
+            "credentials_path": GCP_CREDENTIALS_PATH,
+            "language_code":    _gcp_language_code(_lang or "en"),
+            "rate":             RATE,
+            "chunk":            CHUNK,
+            "tag":              tag,
+        })
+
+    if engine_name == "local_whisper":
+        return LocalWhisperProvider({
+            "endpoint": LOCAL_WHISPER_ENDPOINT,
+            "language": SECONDARY_DEEPGRAM_LANGUAGE if is_secondary else DEEPGRAM_LANGUAGE,
+            "rate":     RATE,
+            "chunk":    CHUNK,
+            "tag":      tag,
+        })
+
+    logger.error(f"❌ Unsupported STT engine '{engine_name}' — no provider built. "
+                 "Check engine setting in Advanced Settings.")
+    raise ValueError(f"Unsupported STT engine: {engine_name}")
+
 
 
 # ── MAIN ──────────────────────────────────────────────────────────────────────
@@ -5875,36 +5395,35 @@ async def main():
     elif STT_ENGINE == "assemblyai":
         _engine_label = (
             "AssemblyAI Universal-3 Multilingual"
-            if AAI_LANGUAGE == "multi"
+            if AAI_LANGUAGE in ("hi", "ml", "multi")
             else "AssemblyAI Universal-3 Pro"
         )
+    elif STT_ENGINE == "gladia":
+        _engine_label = "Gladia (placeholder)"
+    elif STT_ENGINE == "gcp":
+        _engine_label = "Google Cloud STT (placeholder)"
+    elif STT_ENGINE == "local_whisper":
+        _engine_label = "Local Whisper (placeholder)"
     else:
         _engine_label = "Deepgram"
     logger.info(f"   Engine: {_engine_label}")
     logger.info("=" * 60)
+
 
     try:
         points_task   = asyncio.create_task(live_points_loop())
         watchdog_task = asyncio.create_task(_silence_watchdog())
 
         # ── Primary stream task ───────────────────────────────────────────────
-        if USE_SARVAM:
-            primary_task = asyncio.create_task(stream_audio_sarvam(_controller, is_secondary=False))
-        elif STT_ENGINE == "assemblyai":
-            primary_task = asyncio.create_task(stream_audio_assemblyai(_controller))
-        else:
-            primary_task = asyncio.create_task(stream_audio(_controller, is_secondary=False))
+        primary_task = launch_stt_task(_controller, is_secondary=False)
 
         # ── Optional secondary stream task ────────────────────────────────────
         secondary_task = None
         if DUAL_STT_ENABLED and SECONDARY_LANGUAGE:
-            if SECONDARY_USE_SARVAM:
-                secondary_task = asyncio.create_task(stream_audio_sarvam(_controller, is_secondary=True))
-            elif SECONDARY_STT_ENGINE == "assemblyai":
-                secondary_task = asyncio.create_task(stream_audio_assemblyai(_controller, is_secondary=True))
-            else:
-                secondary_task = asyncio.create_task(stream_audio(_controller, is_secondary=True))
-            logger.info(f"🌐 Secondary STT stream started (lang={SECONDARY_LANGUAGE}, engine={SECONDARY_STT_ENGINE})")
+            secondary_task = launch_stt_task(_controller, is_secondary=True)
+            logger.info(
+                f"🌐 Secondary STT stream started (lang={SECONDARY_LANGUAGE}, engine={SECONDARY_STT_ENGINE})"
+            )
 
         # Wait for stop signal, then cancel all stream tasks
         await stop_event.wait()

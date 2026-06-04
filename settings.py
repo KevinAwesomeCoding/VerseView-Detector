@@ -14,14 +14,19 @@ DEFAULTS = {
     "mistral_api_key":            "",
     "sarvam_api_key":             "",
     "assemblyai_api_key":         "",
+    "gladia_api_key":             "",
+    "gcp_credentials_path":       "",
+    "local_whisper_endpoint":     "http://127.0.0.1:8080",
     "discord_webhook_url":        "",
     "discord_log_webhook_url":    "",
     "discord_notes_webhook_url":  "",
     # ── STT Engine ──
     "stt_engine":                 "deepgram",
+    "aai_turn_cutoff":            5,
     # ── Dual STT ──
     "dual_stt_enabled":           False,
     "secondary_language":         None,
+    "secondary_stt_engine":       "deepgram",
     # ── Language / Input ──
     "language":                   "English",
     "mic_index":                  0,
