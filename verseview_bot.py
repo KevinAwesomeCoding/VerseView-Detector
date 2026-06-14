@@ -23,6 +23,39 @@ try:
 except ImportError:
     _updater = None
 
+
+def _get_python_executable() -> str:
+    """
+    Return a real Python interpreter path for spawning child scripts.
+
+    When running as a PyInstaller frozen bundle, sys.executable points to the
+    app bundle itself (the .app on macOS / the .exe on Windows) — NOT a Python
+    interpreter. Spawning [sys.executable, script] from a frozen build therefore
+    re-launches the whole app instead of the intended script. This locates a real
+    interpreter to spawn instead. From source, sys.executable is already correct.
+    """
+    if getattr(sys, "frozen", False):
+        meipass = getattr(sys, "_MEIPASS", "")
+        candidates = [
+            os.path.join(meipass, "python"),
+            os.path.join(meipass, "python3"),
+            "/usr/bin/python3",
+            "/usr/local/bin/python3",
+            "/opt/homebrew/bin/python3",
+        ]
+        for c in candidates:
+            if c and os.path.isfile(c) and os.access(c, os.X_OK):
+                return c
+        # Last resort: resolve a real interpreter from PATH.
+        import shutil
+        for name in ("python3", "python"):
+            found = shutil.which(name)
+            if found:
+                return found
+        return "python3"
+    return sys.executable
+
+
 APP_VERSION = "1.2.0"
 
 def _read_build_version() -> str:
@@ -676,7 +709,7 @@ class VerseViewApp(ctk.CTk):
 
         try:
             self._bot_process = subprocess.Popen(
-                [_sys.executable, bot_script],
+                [_get_python_executable(), bot_script],
                 env=env,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,

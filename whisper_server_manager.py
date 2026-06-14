@@ -8,6 +8,40 @@ import requests
 
 logger = logging.getLogger("VerseViewSTT")
 
+
+def _get_python_executable() -> str:
+    """
+    Return a real Python interpreter path for spawning child processes.
+
+    When running as a PyInstaller frozen bundle, sys.executable points to the
+    app bundle itself (the .app on macOS / the .exe on Windows) — NOT a Python
+    interpreter. Spawning [sys.executable, ...] from a frozen build therefore
+    re-launches the whole app instead of running the intended module. This
+    locates a real interpreter to spawn instead. From source, sys.executable is
+    already correct.
+    """
+    if getattr(sys, "frozen", False):
+        meipass = getattr(sys, "_MEIPASS", "")
+        candidates = [
+            os.path.join(meipass, "python"),
+            os.path.join(meipass, "python3"),
+            "/usr/bin/python3",
+            "/usr/local/bin/python3",
+            "/opt/homebrew/bin/python3",
+        ]
+        for c in candidates:
+            if c and os.path.isfile(c) and os.access(c, os.X_OK):
+                return c
+        # Last resort: resolve a real interpreter from PATH.
+        import shutil
+        for name in ("python3", "python"):
+            found = shutil.which(name)
+            if found:
+                return found
+        return "python3"
+    return sys.executable
+
+
 WHISPER_PORT = 8000   # faster-whisper-server default
 WHISPER_ENDPOINT_BASE = f"http://127.0.0.1:{WHISPER_PORT}"
 WHISPER_HEALTH_URL = f"{WHISPER_ENDPOINT_BASE}/health"
@@ -58,7 +92,7 @@ def _install_faster_whisper():
     logger.info("📦 Installing faster-whisper-server (first time setup)...")
     try:
         subprocess.check_call(
-            [sys.executable, "-m", "pip", "install", "-q", 
+            [_get_python_executable(), "-m", "pip", "install", "-q",
              "faster-whisper", "uvicorn", "fastapi", "python-multipart"],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -97,7 +131,7 @@ def _start_server(model: str) -> bool:
     logger.info(f"🚀 Starting local Whisper server (model={model}) on port {WHISPER_PORT}...")
     
     cmd = [
-        sys.executable, "-m", "faster_whisper_server",
+        _get_python_executable(), "-m", "faster_whisper_server",
         model,               # e.g. "base.en" or "base"
     ]
     
