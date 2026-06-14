@@ -9,6 +9,10 @@ permissions:
   contents: write
 
 env:
+  # Transitional flag from the Node 20 -> 24 actions migration. The pinned
+  # actions below (@v4/@v5) run on their declared Node runtime and are Node 24
+  # compatible, so this is forward-compatible and harmless. Safe to drop once
+  # every action natively targets Node 24.
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
@@ -28,7 +32,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install pyaudio
-          pip install pyinstaller customtkinter selenium webdriver-manager certifi requests websockets charset-normalizer sarvamai pynput deepgram-sdk PyATEMMax zeroconf discord.py aiohttp assemblyai>=0.41.0
+          pip install pyinstaller customtkinter selenium webdriver-manager certifi requests websockets charset-normalizer sarvamai pynput deepgram-sdk PyATEMMax zeroconf discord.py aiohttp "assemblyai>=0.41.0"
 
       - name: Verify tkinter
         run: python -c "import tkinter; print('tkinter OK')"
@@ -65,8 +69,13 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pyaudio
-          pip install pyinstaller customtkinter selenium webdriver-manager certifi requests websockets charset-normalizer sarvamai pynput deepgram-sdk PyATEMMax zeroconf discord.py aiohttp assemblyai>=0.41.0
+          # PyAudio builds from source on macOS and must find Homebrew's PortAudio.
+          # `brew --prefix` resolves to /usr/local on Intel and /opt/homebrew on
+          # Apple Silicon, so this is correct on both runners.
+          export LDFLAGS="-L$(brew --prefix portaudio)/lib"
+          export CFLAGS="-I$(brew --prefix portaudio)/include"
+          pip install --no-cache-dir pyaudio
+          pip install pyinstaller customtkinter selenium webdriver-manager certifi requests websockets charset-normalizer sarvamai pynput deepgram-sdk PyATEMMax zeroconf discord.py aiohttp "assemblyai>=0.41.0"
 
       - name: Write version
         run: echo "build-${GITHUB_SHA::7}-${{ github.run_number }}" > version.txt
@@ -108,8 +117,12 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pyaudio
-          pip install pyinstaller customtkinter selenium webdriver-manager certifi requests websockets charset-normalizer sarvamai pynput deepgram-sdk PyATEMMax zeroconf discord.py aiohttp assemblyai>=0.41.0
+          # On Apple Silicon, Homebrew lives under /opt/homebrew (not /usr/local),
+          # so PyAudio's source build needs these flags to locate PortAudio.
+          export LDFLAGS="-L$(brew --prefix portaudio)/lib"
+          export CFLAGS="-I$(brew --prefix portaudio)/include"
+          pip install --no-cache-dir pyaudio
+          pip install pyinstaller customtkinter selenium webdriver-manager certifi requests websockets charset-normalizer sarvamai pynput deepgram-sdk PyATEMMax zeroconf discord.py aiohttp "assemblyai>=0.41.0"
 
       - name: Write version
         run: echo "build-${GITHUB_SHA::7}-${{ github.run_number }}" > version.txt
@@ -180,10 +193,25 @@ jobs:
             **Standard Downloads:**
             - `VerseView_Detector.exe` → Windows
             - `VerseView-Detector-Mac-Intel.zip` → Older Macs (Intel chips) — *Includes the .app AND the raw UNIX executable folder.*
-            - `VerseView-Detector-Mac-Silicon-App.zip` → Newer Macs (M1/M2/M3 chips)
+            - `VerseView-Detector-Mac-Silicon-App.zip` → Newer Macs (M1/M2/M3/M4 chips)
 
             **Crash/Debug Versions (Only use if the app crashes!):**
             - `VerseView-Detector-Mac-Silicon-CrashDebug.zip`
+
+            ---
+            ### 🍎 Mac: "app is damaged" / "can't be opened" on first launch
+            These builds are ad-hoc signed but **not notarized**, so macOS Gatekeeper
+            quarantines them after download. To open:
+
+            1. Unzip the app.
+            2. In Terminal, clear the quarantine flag (replace the path with where you put it):
+               ```
+               xattr -cr "/Applications/VerseView Detector.app"
+               ```
+            3. Double-click to launch (or right-click → **Open** the first time).
+
+            On first run, allow **Microphone** access when prompted (or enable it later
+            under System Settings → Privacy & Security → Microphone).
           files: |
             ./artifacts/VerseView-Detector-Windows/VerseView_Detector.exe
             ./artifacts/VerseView-Detector-Mac-Intel/VerseView-Detector-Mac-Intel.zip
@@ -191,4 +219,3 @@ jobs:
             ./artifacts/VerseView-Detector-Mac-Silicon-CrashDebug/VerseView-Detector-Mac-Silicon-CrashDebug.zip
           draft: false
           prerelease: false
-

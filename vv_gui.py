@@ -2142,7 +2142,8 @@ class VerseViewApp(ctk.CTk):
             loop.run_until_complete(engine.main())
         except Exception as e:
             self._append_log(f"ENGINE ERROR: {e}")
-            self.after(0, lambda: mb.showerror("Engine Error", str(e)))
+            err_msg = str(e)
+            self.after(0, lambda msg=err_msg: mb.showerror("Engine Error", msg))
         finally:
             loop.close()
             self.after(0, self._on_stopped)

@@ -1,7 +1,7 @@
 import sys
 import os
 import glob
-from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs
+from PyInstaller.utils.hooks import collect_data_files
 
 block_cipher = None
 
@@ -19,17 +19,24 @@ datas += [
     ('version.txt', '.'),
     ('verseview_bot.py', '.'),
     ('vv_discord_bot.py', '.'),
+    ('whisper_server_manager.py', '.'),
 ]
 
+# Bundle the STT provider package source. PyInstaller already compiles these into
+# the archive via the import graph, but shipping the source keeps the package
+# present on disk (parity with the other hot-swappable modules above).
+for _prov in glob.glob(os.path.join('stt_providers', '*.py')):
+    datas.append((_prov, 'stt_providers'))
 
 if sys.platform == 'win32':
-    # Explicitly bundle tkinter DLLs — PyInstaller misses them on some Windows setups
-    import glob, sysconfig
-    _stdlib = sysconfig.get_path('stdlib')
-    _dlls   = os.path.join(os.path.dirname(sys.executable), 'DLLs')
+    # Safety net for tkinter on Windows. PyInstaller's tkinter hook already
+    # collects these for CPython 3.11, but this covers edge setups where the
+    # DLLs / Tcl scripts live outside the default search path.
+    import sysconfig
+    _dlls = os.path.join(os.path.dirname(sys.executable), 'DLLs')
     for _pat, _dest in [
-        (os.path.join(_dlls, 'tcl*.dll'),     '.'),
-        (os.path.join(_dlls, 'tk*.dll'),      '.'),
+        (os.path.join(_dlls, 'tcl*.dll'),      '.'),
+        (os.path.join(_dlls, 'tk*.dll'),       '.'),
         (os.path.join(_dlls, '_tkinter*.pyd'), '.'),
         (os.path.join(sys.exec_prefix, 'tcl', 'tcl8*', '*.tcl'), 'tcl'),
         (os.path.join(sys.exec_prefix, 'tcl', 'tk8*',  '*.tcl'), 'tk'),
@@ -37,11 +44,15 @@ if sys.platform == 'win32':
         for _f in glob.glob(_pat):
             datas.append((_f, _dest))
 
-if sys.platform == 'darwin':
-    tcl_lib = '/usr/local/opt/tcl-tk/lib/tcl8.6'
-    tk_lib = '/usr/local/opt/tcl-tk/lib/tk8.6'
-    if os.path.exists(tcl_lib):
-        datas += [(tcl_lib, 'tcl'), (tk_lib, 'tk')]
+# NOTE (macOS): Tcl/Tk is bundled automatically by PyInstaller's tkinter hook for
+# the python.org / actions-setup-python interpreter used in CI, and its runtime
+# hook wires TCL_LIBRARY / TK_LIBRARY to the bundled copy. We deliberately do NOT
+# copy Homebrew's Tcl/Tk: the old hardcoded /usr/local/opt/tcl-tk path does not
+# exist on Apple Silicon (arm64 Homebrew lives under /opt/homebrew) and is absent
+# on both CI runners regardless, so the manual copy was always a no-op. We also do
+# NOT override TCL_LIBRARY / TK_LIBRARY via LSEnvironment any more — the previous
+# override pointed at an empty Resources/tcl folder and broke Tcl initialisation,
+# causing the app to crash on launch on Apple Silicon.
 
 a = Analysis(
     ['vv_gui.py'],
@@ -54,19 +65,46 @@ a = Analysis(
         'tkinter.ttk',
         'tkinter.messagebox',
         '_tkinter',
-        
-        'pyaudio', 
-        'websockets.legacy.client', 
+
+        'pyaudio',
+
+        # websockets — the Deepgram and Gladia providers stream over raw
+        # websockets (no vendor SDK), so bundle every client backend so the
+        # build works across websockets major versions (legacy vs asyncio).
+        'websockets',
+        'websockets.client',
+        'websockets.legacy.client',
+        'websockets.asyncio.client',
+
         'selenium',
-	    'selenium.webdriver',
-	    'selenium.webdriver.chrome.options', 
-	    'selenium.webdriver.chrome.webdriver',
-	    'selenium.webdriver.chrome.service',
+        'selenium.webdriver',
+        'selenium.webdriver.chrome.options',
+        'selenium.webdriver.chrome.webdriver',
+        'selenium.webdriver.chrome.service',
+
         'pynput.keyboard._darwin',
         'pynput.keyboard._win32',
+
         'webdriver_manager',
+
+        # STT vendor SDKs that ARE imported directly.
         'sarvamai',
-        'keyboard',
+        'assemblyai',
+        'assemblyai.streaming.v3',
+
+        # STT provider package + every submodule. The factory selects providers
+        # by class reference, so list them explicitly to guarantee bundling.
+        'stt_providers',
+        'stt_providers.base',
+        'stt_providers.utils',
+        'stt_providers.deepgram_provider',
+        'stt_providers.assemblyai_provider',
+        'stt_providers.sarvam_provider',
+        'stt_providers.gladia_provider',
+        'stt_providers.google_cloud_provider',
+        'stt_providers.local_whisper_provider',
+        'whisper_server_manager',
+
         'PyATEMMax',
         'zeroconf',
         'zeroconf._utils',
@@ -91,16 +129,24 @@ exe = EXE(
     a.binaries,
     a.zipfiles,
     a.datas,
-    name='VerseView_Detector', 
+    name='VerseView_Detector',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
+    # UPX is OFF everywhere: it corrupts several Windows DLLs (vcruntime, _tkinter,
+    # some extension modules) and, on macOS, mangles Mach-O binaries so they fail
+    # code-signature validation — fatal on Apple Silicon, where unsigned/invalid
+    # arm64 code is killed by the kernel ("crashes on launch"). UPX is also not
+    # installed on the GitHub runners, so disabling it costs nothing.
+    upx=False,
     upx_exclude=[],
     runtime_tmpdir=None,
-    console=False, 
+    console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
+    # Host architecture. Each runner builds its own native slice
+    # (arm64 on macos-latest, x86_64 on macos-15-intel, x86_64 on windows-latest).
+    # Do NOT pin to a single arch here — one spec serves all three runners.
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
@@ -113,7 +159,7 @@ if sys.platform == 'darwin':
         a.zipfiles,
         a.datas,
         strip=False,
-        upx=True,
+        upx=False,
         upx_exclude=[],
         name='VerseView Detector',
     )
@@ -124,11 +170,15 @@ if sys.platform == 'darwin':
         icon=None,
         bundle_identifier='com.verseview.detector',
         info_plist={
-            'NSMicrophoneUsageDescription': 'Needs mic for transcription',
-            'LSEnvironment': {
-                'TCL_LIBRARY': '@executable_path/../Resources/tcl',
-                'TK_LIBRARY': '@executable_path/../Resources/tk',
-            },
-            'LSBackgroundOnly': 'False',
+            # Required so macOS shows the mic-permission prompt (TCC). Without a
+            # usage description the app is killed the moment it touches the mic.
+            'NSMicrophoneUsageDescription':
+                'VerseView needs microphone access to transcribe live audio.',
+            # Real booleans (not the string 'False'): a <string>False</string>
+            # value is non-empty and can be read as truthy, which would hide the
+            # window / dock icon and look like a failed launch.
+            'LSBackgroundOnly': False,
+            'NSHighResolutionCapable': True,
+            'LSMinimumSystemVersion': '10.15',
         },
     )

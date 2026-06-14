@@ -915,7 +915,6 @@ _REP_MIN_PHRASE_LOOP : int   = 4    # "go to go to go to go to" → drop
 _REP_DROP_WINDOW_SEC : float = 3.0  # throttle window after a drop (per stream tag)
 _rep_drop_until      : dict  = {}   # tag → timestamp; chunks silenced until then
 
-_sarvam_ignore_until = 0.0
 _blocked_context_hashes = {}
 _BLOCKED_DEDUP_SECS = 30.0
 _MAX_VERSE_NUMBER = 200
@@ -1574,15 +1573,17 @@ def configure(
                 resp = _req.post(
                     "https://api.cerebras.ai/v1/chat/completions",
                     headers={"Authorization": f"Bearer {CEREBRAS_API_KEY}", "Content-Type": "application/json"},
-                    json={"model": "llama3.1-8b", "messages": [{"role": "user", "content": "ping"}], "max_tokens": 1},
+                    json={"model": "gpt-oss-120b", "messages": [{"role": "user", "content": "ping"}], "max_completion_tokens": 1},
                     timeout=15, verify=_cert.where(),
                 )
                 if resp.status_code == 200:
                     logger.info("✅ Cerebras startup ping OK — gpt-oss-120b responsive")
+                elif resp.status_code == 401:
+                    logger.error("❌ Cerebras startup ping FAILED: invalid or missing API key (401)")
                 elif resp.status_code == 404:
-                    logger.error("❌ Cerebras startup ping FAILED: model 'gpt-oss-120b' not found (404)")
+                    logger.error(f"❌ Cerebras startup ping FAILED 404 — response: {resp.text[:200]}")
                 else:
-                    logger.warning(f"⚠️ Cerebras startup ping returned status {resp.status_code}")
+                    logger.warning(f"⚠️ Cerebras startup ping returned status {resp.status_code}: {resp.text[:200]}")
             except Exception as e:
                 logger.error(f"❌ Cerebras startup validation error: {e}")
         threading.Thread(target=_validate_cerebras, daemon=True).start()
@@ -1662,7 +1663,7 @@ def configure(
         normalize_numbers_only = norm_hindi
         AAI_LANGUAGE           = "hi"
     elif language == "ml":
-        USE_SARVAM             = True
+        USE_SARVAM             = (stt_engine == "sarvam")
         SARVAM_LANGUAGE        = "ml-IN"
         # Must use parse_ml here — parse_eng strips all non-ASCII chars and
         # therefore destroys every Malayalam character before matching. parse_ml
@@ -5314,9 +5315,11 @@ def build_stt_provider(engine_name: str, controller, is_secondary: bool = False)
         })
 
     if engine_name == "local_whisper":
+        from whisper_server_manager import ensure_whisper_server
+        lang = SECONDARY_DEEPGRAM_LANGUAGE if is_secondary else DEEPGRAM_LANGUAGE
+        endpoint = ensure_whisper_server(language=lang)
         return LocalWhisperProvider({
-            "endpoint": LOCAL_WHISPER_ENDPOINT,
-            "language": SECONDARY_DEEPGRAM_LANGUAGE if is_secondary else DEEPGRAM_LANGUAGE,
+            "endpoint": endpoint,
             "rate":     RATE,
             "chunk":    CHUNK,
             "tag":      tag,
@@ -5399,7 +5402,7 @@ async def main():
             else "AssemblyAI Universal-3 Pro"
         )
     elif STT_ENGINE == "gladia":
-        _engine_label = "Gladia (placeholder)"
+        _engine_label = "Gladia"
     elif STT_ENGINE == "gcp":
         _engine_label = "Google Cloud STT (placeholder)"
     elif STT_ENGINE == "local_whisper":
@@ -5445,6 +5448,12 @@ async def main():
             except Exception:
                 pass
         _active_bg_threads.clear()
+
+        try:
+            from whisper_server_manager import stop_whisper_server
+            stop_whisper_server()
+        except Exception:
+            pass
 
         try:
             points_task.cancel()
