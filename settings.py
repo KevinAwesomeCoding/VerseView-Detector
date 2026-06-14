@@ -13,6 +13,7 @@ DEFAULTS = {
     "cerebras_api_key":           "",
     "mistral_api_key":            "",
     "sarvam_api_key":             "",
+    "sarvam_api_key_backup":      "",
     "assemblyai_api_key":         "",
     "gladia_api_key":             "",
     "gcp_credentials_path":       "",

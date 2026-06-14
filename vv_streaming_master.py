@@ -558,6 +558,8 @@ DISCORD_WEBHOOK_URL         = ""
 DISCORD_LOG_WEBHOOK_URL     = ""
 DISCORD_NOTES_WEBHOOK_URL   = ""
 SARVAM_API_KEY        = ""
+SARVAM_API_KEY_BACKUP = ""        # backup/personal key — used after primary hits a quota error
+_sarvam_using_backup  = False     # per-session flag: True once we fall back to the backup key
 ASSEMBLYAI_API_KEY    = ""
 GLADIA_API_KEY        = ""
 GCP_CREDENTIALS_PATH  = ""
@@ -1453,7 +1455,7 @@ def configure(
     dedup_window=60, cooldown=3.0, llm_enabled=True,
     bible_translation="kjv", deepgram_api_key="",
     groq_api_key="", gemini_api_key="", cerebras_api_key="",
-    mistral_api_key="", sarvam_api_key="",
+    mistral_api_key="", sarvam_api_key="", sarvam_api_key_backup="",
     gladia_api_key="", gcp_credentials_path="", local_whisper_endpoint="",
     discord_webhook_url="", discord_log_webhook_url="", discord_notes_webhook_url="",
     confidence=0.75, manual_confirm=True,
@@ -1471,6 +1473,7 @@ def configure(
     malayalam_transliteration=False,
 ):
     global DEEPGRAM_API_KEY, GROQ_API_KEY, GEMINI_API_KEY, CEREBRAS_API_KEY, MISTRAL_API_KEY, SARVAM_API_KEY
+    global SARVAM_API_KEY_BACKUP, _sarvam_using_backup
     global GLADIA_API_KEY, GCP_CREDENTIALS_PATH, LOCAL_WHISPER_ENDPOINT
     global DISCORD_WEBHOOK_URL, DISCORD_LOG_WEBHOOK_URL, DISCORD_NOTES_WEBHOOK_URL
     global USE_SARVAM, DEEPGRAM_LANGUAGE, DEEPGRAM_MODEL, SARVAM_LANGUAGE
@@ -1541,6 +1544,10 @@ def configure(
     CEREBRAS_API_KEY = cerebras_api_key
     MISTRAL_API_KEY  = mistral_api_key
     SARVAM_API_KEY   = sarvam_api_key
+    SARVAM_API_KEY_BACKUP = sarvam_api_key_backup
+    # Fresh session: always try the primary Sarvam key first. The provider flips
+    # this to True (via _mark_sarvam_backup_active) only after a quota error.
+    _sarvam_using_backup = False
     GLADIA_API_KEY   = gladia_api_key
     GCP_CREDENTIALS_PATH = gcp_credentials_path
     LOCAL_WHISPER_ENDPOINT = local_whisper_endpoint
@@ -5258,6 +5265,14 @@ def _gcp_language_code(lang: str) -> str:
     return _MAP.get(lang, lang)
 
 
+def _mark_sarvam_backup_active():
+    """Called by SarvamProvider once it falls back from the primary to the backup
+    key, so the rest of the app can see which key is live this session."""
+    global _sarvam_using_backup
+    _sarvam_using_backup = True
+    logger.info("🔁 Sarvam is now using the backup key for the rest of this session.")
+
+
 def build_stt_provider(engine_name: str, controller, is_secondary: bool = False):
     engine_name = (engine_name or "deepgram").lower().strip()
     tag = _stt_tag(engine_name, is_secondary)
@@ -5285,6 +5300,11 @@ def build_stt_provider(engine_name: str, controller, is_secondary: bool = False)
     if engine_name == "sarvam":
         return SarvamProvider({
             "api_key":        SARVAM_API_KEY,
+            # Backup/personal key — the provider switches to it (once per session)
+            # if the primary key hits a credit/quota error, then notifies us via
+            # on_key_switch so _sarvam_using_backup reflects the live key.
+            "api_key_backup": SARVAM_API_KEY_BACKUP,
+            "on_key_switch":  _mark_sarvam_backup_active,
             "language_code":  SARVAM_LANGUAGE,
             "transliteration": MALAYALAM_TRANSLITERATION,
             "rate":           RATE,
