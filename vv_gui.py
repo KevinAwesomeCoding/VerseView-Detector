@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import customtkinter as ctk  # type: ignore
 import tkinter.messagebox as mb
+import tkinter.filedialog as fd
 import threading
 import asyncio
 import logging
@@ -1195,8 +1196,36 @@ class VerseViewApp(ctk.CTk):
             e.grid(row=n+2+j, column=1, padx=10, pady=4, sticky="ew")
             setattr(self, attr, e)
 
+        # ── Managed Google Cloud credentials ──
+        # The path field above accepts a raw path (backward compatible), but the
+        # recommended flow is this button: it copies the chosen service-account
+        # JSON into the app's per-user managed store, which survives auto-updates
+        # and can travel to other machines via Export Settings.
+        gcp_row = n + 2 + len(key_fields)
+        ctk.CTkLabel(
+            self.adv_frame, text="─── Google Cloud Credentials ───", anchor="w",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            text_color=("gray30", "gray70")
+        ).grid(row=gcp_row, column=0, columnspan=2, padx=10, pady=(14, 2), sticky="ew")
+
+        self.btn_gcp_import = ctk.CTkButton(
+            self.adv_frame, text="📁  Import Service-Account JSON…", height=28,
+            fg_color="#1a5a8a", hover_color="#144a72",
+            command=self._import_gcp_credentials
+        )
+        self.btn_gcp_import.grid(row=gcp_row + 1, column=0, columnspan=2,
+                                 padx=10, pady=(0, 2), sticky="ew")
+
+        self.gcp_cred_status_lbl = ctk.CTkLabel(
+            self.adv_frame, text="", anchor="w",
+            font=ctk.CTkFont(size=11),
+            text_color=("gray35", "gray65")
+        )
+        self.gcp_cred_status_lbl.grid(row=gcp_row + 2, column=0, columnspan=2,
+                                      padx=10, pady=(0, 4), sticky="ew")
+
         # ── Settings Sync ──
-        sync_row = n + 2 + len(key_fields) + 1
+        sync_row = gcp_row + 4
         ctk.CTkLabel(
             self.adv_frame, text="─── Settings Sync ───", anchor="w",
             font=ctk.CTkFont(size=12, weight="bold"),
@@ -1463,6 +1492,8 @@ class VerseViewApp(ctk.CTk):
         self.sync_url_entry.delete(0, "end")
         self.sync_url_entry.insert(0, s.get("settings_sync_url", ""))
 
+        self._update_gcp_cred_status()
+
 
     def _collect_settings(self) -> dict:
         return {
@@ -1578,6 +1609,17 @@ class VerseViewApp(ctk.CTk):
                     merged[k] = remote[k]
                     updated.append(k)
 
+            # If the synced file carried a portable GCP credential (base64
+            # payload, or a URL as a secondary option), materialise it into the
+            # managed store and point the path at the local managed copy. The raw
+            # secret is handled by settings.py and is never merged into (or
+            # persisted in) the local settings dict.
+            if remote.get(cfg.GCP_CREDENTIALS_PAYLOAD_KEY) or remote.get(cfg.GCP_CREDENTIALS_URL_KEY):
+                _managed = cfg.materialize_gcp_from_transport(remote)
+                if _managed and merged.get("gcp_credentials_path") != _managed:
+                    merged["gcp_credentials_path"] = _managed
+                    updated.append("gcp_credentials_path")
+
             if updated:
                 cfg.save(merged)
                 self._s = merged
@@ -1608,21 +1650,109 @@ class VerseViewApp(ctk.CTk):
 
     def _export_settings(self):
         data = self._collect_settings()
-        if cfg.export_settings(data):
-            self._append_log("📤 Settings exported successfully.")
+        include_gcp = False
+        if cfg.has_managed_gcp_credentials():
+            include_gcp = mb.askyesno(
+                "Include GCP Credentials?",
+                "Include your Google Cloud service-account credentials in this "
+                "export so GCP works on another computer?\n\n"
+                "⚠️ If you choose Yes, the exported file will contain a SECRET key "
+                "(base64-encoded, NOT encrypted). Share it only through a private "
+                "channel and never commit it anywhere public.\n\n"
+                "Choose No to export settings without credentials.",
+            )
+        if cfg.export_settings(data, include_gcp_credentials=include_gcp):
+            if include_gcp:
+                self._append_log("📤 Settings exported (with portable GCP credentials).")
+            else:
+                self._append_log("📤 Settings exported successfully.")
         else:
             self._append_log("⚠️ Export cancelled.")
 
 
     def _import_settings(self):
+        # cfg.import_settings() materialises any portable GCP credential payload
+        # into the managed store and strips the secret before returning.
         data = cfg.import_settings()
         if data:
             self._s = data
             cfg.save(data)
             self._load_into_ui()
-            self._append_log("📥 Settings imported successfully.")
+            if cfg.has_managed_gcp_credentials():
+                self._append_log(
+                    "📥 Settings imported (GCP credentials materialised into managed store)."
+                )
+            else:
+                self._append_log("📥 Settings imported successfully.")
         else:
             self._append_log("⚠️ Import cancelled.")
+
+
+    def _import_gcp_credentials(self):
+        """Pick a Google service-account JSON and copy it into the managed store."""
+        path = fd.askopenfilename(
+            title="Select Google Cloud service-account JSON",
+            filetypes=[("JSON key file", "*.json"), ("All files", "*.*")],
+        )
+        if not path:
+            return
+        try:
+            managed = cfg.import_gcp_credentials_file(path)
+        except ValueError as exc:
+            mb.showerror("Invalid Credential", str(exc))
+            self._append_log(f"⚠️ GCP credential import failed: {exc}")
+            return
+        # Point the path field at the managed copy and persist it.
+        self.gcp_path_entry.delete(0, "end")
+        self.gcp_path_entry.insert(0, managed)
+        self._s = self._collect_settings()
+        cfg.save(self._s)
+        self._update_gcp_cred_status()
+        self._append_log("🔐 GCP service-account credential imported into the managed store.")
+        mb.showinfo(
+            "Credential Imported",
+            "Google Cloud credentials were copied into VerseView's managed store.\n\n"
+            "• They survive app updates (stored outside the app).\n"
+            "• To use them on another computer, Export Settings and choose "
+            "“Include GCP credentials”.",
+        )
+
+
+    def _update_gcp_cred_status(self):
+        """Reflect GCP credential state — missing / present (managed) / invalid /
+        raw path — in the status label."""
+        if not hasattr(self, "gcp_cred_status_lbl"):
+            return
+        managed = cfg.get_managed_gcp_credentials_path()
+        if os.path.isfile(managed):
+            if cfg.validate_service_account_file(managed):
+                self.gcp_cred_status_lbl.configure(
+                    text="✅ Present via managed store (survives updates; portable via export).",
+                    text_color=("#1f7a1f", "#5fbf5f"),
+                )
+            else:
+                self.gcp_cred_status_lbl.configure(
+                    text="❌ Managed credential is invalid — re-import a service-account JSON.",
+                    text_color=("#b53b3b", "#e05a5a"),
+                )
+            return
+        raw = self.gcp_path_entry.get().strip() if hasattr(self, "gcp_path_entry") else ""
+        if raw and os.path.isfile(raw):
+            if cfg.validate_service_account_file(raw):
+                self.gcp_cred_status_lbl.configure(
+                    text="ℹ️ Using a raw credential path (not managed — won’t travel with settings).",
+                    text_color=("gray35", "gray65"),
+                )
+            else:
+                self.gcp_cred_status_lbl.configure(
+                    text="❌ Credential file at the given path is invalid.",
+                    text_color=("#b53b3b", "#e05a5a"),
+                )
+        else:
+            self.gcp_cred_status_lbl.configure(
+                text="⚠️ Missing — no Google Cloud credential configured.",
+                text_color=("#9a6a00", "#d0a000"),
+            )
 
 
     # ─────────────────────────────────────────────────
@@ -2068,11 +2198,10 @@ class VerseViewApp(ctk.CTk):
                 if not s.get("assemblyai_api_key"):
                     missing.append("AssemblyAI API Key")
             if _engine == "gcp":
-                _gcp_path = s.get("gcp_credentials_path", "")
-                if not _gcp_path:
-                    missing.append("Google Cloud Credentials Path")
-                elif not os.path.isfile(_gcp_path):
-                    missing.append(f"Google Cloud credentials file not found: {_gcp_path}")
+                if not cfg.resolve_gcp_credentials_path(s):
+                    missing.append(
+                        "Google Cloud credentials (import a service-account JSON in Advanced Settings)"
+                    )
             if _engine == "local_whisper":
                 if not s.get("local_whisper_endpoint"):
                     missing.append("Local Whisper Endpoint URL")
@@ -2088,11 +2217,11 @@ class VerseViewApp(ctk.CTk):
                 if _sec_engine in ("assemblyai", "assemblyai_pro", "assemblyai_multilingual") and not s.get("assemblyai_api_key"):
                     missing.append("AssemblyAI API Key (required for secondary stream)")
                 if _sec_engine == "gcp":
-                    _gcp_path = s.get("gcp_credentials_path", "")
-                    if not _gcp_path:
-                        missing.append("Google Cloud Credentials Path (required for secondary stream)")
-                    elif not os.path.isfile(_gcp_path):
-                        missing.append(f"Google Cloud credentials file not found (secondary): {_gcp_path}")
+                    if not cfg.resolve_gcp_credentials_path(s):
+                        missing.append(
+                            "Google Cloud credentials (required for secondary stream — "
+                            "import a service-account JSON in Advanced Settings)"
+                        )
                 if _sec_engine == "local_whisper" and not s.get("local_whisper_endpoint"):
                     missing.append("Local Whisper Endpoint URL (required for secondary stream)")
 
@@ -2121,7 +2250,7 @@ class VerseViewApp(ctk.CTk):
                 sarvam_api_key            = s["sarvam_api_key"],
                 sarvam_api_key_backup     = s.get("sarvam_api_key_backup", ""),
                 gladia_api_key            = s.get("gladia_api_key", ""),
-                gcp_credentials_path      = s.get("gcp_credentials_path", ""),
+                gcp_credentials_path      = cfg.resolve_gcp_credentials_path(s),
                 local_whisper_endpoint    = s.get("local_whisper_endpoint", ""),
                 discord_webhook_url       = s["discord_webhook_url"],
                 discord_log_webhook_url   = s["discord_log_webhook_url"],
