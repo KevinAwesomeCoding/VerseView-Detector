@@ -1094,7 +1094,7 @@ class VerseViewApp(ctk.CTk):
         self.sec_engine_menu = ctk.CTkOptionMenu(
             sec_sub,
             variable=self.sec_engine_var,
-            values=["Deepgram", "AssemblyAI (Universal-3 Pro)", "AssemblyAI (Universal-3 Multilingual)"],
+            values=["Deepgram", "AssemblyAI (Universal-3 Pro)", "AssemblyAI (Universal-3 Multilingual)", "Google Cloud STT"],
             state="disabled",
         )
         self.sec_engine_menu.grid(row=1, column=1, sticky="ew", pady=2)
@@ -1103,13 +1103,13 @@ class VerseViewApp(ctk.CTk):
             """Swap secondary engine options when secondary language changes.
             AssemblyAI streaming only supports EN/ES/DE/FR/IT/PT."""
             if "Malayalam" in val:
-                new_opts = ["Sarvam AI"]
+                new_opts = ["Sarvam AI", "Google Cloud STT"]
             elif val == "Hindi":
-                new_opts = ["Deepgram"]
+                new_opts = ["Deepgram", "Google Cloud STT"]
             elif val == "Multi-Language":
-                new_opts = ["Deepgram", "AssemblyAI (Universal-3 Multilingual)"]
+                new_opts = ["Deepgram", "AssemblyAI (Universal-3 Multilingual)", "Google Cloud STT"]
             else:
-                new_opts = ["Deepgram", "AssemblyAI (Universal-3 Pro)", "AssemblyAI (Universal-3 Multilingual)"]
+                new_opts = ["Deepgram", "AssemblyAI (Universal-3 Pro)", "AssemblyAI (Universal-3 Multilingual)", "Google Cloud STT"]
             self.sec_engine_menu.configure(values=new_opts)
             self.sec_engine_var.set(new_opts[0])
             self._update_log_headers()
@@ -1328,13 +1328,13 @@ class VerseViewApp(ctk.CTk):
             self.sec_lang_var.set(_sec_label)
             # Sync secondary engine dropdown options — AAI not allowed for ml/hi
             if saved_sec_lang == "ml":
-                self.sec_engine_menu.configure(values=["Sarvam AI"])
+                self.sec_engine_menu.configure(values=["Sarvam AI", "Google Cloud STT"])
             elif saved_sec_lang == "hi":
-                self.sec_engine_menu.configure(values=["Deepgram"])
+                self.sec_engine_menu.configure(values=["Deepgram", "Google Cloud STT"])
             elif saved_sec_lang == "multi":
-                self.sec_engine_menu.configure(values=["Deepgram", "AssemblyAI (Universal-3 Multilingual)"])
+                self.sec_engine_menu.configure(values=["Deepgram", "AssemblyAI (Universal-3 Multilingual)", "Google Cloud STT"])
             else:
-                self.sec_engine_menu.configure(values=["Deepgram", "AssemblyAI (Universal-3 Pro)", "AssemblyAI (Universal-3 Multilingual)"])
+                self.sec_engine_menu.configure(values=["Deepgram", "AssemblyAI (Universal-3 Pro)", "AssemblyAI (Universal-3 Multilingual)", "Google Cloud STT"])
         saved_sec_engine = s.get("secondary_stt_engine", "deepgram")
         _sec_engine_label_map = {
             "assemblyai_pro":           "AssemblyAI (Universal-3 Pro)",

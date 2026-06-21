@@ -11,6 +11,10 @@ logger = logging.getLogger("VerseViewSTT")
 # 4 min 45 sec gives a 20-second safety margin.
 _SESSION_LIMIT_SECS = 285
 
+# GCP's RecognitionConfig accepts at most 3 alternative language codes
+# (4 languages total counting the primary language_code).
+_MAX_ALTERNATIVE_LANGUAGES = 3
+
 
 class GoogleCloudProvider(STTProvider):
     """Real-time Google Cloud Speech-to-Text streaming provider.
@@ -34,7 +38,8 @@ class GoogleCloudProvider(STTProvider):
               and fires on_transcript for every interim and final result.
           e.  asyncio.wait races stop_event, stop_session, and _recv.
           f.  Teardown: cancel timer + recv, set stop_session to unblock generator.
-          g.  Auth errors → break (fatal); quota errors → 30 s back-off; others → reconnect.
+          g.  Auth / invalid-config errors → break (fatal); quota errors → 30 s
+              back-off; others → reconnect.
     5.  Close gRPC transport.
     6.  teardown_microphone.
 
@@ -42,15 +47,28 @@ class GoogleCloudProvider(STTProvider):
     -----------------------------------------------------------------
     raw PCM16LE bytes — no base64, no framing.  gRPC handles framing.
 
+    Language modes
+    --------------
+    Single language → language_code only (e.g. "en-US", "hi-IN", "ml-IN").
+    Multi-language  → language_code (primary) + alternative_language_codes.
+                      GCP streaming has no universal auto-detect, so true
+                      multi-language is wired via the documented
+                      alternative_language_codes mechanism: GCP picks which of
+                      the supplied languages is being spoken per utterance and
+                      reports it back in result.language_code (surfaced in
+                      metadata["detected_language"]).
+
     Config keys
     -----------
-    credentials_path  – path to a GCP service account JSON key file (required)
-    language_code     – BCP-47 language code, e.g. "en-US" (default)
-    language          – alias for language_code if language_code is absent
-    rate              – PCM sample rate (default 16000)
-    chunk             – PyAudio frames_per_buffer (default 4096)
-    tag               – log-prefix string (default "[PRI-GCP]")
-    model             – GCP recognition model (default "latest_long")
+    credentials_path            – path to a GCP service account JSON key (required)
+    language_code               – primary BCP-47 language code, e.g. "en-US"
+    language                    – alias for language_code if language_code is absent
+    alternative_language_codes  – optional list of extra BCP-47 codes for
+                                  multi-language recognition (max 3)
+    rate                        – PCM sample rate (default 16000)
+    chunk                       – PyAudio frames_per_buffer (default 4096)
+    tag                         – log-prefix string (default "[PRI-GCP]")
+    model                       – GCP recognition model (default "latest_long")
     """
 
     async def stream_audio(
@@ -81,6 +99,22 @@ class GoogleCloudProvider(STTProvider):
         chunk = int(self.config.get("chunk") or 4096)
         tag   = (self.config.get("tag") or "[PRI-GCP]")
         model = (self.config.get("model") or "latest_long").strip()
+
+        # Multi-language alternatives — clean to a list of non-empty strings and
+        # drop any that duplicate the primary code, then clamp to GCP's max of 3.
+        raw_alts = self.config.get("alternative_language_codes") or []
+        alt_langs = [
+            c.strip()
+            for c in raw_alts
+            if isinstance(c, str) and c.strip() and c.strip() != language_code
+        ]
+        if len(alt_langs) > _MAX_ALTERNATIVE_LANGUAGES:
+            logger.warning(
+                f"⚠️ {tag} GCP accepts at most {_MAX_ALTERNATIVE_LANGUAGES} "
+                f"alternative language codes — using the first "
+                f"{_MAX_ALTERNATIVE_LANGUAGES} of {alt_langs}"
+            )
+            alt_langs = alt_langs[:_MAX_ALTERNATIVE_LANGUAGES]
 
         # ── Credentials ─────────────────────────────────────────────────────────
         if not credentials_path:
@@ -117,13 +151,18 @@ class GoogleCloudProvider(STTProvider):
         client = speech.SpeechAsyncClient(credentials=credentials)
 
         # Recognition config is identical for every session in this run.
-        recognition_config = speech.RecognitionConfig(
+        recognition_kwargs = dict(
             encoding=speech.RecognitionConfig.AudioEncoding.LINEAR16,
             sample_rate_hertz=rate,
             language_code=language_code,
             enable_automatic_punctuation=True,
             model=model,
         )
+        if alt_langs:
+            # Real multi-language recognition — GCP detects which of these
+            # languages is being spoken per utterance.
+            recognition_kwargs["alternative_language_codes"] = alt_langs
+        recognition_config = speech.RecognitionConfig(**recognition_kwargs)
         streaming_config = speech.StreamingRecognitionConfig(
             config=recognition_config,
             interim_results=True,
@@ -132,10 +171,22 @@ class GoogleCloudProvider(STTProvider):
         def _read_audio():
             return stream.read(chunk, exception_on_overflow=False)
 
-        logger.info(
-            f"🎤 {tag} Google Cloud STT initialised — "
-            f"language: {language_code} | model: {model}"
-        )
+        if alt_langs:
+            logger.info(
+                f"🎤 {tag} Google Cloud STT initialised — multi-language: "
+                f"{language_code} (primary) + alternatives {alt_langs} | "
+                f"model: {model}"
+            )
+            logger.info(
+                f"ℹ️ {tag} GCP multi-language detects the spoken language per "
+                f"utterance from the configured set; detection quality depends on "
+                f"GCP model support for alternative_language_codes."
+            )
+        else:
+            logger.info(
+                f"🎤 {tag} Google Cloud STT initialised — "
+                f"language: {language_code} | model: {model}"
+            )
 
         try:
             # ── Reconnect loop ──────────────────────────────────────────────────
@@ -196,12 +247,19 @@ class GoogleCloudProvider(STTProvider):
                                     if is_final
                                     else None
                                 )
+                                # In multi-language mode GCP reports the detected
+                                # language per result; fall back to the primary code.
+                                detected_language = (
+                                    getattr(result, "language_code", "")
+                                    or language_code
+                                )
                                 metadata = {
-                                    "engine":        "gcp",
-                                    "tag":           tag,
-                                    "confidence":    confidence,
-                                    "language_code": language_code,
-                                    "raw":           str(result),
+                                    "engine":            "gcp",
+                                    "tag":               tag,
+                                    "confidence":        confidence,
+                                    "language_code":     language_code,
+                                    "detected_language": detected_language,
+                                    "raw":               str(result),
                                 }
                                 if is_final:
                                     logger.info(f"📝 {tag} {sentence}")
@@ -252,6 +310,15 @@ class GoogleCloudProvider(STTProvider):
                             f"Check your service account key.  Detail: {exc}"
                         )
                         break   # auth failure — reconnecting will not help
+                    if "INVALID_ARGUMENT" in err_str:
+                        logger.error(
+                            f"❌ {tag} GCP rejected the recognition config "
+                            f"(INVALID_ARGUMENT). This usually means an unsupported "
+                            f"language_code / alternative-language / model "
+                            f"combination (e.g. model '{model}' not supporting "
+                            f"multi-language). Detail: {exc}"
+                        )
+                        break   # config error — reconnecting will not help
                     if "RESOURCE_EXHAUSTED" in err_str:
                         logger.warning(
                             f"⚠️ {tag} GCP quota exhausted — retrying in 30s..."

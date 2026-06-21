@@ -424,6 +424,11 @@ USE_SARVAM            = False
 show_malayalam_raw    = False
 MALAYALAM_TRANSLITERATION = False
 DEEPGRAM_LANGUAGE     = "en"
+# Canonical session language as a short code ("en" | "hi" | "ml" | "multi").
+# Engines that need the *actually selected* language (e.g. Google Cloud STT)
+# read this rather than DEEPGRAM_LANGUAGE, which is a Deepgram-specific proxy
+# that is intentionally not set in the Malayalam branch.
+PRIMARY_LANGUAGE      = "en"
 DEEPGRAM_MODEL        = "nova-3"
 SARVAM_LANGUAGE       = "ml-IN"
 PRIMARY_PARSER        = parse_eng
@@ -1476,7 +1481,7 @@ def configure(
     global SARVAM_API_KEY_BACKUP, _sarvam_using_backup
     global GLADIA_API_KEY, GCP_CREDENTIALS_PATH, LOCAL_WHISPER_ENDPOINT
     global DISCORD_WEBHOOK_URL, DISCORD_LOG_WEBHOOK_URL, DISCORD_NOTES_WEBHOOK_URL
-    global USE_SARVAM, DEEPGRAM_LANGUAGE, DEEPGRAM_MODEL, SARVAM_LANGUAGE
+    global USE_SARVAM, DEEPGRAM_LANGUAGE, DEEPGRAM_MODEL, SARVAM_LANGUAGE, PRIMARY_LANGUAGE
     global PRIMARY_PARSER, MIC_INDEX, RATE, CHUNK, REMOTE_URL
     global show_malayalam_raw, MALAYALAM_TRANSLITERATION
     global DEDUP_WINDOW, COOLDOWN, LLM_ENABLED, BIBLE_TRANSLATION, USE_XPATH
@@ -1656,6 +1661,7 @@ def configure(
 
     if language == "en":
         USE_SARVAM             = False
+        PRIMARY_LANGUAGE       = "en"
         DEEPGRAM_LANGUAGE      = "en"
         DEEPGRAM_MODEL         = "nova-3"
         PRIMARY_PARSER         = parse_eng
@@ -1664,6 +1670,7 @@ def configure(
         AAI_LANGUAGE           = "multi" if _primary_aai_multilingual else "en"
     elif language == "hi":
         USE_SARVAM             = False
+        PRIMARY_LANGUAGE       = "hi"
         DEEPGRAM_LANGUAGE      = "hi"
         DEEPGRAM_MODEL         = "nova-3"
         PRIMARY_PARSER         = parse_hindi
@@ -1671,6 +1678,7 @@ def configure(
         AAI_LANGUAGE           = "hi"
     elif language == "ml":
         USE_SARVAM             = (stt_engine == "sarvam")
+        PRIMARY_LANGUAGE       = "ml"
         SARVAM_LANGUAGE        = "ml-IN"
         # Must use parse_ml here — parse_eng strips all non-ASCII chars and
         # therefore destroys every Malayalam character before matching. parse_ml
@@ -1681,6 +1689,7 @@ def configure(
         AAI_LANGUAGE           = "ml"
     else:
         USE_SARVAM             = False
+        PRIMARY_LANGUAGE       = "multi"
         DEEPGRAM_LANGUAGE      = "multi"
         DEEPGRAM_MODEL         = "nova-3"
         PRIMARY_PARSER         = parse_eng
@@ -5265,6 +5274,33 @@ def _gcp_language_code(lang: str) -> str:
     return _MAP.get(lang, lang)
 
 
+def _gcp_language_config(lang: str) -> dict:
+    """Build the GCP language settings for a VerseView short language code.
+
+    Returns a dict with:
+        language_code               – primary BCP-47 code GCP recognises with
+        alternative_language_codes  – extra BCP-47 codes for multi-language mode
+                                      (empty list for single-language modes)
+
+    GCP streaming has no universal auto-detect language, so "Multi-Language"
+    mode is implemented with GCP's documented multi-language mechanism: one
+    primary language_code plus up to three alternative_language_codes.  We cover
+    the three languages VerseView supports (English, Hindi, Malayalam), so GCP
+    detects which of them is being spoken per utterance instead of being locked
+    to a single hardcoded language.
+    """
+    lang = (lang or "en").lower().strip()
+    if lang == "multi":
+        return {
+            "language_code": "en-US",
+            "alternative_language_codes": ["hi-IN", "ml-IN"],
+        }
+    return {
+        "language_code": _gcp_language_code(lang),
+        "alternative_language_codes": [],
+    }
+
+
 def _mark_sarvam_backup_active():
     """Called by SarvamProvider once it falls back from the primary to the backup
     key, so the rest of the app can see which key is live this session."""
@@ -5325,13 +5361,20 @@ def build_stt_provider(engine_name: str, controller, is_secondary: bool = False)
         })
 
     if engine_name == "gcp":
-        _lang = SECONDARY_LANGUAGE if is_secondary else DEEPGRAM_LANGUAGE
+        # Primary uses the canonical session language (PRIMARY_LANGUAGE); the
+        # secondary stream uses its own language.  Both are short codes
+        # ("en" | "hi" | "ml" | "multi") that _gcp_language_config maps to GCP
+        # BCP-47 codes — wiring real multi-language recognition (primary +
+        # alternative_language_codes) when the mode is "multi".
+        _lang = (SECONDARY_LANGUAGE if is_secondary else PRIMARY_LANGUAGE) or "en"
+        _gcfg = _gcp_language_config(_lang)
         return GoogleCloudProvider({
-            "credentials_path": GCP_CREDENTIALS_PATH,
-            "language_code":    _gcp_language_code(_lang or "en"),
-            "rate":             RATE,
-            "chunk":            CHUNK,
-            "tag":              tag,
+            "credentials_path":           GCP_CREDENTIALS_PATH,
+            "language_code":              _gcfg["language_code"],
+            "alternative_language_codes": _gcfg["alternative_language_codes"],
+            "rate":                       RATE,
+            "chunk":                      CHUNK,
+            "tag":                        tag,
         })
 
     if engine_name == "local_whisper":
@@ -5424,7 +5467,14 @@ async def main():
     elif STT_ENGINE == "gladia":
         _engine_label = "Gladia"
     elif STT_ENGINE == "gcp":
-        _engine_label = "Google Cloud STT (placeholder)"
+        _gcfg = _gcp_language_config(PRIMARY_LANGUAGE or "en")
+        if _gcfg["alternative_language_codes"]:
+            _engine_label = (
+                f"Google Cloud STT (multi-language: {_gcfg['language_code']} + "
+                f"{', '.join(_gcfg['alternative_language_codes'])})"
+            )
+        else:
+            _engine_label = f"Google Cloud STT ({_gcfg['language_code']})"
     elif STT_ENGINE == "local_whisper":
         _engine_label = "Local Whisper (placeholder)"
     else:
