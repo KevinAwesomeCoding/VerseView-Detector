@@ -3,6 +3,7 @@ pyaudio
 deepgram-sdk>=3.0.0
 assemblyai>=0.41.0
 sarvamai
+google-cloud-speech>=2.21.0
 websockets
 selenium
 webdriver-manager

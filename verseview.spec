@@ -1,7 +1,7 @@
 import sys
 import os
 import glob
-from PyInstaller.utils.hooks import collect_data_files
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules, copy_metadata
 
 block_cipher = None
 
@@ -27,6 +27,53 @@ datas += [
 # present on disk (parity with the other hot-swappable modules above).
 for _prov in glob.glob(os.path.join('stt_providers', '*.py')):
     datas.append((_prov, 'stt_providers'))
+
+# ── Google Cloud Speech-to-Text (optional STT engine) ───────────────────────
+# google-cloud-speech is a google.* namespace package built on gRPC + protobuf,
+# with runtime version lookups via importlib.metadata. PyInstaller needs more
+# than a bare hidden import to bundle it correctly:
+#   • collect_submodules → pull the full google.cloud.speech / api_core / auth /
+#                          protobuf / grpc / proto module trees (namespace
+#                          packages are not followed reliably by the import graph)
+#   • collect_data_files → grpc ships native libs + a bundled cacert.pem
+#   • copy_metadata      → google-api-core and the speech client read their dist
+#                          version via importlib.metadata at import time; a
+#                          missing dist-info raises PackageNotFoundError at runtime
+# Each step is wrapped defensively so a build environment WITHOUT the SDK still
+# succeeds — GCP simply won't be bundled in that particular build.
+_google_hiddenimports = []
+for _gpkg in (
+    'google.cloud.speech',
+    'google.api_core',
+    'google.auth',
+    'google.oauth2',
+    'google.protobuf',
+    'grpc',
+    'proto',
+):
+    try:
+        _google_hiddenimports += collect_submodules(_gpkg)
+    except Exception:
+        pass
+
+try:
+    datas += collect_data_files('grpc')
+except Exception:
+    pass
+
+for _gmeta in (
+    'google-cloud-speech',
+    'google-api-core',
+    'google-auth',
+    'grpcio',
+    'protobuf',
+    'proto-plus',
+    'googleapis-common-protos',
+):
+    try:
+        datas += copy_metadata(_gmeta)
+    except Exception:
+        pass
 
 if sys.platform == 'win32':
     # Safety net for tkinter on Windows. PyInstaller's tkinter hook already
@@ -111,7 +158,12 @@ a = Analysis(
         'zeroconf._dns',
         'discord',
         'aiohttp',
-    ],
+
+        # Google Cloud STT — base hooks; the full submodule list (computed above
+        # via collect_submodules) is appended to this list just below.
+        'google.cloud.speech',
+        'google.oauth2.service_account',
+    ] + _google_hiddenimports,
     hookspath=[],
     runtime_hooks=[],
     excludes=[],
