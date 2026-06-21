@@ -87,7 +87,23 @@ class GUILogHandler(logging.Handler):
 
 
     def emit(self, record):
-        self.callback(self.format(record))
+        # Decide pane routing from EXPLICIT metadata, never by parsing the
+        # visible "[PRI-…]/[SEC-…]" text:
+        #   • record.vv_transcript (set via extra=) marks a line as transcript
+        #     text — only these are eligible for a transcript pane.
+        #   • engine.STT_STREAM_ROLE (a contextvar) tells which stream produced
+        #     it.  emit() runs synchronously inside the same asyncio task — and
+        #     therefore the same context — that logged the record, so the role
+        #     is still accurate here.
+        # Status/startup/reconnect lines are NOT flagged vv_transcript, so they
+        # resolve to role=None and stay in the neutral (primary) log area.
+        stream_role = None
+        if getattr(record, "vv_transcript", False):
+            try:
+                stream_role = engine.STT_STREAM_ROLE.get()
+            except Exception:
+                stream_role = None
+        self.callback(self.format(record), stream_role)
 
 
 
@@ -1140,6 +1156,7 @@ class VerseViewApp(ctk.CTk):
             ("Dedup Window (s)",     "60",    "dedup_entry"),
             ("Silence Timeout (s)", "60",    "silence_entry"),
             ("AAI Turn Cutoff (s)",  "5",     "aai_cutoff_entry"),
+            ("GCP Interim Flush (s)", "4",    "gcp_flush_entry"),
         ]
         for i, (lbl, default, attr) in enumerate(fields):
             ctk.CTkLabel(self.adv_frame, text=lbl, anchor="w").grid(
@@ -1462,6 +1479,7 @@ class VerseViewApp(ctk.CTk):
         self.dedup_entry.delete(0, "end");    self.dedup_entry.insert(0,    str(s.get("dedup_window",     60)))
         self.silence_entry.delete(0, "end");  self.silence_entry.insert(0,  str(s.get("silence_timeout",  60)))
         self.aai_cutoff_entry.delete(0, "end"); self.aai_cutoff_entry.insert(0, str(s.get("aai_turn_cutoff", 5)))
+        self.gcp_flush_entry.delete(0, "end"); self.gcp_flush_entry.insert(0, str(s.get("gcp_interim_flush", 4)))
         self.llm_var.set("Enabled" if s.get("llm_enabled", True) else "Disabled")
 
         self.atem_var.set(s.get("atem_enabled", False))
@@ -1526,6 +1544,7 @@ class VerseViewApp(ctk.CTk):
             "dedup_window":               self._safe_int(self.dedup_entry,     60),
             "silence_timeout":            self._safe_int(self.silence_entry,   60),
             "aai_turn_cutoff":            self._safe_int(self.aai_cutoff_entry, 5),
+            "gcp_interim_flush":          self._safe_int(self.gcp_flush_entry, 4),
             "llm_enabled":                self.llm_var.get() == "Enabled",
             "deepgram_api_key":           self.dg_key_entry.get(),
             "groq_api_key":               self.or_key_entry.get(),
@@ -1873,19 +1892,22 @@ class VerseViewApp(ctk.CTk):
             self._log_divider.grid_remove()
             self._sec_log_box.grid_remove()
 
-    def _append_log(self, msg: str):
+    def _append_log(self, msg: str, stream_role: str = None):
+        # ── Route lines to the correct pane using EXPLICIT stream metadata ──
+        # `stream_role` is supplied by GUILogHandler and is only ever
+        # "secondary"/"primary" for actual transcript text; status, startup and
+        # reconnect lines arrive as None and stay in the neutral (primary) area:
+        #   "secondary" → secondary transcript pane (only when split view is up)
+        #   else        → primary / neutral pane
+        # The visible "[PRI-…]/[SEC-…]" debug tags are preserved in the text for
+        # readability but are NOT used to decide routing.
         def _do():
-            # ── Route secondary transcript lines to the secondary panel ──
-            # Tags emitted by the streaming engine:
-            #   Primary:   [PRI]  [PRI-ML]  [Manglish]  [AAI]
-            #   Secondary: [SEC]  [SEC-ML]  [AAI-SEC]
-            _is_secondary = (
-                "[SEC]" in msg or "[SEC-ML]" in msg or "[AAI-SEC]" in msg
+            sec_visible = (
+                stream_role == "secondary"
+                and hasattr(self, "_sec_log_box")
+                and self._sec_log_box.winfo_ismapped()
             )
-            if _is_secondary and hasattr(self, "_sec_log_box") and self._sec_log_box.winfo_ismapped():
-                target = self._sec_log_box
-            else:
-                target = self.log_box
+            target = self._sec_log_box if sec_visible else self.log_box
 
             at_bottom = target.yview()[1] >= 0.99
             target.configure(state="normal")
@@ -2282,6 +2304,7 @@ class VerseViewApp(ctk.CTk):
                 stt_engine                 = _engine,
                 assemblyai_api_key         = s.get("assemblyai_api_key", ""),
                 aai_turn_cutoff            = s.get("aai_turn_cutoff", 5),
+                gcp_interim_flush          = s.get("gcp_interim_flush", 4),
                 malayalam_transliteration  = s.get("malayalam_transliteration", False),
             )
 

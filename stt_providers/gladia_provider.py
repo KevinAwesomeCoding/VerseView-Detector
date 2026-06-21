@@ -193,7 +193,8 @@ class GladiaProvider(STTProvider):
                                         logger.debug(
                                             f"{'📝' if is_final else '…'} {tag} "
                                             f"[{'FINAL' if is_final else 'partial'}] "
-                                            f"{sentence}"
+                                            f"{sentence}",
+                                            extra={"vv_transcript": True},
                                         )
                                         on_transcript(sentence, is_final, metadata)
 

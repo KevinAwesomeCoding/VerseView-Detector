@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 import sys, os
+import contextvars
 
 IS_WINDOWS = sys.platform.startswith("win")
 
@@ -572,6 +573,7 @@ LOCAL_WHISPER_ENDPOINT = ""
 STT_ENGINE            = "deepgram"   # "deepgram" | "assemblyai"
 AAI_LANGUAGE          = "en"         # "en" | "hi" | "ml" | "multi"
 AAI_TURN_CUTOFF_SEC   = 5            # force_endpoint interval in seconds (3–11)
+GCP_INTERIM_FLUSH_SEC = 4            # GCP Malayalam soft-final flush interval (0 = off)
 
 CONFIDENCE_THRESHOLD   = 0.75
 REQUIRE_MANUAL_CONFIRM = True
@@ -1475,6 +1477,7 @@ def configure(
     dual_stt_enabled=False, secondary_language=None, secondary_stt_engine="deepgram",
     assemblyai_api_key="", stt_engine="deepgram",
     aai_turn_cutoff=5,
+    gcp_interim_flush=4,
     malayalam_transliteration=False,
 ):
     global DEEPGRAM_API_KEY, GROQ_API_KEY, GEMINI_API_KEY, CEREBRAS_API_KEY, MISTRAL_API_KEY, SARVAM_API_KEY
@@ -1503,7 +1506,7 @@ def configure(
     _force_stopped = False
     global SECONDARY_STT_ENGINE
     global full_sermon_transcript_secondary
-    global ASSEMBLYAI_API_KEY, STT_ENGINE, AAI_LANGUAGE, AAI_TURN_CUTOFF_SEC
+    global ASSEMBLYAI_API_KEY, STT_ENGINE, AAI_LANGUAGE, AAI_TURN_CUTOFF_SEC, GCP_INTERIM_FLUSH_SEC
     WORSHIP_MODE = False
     _exit_scripture_read_mode(reason="session-reset")
     if not _verse_history:          # only wipe on a true fresh launch
@@ -1565,6 +1568,8 @@ def configure(
     STT_ENGINE  = "assemblyai" if _raw_engine.startswith("assemblyai") else _raw_engine
     _primary_aai_multilingual = (_raw_engine == "assemblyai_multilingual")
     AAI_TURN_CUTOFF_SEC = max(3, min(11, int(aai_turn_cutoff or 5)))
+    # Clamp to a sane range; 0 disables interim flush (wait for natural finals).
+    GCP_INTERIM_FLUSH_SEC = max(0, min(30, int(gcp_interim_flush or 0)))
     MALAYALAM_TRANSLITERATION = malayalam_transliteration
 
     # ── Groq: verse extraction only ──
@@ -5109,6 +5114,27 @@ async def _silence_watchdog():
 
 # ── STT LAUNCH HELPERS ────────────────────────────────────────────────────────
 
+# Explicit per-stream routing metadata.  Each STT asyncio task sets this
+# contextvar once at startup ("primary" / "secondary").  Because asyncio tasks
+# inherit a private copy of the context, EVERY log record emitted while that task
+# runs — transcript text, status, startup, and reconnect messages from both the
+# handler and the underlying provider — carries the correct stream role without
+# any code having to parse the visible "[PRI-…]/[SEC-…]" debug tags.  The GUI log
+# handler reads this value to route lines to the matching transcript pane.
+# Default None == "not inside an STT stream" → shared/system log (neutral area).
+STT_STREAM_ROLE: "contextvars.ContextVar[str | None]" = contextvars.ContextVar(
+    "stt_stream_role", default=None
+)
+
+# Pass this as `extra=` on a logging call to mark the record as actual
+# transcript text (the spoken words), as opposed to status/startup/reconnect
+# noise.  Only records flagged this way are routed into a transcript pane; the
+# stream role (primary/secondary) is taken from STT_STREAM_ROLE.  Everything
+# else — including each stream's own connect/reconnect messages — stays in the
+# neutral log area so the transcript panes show transcript text only.
+TRANSCRIPT_LOG_EXTRA = {"vv_transcript": True}
+
+
 def create_transcript_handler(controller, is_secondary: bool, tag: str, parser):
     """Return a callback with the on_transcript(sentence, is_final, metadata) signature.
 
@@ -5133,7 +5159,7 @@ def create_transcript_handler(controller, is_secondary: bool, tag: str, parser):
         if _drop_if_degenerate(sentence, tag):
             return
 
-        logger.info(f"📝 {tag} {sentence}")
+        logger.info(f"📝 {tag} {sentence}", extra=TRANSCRIPT_LOG_EXTRA)
         if is_secondary:
             full_sermon_transcript_secondary += " " + sentence.strip()
         else:
@@ -5173,14 +5199,14 @@ def create_sarvam_transcript_handler(controller, is_secondary: bool, tag: str, p
         english_text = translate_to_english(sentence)
 
         if transliteration:
-            logger.info(f"📝 {tag} [Manglish] {sentence}")
+            logger.info(f"📝 {tag} [Manglish] {sentence}", extra=TRANSCRIPT_LOG_EXTRA)
             if english_text and english_text != sentence:
-                logger.info(f"🔤 {tag} [Manglish→EN] {english_text}")
+                logger.info(f"🔤 {tag} [Manglish→EN] {english_text}", extra=TRANSCRIPT_LOG_EXTRA)
         else:
             display = sentence if show_malayalam_raw else english_text
-            logger.info(f"📝 {tag} {display}")
+            logger.info(f"📝 {tag} {display}", extra=TRANSCRIPT_LOG_EXTRA)
             if show_malayalam_raw and english_text != sentence:
-                logger.info(f"🔤 {tag} {english_text}")
+                logger.info(f"🔤 {tag} {english_text}", extra=TRANSCRIPT_LOG_EXTRA)
 
         check_verse_queue(english_text, controller)
 
@@ -5225,7 +5251,17 @@ def launch_stt_task(controller, is_secondary: bool = False):
     logger.info(
         f"🎤 Starting {'secondary' if is_secondary else 'primary'} STT via {engine_name}"
     )
-    return asyncio.create_task(provider.stream_audio(MIC_INDEX, stop_event, handler))
+
+    role = "secondary" if is_secondary else "primary"
+
+    async def _run_stream():
+        # Stamp this task's context so all logging done while the stream runs
+        # (handler transcript lines + provider status/reconnect lines) is
+        # attributed to the correct pane via STT_STREAM_ROLE.
+        STT_STREAM_ROLE.set(role)
+        await provider.stream_audio(MIC_INDEX, stop_event, handler)
+
+    return asyncio.create_task(_run_stream())
 
 
 def _stt_tag(engine: str, is_secondary: bool = False) -> str:
@@ -5368,6 +5404,11 @@ def build_stt_provider(engine_name: str, controller, is_secondary: bool = False)
         # alternative_language_codes) when the mode is "multi".
         _lang = (SECONDARY_LANGUAGE if is_secondary else PRIMARY_LANGUAGE) or "en"
         _gcfg = _gcp_language_config(_lang)
+        # Interim flush is a Malayalam-only mitigation for GCP letting long
+        # continuous speech run on without a natural-pause final.  Other GCP
+        # languages (en/hi/multi) keep the original wait-for-final behaviour, so
+        # this never changes English/Hindi or any non-GCP engine.
+        _gcp_flush = GCP_INTERIM_FLUSH_SEC if _lang == "ml" else 0
         return GoogleCloudProvider({
             "credentials_path":           GCP_CREDENTIALS_PATH,
             "language_code":              _gcfg["language_code"],
@@ -5375,6 +5416,7 @@ def build_stt_provider(engine_name: str, controller, is_secondary: bool = False)
             "rate":                       RATE,
             "chunk":                      CHUNK,
             "tag":                        tag,
+            "interim_flush_sec":          _gcp_flush,
         })
 
     if engine_name == "local_whisper":

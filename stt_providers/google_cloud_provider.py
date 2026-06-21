@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+import time
 
 from .base import STTProvider
 from .utils import open_microphone, teardown_microphone
@@ -14,6 +15,53 @@ _SESSION_LIMIT_SECS = 285
 # GCP's RecognitionConfig accepts at most 3 alternative language codes
 # (4 languages total counting the primary language_code).
 _MAX_ALTERNATIVE_LANGUAGES = 3
+
+# Sentence-final punctuation we prefer to chunk on for the interim-flush feature.
+# Includes the Devanagari/Indic danda "।" alongside Latin marks because GCP's
+# automatic punctuation can emit either depending on the recognised language.
+_SENT_PUNCT = ".?!।"
+
+
+def _carve_stable_chunk(full_text: str, committed_len: int):
+    """Carve a readable, word-safe chunk out of a growing interim transcript.
+
+    `full_text` is GCP's cumulative interim transcript for the current utterance
+    and `committed_len` is how many leading characters of it have already been
+    emitted (as earlier soft-final chunks).  We return ``(chunk, new_committed_len)``
+    where `chunk` is the next stable slice to surface and `new_committed_len` is
+    the updated commit offset.  Returns ``("", committed_len)`` when there is no
+    safe boundary yet (so the caller waits for more audio).
+
+    Boundary preference, to avoid chopping words mid-flow:
+      1. The last sentence-punctuation mark that is *followed* by more text — a
+         completed clause/sentence is stable and reads cleanly.
+      2. Otherwise the last whitespace, holding back the trailing (possibly still
+         growing) partial word.
+      3. If neither exists (one unbroken token), emit nothing and wait.
+    """
+    tail = full_text[committed_len:]
+    if not tail.strip():
+        return "", committed_len
+
+    cut = -1
+    # Prefer a punctuation boundary that is confirmed by trailing content.
+    for i in range(len(tail) - 1, -1, -1):
+        if tail[i] in _SENT_PUNCT and i < len(tail) - 1:
+            cut = i + 1
+            break
+
+    if cut == -1:
+        # No confirmed punctuation — fall back to the last word boundary so we
+        # never split a word and we leave the volatile trailing word uncommitted.
+        ws = tail.rfind(" ")
+        if ws <= 0:
+            return "", committed_len
+        cut = ws
+
+    chunk = tail[:cut].strip()
+    if not chunk:
+        return "", committed_len
+    return chunk, committed_len + cut
 
 
 class GoogleCloudProvider(STTProvider):
@@ -69,6 +117,10 @@ class GoogleCloudProvider(STTProvider):
     chunk                       – PyAudio frames_per_buffer (default 4096)
     tag                         – log-prefix string (default "[PRI-GCP]")
     model                       – GCP recognition model (default "latest_long")
+    interim_flush_sec           – if > 0, surface stable interim text as readable
+                                  soft-final chunks every N seconds during long
+                                  uninterrupted speech (default 0 = disabled).
+                                  Wired on only for Malayalam by the runtime.
     """
 
     async def stream_audio(
@@ -99,6 +151,17 @@ class GoogleCloudProvider(STTProvider):
         chunk = int(self.config.get("chunk") or 4096)
         tag   = (self.config.get("tag") or "[PRI-GCP]")
         model = (self.config.get("model") or "latest_long").strip()
+
+        # ── Interim flush (soft-final) ──────────────────────────────────────────
+        # When > 0, long uninterrupted speech is surfaced in readable chunks
+        # every `interim_flush_sec` seconds instead of waiting for GCP to emit a
+        # natural-pause final.  0 disables the feature entirely (original
+        # behaviour).  The runtime only enables this for Malayalam on GCP.
+        try:
+            interim_flush_sec = float(self.config.get("interim_flush_sec") or 0)
+        except (TypeError, ValueError):
+            interim_flush_sec = 0.0
+        flush_enabled = interim_flush_sec > 0
 
         # Multi-language alternatives — clean to a list of non-empty strings and
         # drop any that duplicate the primary code, then clamp to GCP's max of 3.
@@ -188,6 +251,12 @@ class GoogleCloudProvider(STTProvider):
                 f"language: {language_code} | model: {model}"
             )
 
+        if flush_enabled:
+            logger.info(
+                f"⏱️ {tag} Interim flush ON — surfacing stable chunks every "
+                f"{interim_flush_sec:g}s during long continuous speech"
+            )
+
         try:
             # ── Reconnect loop ──────────────────────────────────────────────────
             while not stop_event.is_set():
@@ -226,6 +295,26 @@ class GoogleCloudProvider(STTProvider):
 
                 # ── Response task ───────────────────────────────────────────────
                 async def _recv():
+                    # Per-utterance interim-flush state.  Re-initialised every
+                    # session (each reconnect re-defines _recv), so it never
+                    # leaks committed text across a reconnect.
+                    #   committed_len    – chars of the CURRENT utterance already
+                    #                      surfaced as soft-final chunks
+                    #   last_commit_time – monotonic time of the last emission,
+                    #                      so flushing is paced by interim_flush_sec
+                    committed_len = 0
+                    last_commit_time = time.monotonic()
+
+                    def _emit(text, final, meta):
+                        # extra marks transcript text so the GUI routes it to the
+                        # matching pane; finals (incl. soft-finals) are also logged.
+                        if final:
+                            logger.info(
+                                f"📝 {tag} {text}",
+                                extra={"vv_transcript": True},
+                            )
+                        on_transcript(text, final, meta)
+
                     try:
                         # streaming_recognize is async def — await it to obtain the
                         # async response iterator, then iterate over results normally.
@@ -235,10 +324,11 @@ class GoogleCloudProvider(STTProvider):
                         async for response in responses:
                             if stop_event.is_set() or stop_session.is_set():
                                 break
-                            for result in response.results:
+                            for idx, result in enumerate(response.results):
                                 if not result.alternatives:
                                     continue
-                                sentence = result.alternatives[0].transcript.strip()
+                                full     = result.alternatives[0].transcript
+                                sentence = full.strip()
                                 if not sentence:
                                     continue
                                 is_final   = result.is_final
@@ -261,9 +351,51 @@ class GoogleCloudProvider(STTProvider):
                                     "detected_language": detected_language,
                                     "raw":               str(result),
                                 }
+
                                 if is_final:
-                                    logger.info(f"📝 {tag} {sentence}")
-                                on_transcript(sentence, is_final, metadata)
+                                    # A true final closes the utterance.  If we
+                                    # already soft-flushed part of it, emit only
+                                    # the not-yet-committed remainder so nothing is
+                                    # duplicated; otherwise emit the whole final.
+                                    if flush_enabled and committed_len > 0:
+                                        remainder = (
+                                            full[committed_len:].strip()
+                                            if len(full) > committed_len
+                                            else ""
+                                        )
+                                        if remainder:
+                                            _emit(remainder, True, metadata)
+                                    else:
+                                        _emit(sentence, True, metadata)
+                                    # Reset for the next utterance.
+                                    committed_len = 0
+                                    last_commit_time = time.monotonic()
+                                    continue
+
+                                # ── Interim result ──────────────────────────────
+                                # Always feed the partial to the verse-queue path
+                                # (unchanged behaviour).
+                                _emit(sentence, False, metadata)
+
+                                # Time-based soft-final flush — only on the primary
+                                # hypothesis (idx 0) so secondary low-stability
+                                # results never corrupt the commit offset.
+                                if (
+                                    flush_enabled
+                                    and idx == 0
+                                    and len(full) > committed_len
+                                    and (time.monotonic() - last_commit_time)
+                                    >= interim_flush_sec
+                                ):
+                                    chunk, new_len = _carve_stable_chunk(
+                                        full, committed_len
+                                    )
+                                    if chunk:
+                                        soft_meta = dict(metadata)
+                                        soft_meta["soft_final"] = True
+                                        _emit(chunk, True, soft_meta)
+                                        committed_len = new_len
+                                        last_commit_time = time.monotonic()
                     except asyncio.CancelledError:
                         pass
                     except Exception as exc:

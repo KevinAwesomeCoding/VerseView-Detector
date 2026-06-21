@@ -28,6 +28,7 @@ DEFAULTS = {
     # ── STT Engine ──
     "stt_engine":                 "deepgram",
     "aai_turn_cutoff":            5,
+    "gcp_interim_flush":          4,
     # ── Dual STT ──
     "dual_stt_enabled":           False,
     "secondary_language":         None,

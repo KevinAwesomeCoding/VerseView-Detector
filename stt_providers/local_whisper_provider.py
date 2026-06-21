@@ -230,7 +230,9 @@ class LocalWhisperProvider(STTProvider):
                     "raw":               raw_json,
                 }
 
-                logger.info(f"📝 {tag} {sentence}")
+                # extra marks this as transcript text so the GUI routes it to
+                # the matching transcript pane.
+                logger.info(f"📝 {tag} {sentence}", extra={"vv_transcript": True})
                 on_transcript(sentence, True, metadata)
 
         except asyncio.CancelledError:
