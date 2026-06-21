@@ -1609,12 +1609,15 @@ class VerseViewApp(ctk.CTk):
                     merged[k] = remote[k]
                     updated.append(k)
 
-            # If the synced file carried a portable GCP credential (base64
-            # payload, or a URL as a secondary option), materialise it into the
-            # managed store and point the path at the local managed copy. The raw
-            # secret is handled by settings.py and is never merged into (or
-            # persisted in) the local settings dict.
-            if remote.get(cfg.GCP_CREDENTIALS_PAYLOAD_KEY) or remote.get(cfg.GCP_CREDENTIALS_URL_KEY):
+            # If the synced file carried a portable GCP credential — a base64
+            # payload, a credential URL, OR the remote being the raw service-
+            # account key JSON itself — materialise it into the managed store and
+            # point the path at the local managed copy. The raw secret is handled
+            # by settings.py and is never merged into (or persisted in) the local
+            # settings dict.
+            if (cfg.validate_gcp_service_account_json(remote)
+                    or remote.get(cfg.GCP_CREDENTIALS_PAYLOAD_KEY)
+                    or remote.get(cfg.GCP_CREDENTIALS_URL_KEY)):
                 _managed = cfg.materialize_gcp_from_transport(remote)
                 if _managed and merged.get("gcp_credentials_path") != _managed:
                     merged["gcp_credentials_path"] = _managed

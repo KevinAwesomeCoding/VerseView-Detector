@@ -293,16 +293,31 @@ def _materialize_gcp_url(url: str) -> str | None:
 
 
 def materialize_gcp_from_transport(source: dict) -> str | None:
-    """Materialise a managed credential from a dict that may carry a base64
-    payload (primary) or a credential URL (secondary). Returns the managed path
-    on success, or None. Does NOT mutate source. Shared by load / import / sync
-    so all three behave identically."""
+    """Materialise a managed credential from a remote/imported dict. Handles, in
+    order:
+      (1) a dict that IS itself a raw Google service-account key — e.g. a sync
+          URL that points straight at the key JSON rather than a settings object;
+      (2) a base64 payload (primary mechanism);
+      (3) a credential URL (secondary mechanism).
+    Returns the managed path on success, or None. Does NOT mutate source. Shared
+    by load / import / sync so all three behave identically."""
     if not isinstance(source, dict):
         return None
+    # (1) the remote is itself a raw Google service-account key.
+    if validate_gcp_service_account_json(source):
+        try:
+            return _write_managed_credential(json.dumps(source, indent=2))
+        except Exception as exc:
+            logger.warning(
+                f"⚠️ Could not write GCP credential from remote service account: {exc}"
+            )
+            return None
+    # (2) base64 payload (primary mechanism).
     if source.get(GCP_CREDENTIALS_PAYLOAD_KEY):
         managed = materialize_gcp_credentials_payload(source[GCP_CREDENTIALS_PAYLOAD_KEY])
         if managed:
             return managed
+    # (3) credential URL (secondary mechanism).
     if source.get(GCP_CREDENTIALS_URL_KEY):
         return _materialize_gcp_url(source[GCP_CREDENTIALS_URL_KEY])
     return None
