@@ -195,14 +195,43 @@ session_log_stream = io.StringIO()
 session_log_handler = logging.StreamHandler(session_log_stream)
 session_log_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)-5s %(message)s"))
 
+# ── Log file location ─────────────────────────────────────────────────────────
+# Must be an ABSOLUTE path in a writable per-user directory. A relative
+# "verseview.log" is created in the process working directory — which is the
+# folder you launch from in Terminal (writable, so the raw Unix binary works),
+# but is "/" when the .app is double-clicked via Finder/LaunchServices. Creating
+# /verseview.log raises PermissionError inside the FileHandler constructor at
+# import time, which propagates out of `import vv_streaming_master` and kills the
+# app ~1s after launch. Reuse the same per-user app-data dir as settings.py.
+def _log_file_path() -> str:
+    try:
+        if sys.platform == "darwin":
+            base = os.path.join(os.path.expanduser("~"), "Library",
+                                "Application Support", "VerseView")
+        elif os.name == "nt":
+            base = os.path.join(os.getenv("APPDATA", os.path.expanduser("~")),
+                                "VerseView")
+        else:
+            base = os.path.join(os.path.expanduser("~"), ".verseview")
+        os.makedirs(base, exist_ok=True)
+        return os.path.join(base, "verseview.log")
+    except Exception:
+        # Last resort: temp dir is always writable. Never let logging setup
+        # crash the app on launch.
+        import tempfile
+        return os.path.join(tempfile.gettempdir(), "verseview.log")
+
+_log_handlers = [logging.StreamHandler(), session_log_handler]
+try:
+    _log_handlers.insert(0, logging.FileHandler(_log_file_path(), encoding="utf-8"))
+except Exception:
+    # If even the fallback fails, run without a file handler rather than dying.
+    pass
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)-5s %(message)s",
-    handlers=[
-        logging.FileHandler("verseview.log", encoding="utf-8"),
-        logging.StreamHandler(),
-        session_log_handler,
-    ],
+    handlers=_log_handlers,
 )
 logger = logging.getLogger(__name__)
 
@@ -2267,12 +2296,113 @@ def add_to_verse_history(ref: str, source: str = "MANUAL") -> None:
 
     # System-side events are metadata only — open a quarantine so this
     # injection cannot steer subsequent inferred detections.
-    _SYSTEM_SOURCES = {"MANUAL-ENTRY", "CHAPTER-BROWSER", "MANUAL", "RESTORE"}
+    _SYSTEM_SOURCES = {"MANUAL-ENTRY", "CHAPTER-BROWSER", "MANUAL", "RESTORE", "REMOTE"}
     if source in _SYSTEM_SOURCES:
         _open_system_quarantine(f"add_to_verse_history({source})")
 
 def clear_verse_history():
     _verse_history.clear()
+
+
+# ── REMOTE CONTROL API (Discord bridge) ───────────────────────────────────────
+# These three helpers are the single, authoritative entry points the bot bridge
+# (vv_bot_bridge.py) calls to drive the display from Discord. They mirror exactly
+# what the GUI does for manual entry / panic, so remote and local control behave
+# identically. They never raise — each returns (ok: bool, message: str) so the
+# bridge can turn the result straight into an HTTP status + body.
+
+def remote_present_verse(ref: str):
+    """Present a verse from a remote (Discord) source, bypassing STT detection.
+
+    This is the manual-override path: it does the same raw Selenium send the GUI
+    text box uses (set input value → click PRESENT), updates sermon context, and
+    records the ref in history (which also fires the verse-notification webhook).
+    No confidence gate, no dedup/cooldown — a remote operator asked for it
+    explicitly, so it always presents.
+    """
+    ref = (ref or "").strip()
+    if not ref:
+        return False, "No verse reference supplied"
+
+    ctrl = _controller
+    if ctrl is None or ctrl.driver is None:
+        return False, "VerseView not connected — start the engine first"
+    if ctrl.box is None or ctrl.btn is None:
+        return False, "VerseView input / PRESENT button not found"
+
+    try:
+        # Dismiss any stale browser alert left by a previous bad send, otherwise
+        # the next execute_script throws "unexpected alert open".
+        try:
+            _alert = ctrl.driver.switch_to.alert
+            logger.warning(f"⚠️ Dismissing stale alert before remote send: \"{_alert.text}\"")
+            _alert.dismiss()
+        except Exception:
+            pass
+
+        ctrl.driver.execute_script("arguments[0].value = arguments[1];", ctrl.box, ref)
+        ctrl.driver.execute_script("arguments[0].click();", ctrl.btn)
+        logger.info(f"✅ REMOTE PRESENTED: {ref}")
+        _trigger_atem_keyer()
+
+        # Keep detection context in sync so contextual 'verse N' resolves correctly.
+        try:
+            parts = ref.split()
+            if len(parts) >= 2:
+                _book = " ".join(parts[:-1])
+                _last = parts[-1]
+                if ":" in _last:
+                    _chap, _vs = _last.split(":", 1)
+                else:
+                    _chap, _vs = _last, ""
+                set_context(_book, _chap, _vs)
+        except Exception:
+            pass
+
+        # History + verse-notification webhook (same as GUI manual entry).
+        try:
+            add_to_verse_history(ref, source="REMOTE")
+        except Exception:
+            pass
+
+        return True, f"Presented {ref}"
+    except Exception as exc:
+        logger.error(f"[remote] present failed for {ref}: {exc}")
+        return False, f"Selenium error: {exc}"
+
+
+def remote_clear():
+    """Clear the currently displayed verse — remote equivalent of the panic button."""
+    if _controller is None or _controller.driver is None:
+        return False, "VerseView not connected — start the engine first"
+    try:
+        trigger_panic()   # cancels Smart-Amen timer + clicks iconClose
+        return True, "Screen cleared"
+    except Exception as exc:
+        logger.error(f"[remote] clear failed: {exc}")
+        return False, f"Clear failed: {exc}"
+
+
+def remote_status() -> dict:
+    """Connection + context snapshot for the bridge /status endpoint.
+
+    'connected' means a live Selenium session exists (verses can be sent).
+    Engine-running state is added by the bridge from the GUI flag, since the
+    engine can be running but mid-reconnect (not yet connected).
+    """
+    connected = False
+    try:
+        if _controller is not None and _controller.driver is not None:
+            _ = _controller.driver.title   # cheap liveness ping
+            connected = True
+    except Exception:
+        connected = False
+    return {
+        "connected": connected,
+        "book":      current_book or "",
+        "chapter":   current_chapter or "",
+        "verse":     current_verse or "",
+    }
 
 
 # ── ONWARDS MODE ──────────────────────────────────────────────────────────────

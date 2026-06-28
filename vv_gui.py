@@ -798,17 +798,18 @@ class VerseViewApp(ctk.CTk):
             self._start_bot()
 
     def _on_bridge_ready(self):
-        """Called by engine via BRIDGE_READY_CALLBACK once bridge is live."""
+        """Called by engine via BRIDGE_READY_CALLBACK once the engine connects.
+
+        The bridge controller reference is now current. If the bot is already
+        online (started independently), leave its status alone; otherwise mark it
+        ready to start.
+        """
         def _update():
-            self.bot_status_lbl.configure(text="● Ready", text_color="#a07a00")
-            self.bot_start_btn.configure(state="normal")
-            self._bot_log("✅ Bridge ready — engine connected.")
-            # NOTE: Bot auto-start is disabled — bot is broken and pending fix.
-            # if self._bot_process is None or self._bot_process.poll() is not None:
-            #     self._auto_start_bot()   # auto-start if token is saved
-            # else:
-            #     self._bot_log("ℹ️ Bot already running — skipping auto-start.")
-            self._bot_log("ℹ️ Bot auto-start is currently disabled.")
+            self._bot_log("✅ Engine connected — bridge controller refreshed.")
+            bot_online = bool(self._bot_process and self._bot_process.poll() is None)
+            if not bot_online:
+                self.bot_status_lbl.configure(text="● Ready", text_color="#a07a00")
+                self.bot_start_btn.configure(state="normal")
         self.after(0, _update)       # always schedule onto the tkinter thread
 
     def _bot_log(self, text: str):
@@ -819,13 +820,26 @@ class VerseViewApp(ctk.CTk):
             self.bot_log.configure(state="disabled")
         self.after(0, _append)
 
-    def _start_bot(self):
-        if not self._running:
-            mb.showwarning(
-                "Engine Not Running",
-                "Please start the VerseView engine first before starting the bot."
+    def _ensure_bridge(self):
+        """Start the Discord↔engine HTTP bridge if it isn't already running.
+
+        The bridge runs independently of the engine so the bot can receive
+        commands — including remote /start — while the engine is stopped. Safe to
+        call repeatedly: start_bot_bridge() binds the socket only once and just
+        refreshes the GUI/controller references on subsequent calls.
+        """
+        try:
+            from vv_bot_bridge import start_bot_bridge
+            start_bot_bridge(
+                getattr(engine, "_controller", None),
+                port=50011,
+                gui_app=self,
             )
-            return
+            self._bot_log("🔌 Bridge ready (runs independently of the engine).")
+        except Exception as e:
+            self._bot_log(f"⚠️ Could not start bridge: {e}")
+
+    def _start_bot(self):
         token = self.bot_token_entry.get().strip()
         host  = self.bot_host_entry.get().strip() or "127.0.0.1"
         port  = self.bot_port_entry.get().strip() or "50011"
@@ -833,6 +847,14 @@ class VerseViewApp(ctk.CTk):
         if not token:
             mb.showerror("Missing Token", "Please enter a Discord Bot Token.")
             return
+
+        if self._bot_process and self._bot_process.poll() is None:
+            self._bot_log("ℹ️ Bot is already running.")
+            return
+
+        # Bring the bridge up BEFORE the bot connects, independent of the engine,
+        # so remote /start works even while the engine is stopped.
+        self._ensure_bridge()
 
         self._save_bot_config()
 
@@ -888,12 +910,13 @@ class VerseViewApp(ctk.CTk):
 
     def _on_bot_stopped(self):
         self._bot_log("⏹ Bot stopped.")
-        self.bot_start_btn.configure(state="normal" if self._running else "disabled")
+        # The bot can be started any time now (it no longer needs the engine).
+        self.bot_start_btn.configure(state="normal")
         self.bot_stop_btn.configure(state="disabled")
         if self._running:
             self.bot_status_lbl.configure(text="● Ready", text_color="#a07a00")
         else:
-            self.bot_status_lbl.configure(text="⏸ Waiting for engine…", text_color="#888888")
+            self.bot_status_lbl.configure(text="● Stopped", text_color="#cc4444")
         self._bot_process = None
 
 
@@ -2192,6 +2215,13 @@ class VerseViewApp(ctk.CTk):
             self._append_log("⚡ Auto-Start: starting engine in 3 seconds...")
             self.after(3000, self._start)
 
+        # Auto-start the Discord bot whenever a token is saved, so remote control
+        # is available immediately after launch — including remote /start before
+        # the engine is ever started locally. The bridge comes up with it.
+        if self.bot_token_entry.get().strip():
+            self._append_log("🤖 Auto-starting Discord bot for remote control…")
+            self.after(1500, self._start_bot)
+
 
     def _start(self):
         try:
@@ -2350,12 +2380,20 @@ class VerseViewApp(ctk.CTk):
 
     def _on_stopped(self):
         self._running = False
-        # Stop the Discord bot — the bridge is dead, bot would be useless
-        if self._bot_process and self._bot_process.poll() is None:
-            self._bot_process.terminate()
-        self.bot_start_btn.configure(state="disabled")
-        self.bot_stop_btn.configure(state="disabled")
-        self.bot_status_lbl.configure(text="⏸ Waiting for engine…", text_color="#888888")
+        # Keep the Discord bot ALIVE after the engine stops. The bridge now runs
+        # independently, so the bot can still receive /start and power the engine
+        # back on remotely — no app restart needed. (Only a window-close tears
+        # the bot down; see _finish_close.)
+        bot_online = bool(self._bot_process and self._bot_process.poll() is None)
+        if bot_online:
+            self.bot_start_btn.configure(state="disabled")
+            self.bot_stop_btn.configure(state="normal")
+            self.bot_status_lbl.configure(text="● Online (engine stopped)", text_color="#a07a00")
+            self._bot_log("ℹ️ Engine stopped — bot still online. Use /start in Discord to power it back on.")
+        else:
+            self.bot_start_btn.configure(state="normal")
+            self.bot_stop_btn.configure(state="disabled")
+            self.bot_status_lbl.configure(text="● Stopped", text_color="#cc4444")
         self.btn_stop.configure(state="disabled")
         self.lbl_status.configure(text="● Stopped", text_color="#666666")
         self.lang_menu.configure(state="normal")
@@ -3225,6 +3263,15 @@ class VerseViewApp(ctk.CTk):
                 print(f"Emergency Auto-Save triggered: {filepath}")
             except Exception as e:
                 print(f"Emergency Auto-Save Failed: {e}")
+
+        # Tear down the Discord bot subprocess on app close. The bot is no longer
+        # stopped when the engine stops (it outlives engine stop/start cycles), so
+        # the window close is the one place that must clean it up.
+        try:
+            if self._bot_process and self._bot_process.poll() is None:
+                self._bot_process.terminate()
+        except Exception:
+            pass
 
         self.destroy()
 

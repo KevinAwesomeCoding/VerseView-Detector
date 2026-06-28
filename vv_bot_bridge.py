@@ -3,27 +3,36 @@
 vv_bot_bridge.py — Lightweight HTTP bridge server for the Discord bot.
 
 Listens on http://127.0.0.1:50011 (separate from VerseView's own port 50010).
-The Discord bot (verseview_bot.py) calls these endpoints, and the bridge
-executes the corresponding Selenium actions via the already-running driver.
+The Discord bot (vv_discord_bot.py) calls these endpoints, and the bridge
+executes the corresponding action on the host: either an engine remote-control
+helper or a direct Selenium navigation click on the already-running driver.
 
 Usage:
     from vv_bot_bridge import start_bot_bridge
-    start_bot_bridge(controller)   # pass the VerseController instance
+    start_bot_bridge(gui_app=app)            # at app startup (engine NOT required)
+    start_bot_bridge(controller, gui_app=app)# again when the engine connects (idempotent)
 
 Endpoints (all GET):
-    /goto?ref=John+1:5   — type ref into the input and click the search btn
-    /present             — click the PRESENT button
+    /start               — start the VerseView engine on the host (remote power-on)
+    /stop                — stop the engine
+    /goto?ref=John+1:5   — present a verse directly (bypasses STT detection)
+    /clear               — clear the verse off the screen (panic/blank)
+    /present             — re-click the PRESENT button
     /next                — click the forward/next button
     /prev                — click the backward/prev button
     /close               — click the close (iconClose) button
-    /status              — 200 if connected, 503 if not
+    /status              — JSON-ish text: engine running / connected / current verse
 
 Design notes:
   • Runs in a daemon thread — never blocks the main app.
   • Uses only Python stdlib (http.server) — zero extra dependencies.
+  • DECOUPLED FROM THE ENGINE: the live VerseController is looked up from the
+    engine module on every request, so the bridge keeps working across engine
+    stop/start cycles WITHOUT being restarted. This is what lets a remote
+    operator power the engine back on with /start after a /stop.
+  • Engine power (start/stop) is marshalled onto the tkinter GUI thread via
+    gui_app.after(), so it is thread-safe.
   • All HTTP request logs are suppressed (log_message is a no-op).
-  • Selenium errors are caught, logged to the engine logger, and returned as
-    HTTP 500 so the Discord bot can surface a meaningful error to the user.
   • Self-contained: remove the import + start_bot_bridge() call to disable
     entirely without touching any other code.
 """
@@ -36,10 +45,39 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 
 logger = logging.getLogger(__name__)
 
-# Module-level references injected by start_bot_bridge()
+# Module-level references. _controller is only a *fallback*; the live controller
+# is read from the engine module each request (see _get_controller) so engine
+# restarts never leave the bridge pointing at a dead driver.
 _controller = None
 _gui_app    = None
 _server: "HTTPServer | None" = None   # kept so we never try to bind twice
+
+
+# ── Live lookups ───────────────────────────────────────────────────────────────
+
+def _get_controller():
+    """Return the engine's current VerseController, or None.
+
+    Prefers the live `_controller` global inside vv_streaming_master (the single
+    source of truth, recreated on every engine start) and falls back to whatever
+    was injected via start_bot_bridge(). This is the key to surviving engine
+    restarts without rebinding the bridge.
+    """
+    try:
+        import vv_streaming_master as _engine
+        live = getattr(_engine, "_controller", None)
+        if live is not None:
+            return live
+    except Exception:
+        pass
+    return _controller
+
+
+def _engine_running() -> bool:
+    """True if the GUI says the engine session is active."""
+    if _gui_app is None:
+        return False
+    return bool(getattr(_gui_app, "_running", False))
 
 
 # ── Handler ────────────────────────────────────────────────────────────────────
@@ -58,7 +96,10 @@ class _BridgeHandler(BaseHTTPRequestHandler):
         path   = parsed.path.rstrip("/")
 
         routes = {
+            "/start":   self._handle_start,
+            "/stop":    self._handle_stop,
             "/goto":    self._handle_goto,
+            "/clear":   self._handle_clear,
             "/present": self._handle_present,
             "/next":    self._handle_next,
             "/prev":    self._handle_prev,
@@ -77,109 +118,110 @@ class _BridgeHandler(BaseHTTPRequestHandler):
             logger.error(f"[bridge] Unhandled error in {path}: {exc}")
             self._send(500, f"Internal error: {exc}")
 
-    # ── Routes ─────────────────────────────────────────────────────────────────
+    # ── Engine power (remote start/stop) ──────────────────────────────────────
+
+    def _handle_start(self, params):
+        """Start the VerseView engine on the host machine (remote power-on).
+
+        Works even when the engine is stopped because the bridge runs for the
+        whole app lifetime, independent of the engine.
+        """
+        if _gui_app is None:
+            self._send(503, "GUI not available — cannot start the engine remotely")
+            return
+        if _engine_running():
+            self._send(200, "Engine is already running")
+            return
+        try:
+            # _start touches tkinter widgets — must run on the GUI thread.
+            _gui_app.after(0, _gui_app._start)
+            logger.info("[bridge] /start → engine start scheduled")
+            self._send(200, "Starting VerseView engine… (give it a few seconds to connect)")
+        except Exception as exc:
+            logger.error(f"[bridge] /start failed: {exc}")
+            self._send(500, f"Could not start engine: {exc}")
+
+    def _handle_stop(self, params):
+        """Stop the VerseView engine on the host machine."""
+        if _gui_app is None:
+            self._send(503, "GUI not available — cannot stop the engine remotely")
+            return
+        if not _engine_running():
+            self._send(200, "Engine is already stopped")
+            return
+        try:
+            _gui_app.after(0, _gui_app._stop)
+            logger.info("[bridge] /stop → engine stop scheduled")
+            self._send(200, "Stopping VerseView engine…")
+        except Exception as exc:
+            logger.error(f"[bridge] /stop failed: {exc}")
+            self._send(500, f"Could not stop engine: {exc}")
+
+    # ── Verse override + clear (routed through the engine helpers) ─────────────
 
     def _handle_goto(self, params):
+        """Present a verse directly, bypassing STT detection."""
         ref = (params.get("ref") or [""])[0].strip()
-        print(f"[Bridge] /goto called with ref={ref}")
         if not ref:
             self._send(400, "Missing ?ref= parameter")
             return
-        if not self._check_connected():
-            return
         try:
-            from selenium.webdriver.common.by import By
-            driver = _controller.driver
-
-            print("[Bridge] Step 1: Finding verse input field...")
-            box    = driver.find_element(By.ID, "remote_bibleRefID")
-
-            print("[Bridge] Step 2: Clearing field...")
-            # We use JS to set value but Step 2 is requested
-            driver.execute_script("arguments[0].value = '';", box)
-
-            print("[Bridge] Step 3: Typing reference...")
-            driver.execute_script("arguments[0].value = arguments[1];", box, ref)
-
-            print("[Bridge] Step 4: Clicking search/present button...")
-            # In VerseController, self.btn is the found PRESENT button
-            driver.execute_script("arguments[0].click();", _controller.btn)
-
-            # Step 5 requested by user - clicking the present button specifically
-            # In our code, _controller.btn is already the present button, but
-            # we'll add a check/click for a dedicated present ID just in case.
-            print("[Bridge] Step 5: Verifying presentation...")
-            try:
-                present_btn = driver.find_element(By.ID, "remote_bible_present")
-                driver.execute_script("arguments[0].click();", present_btn)
-            except:
-                # If not found or already clicked, no worries
-                pass
-
-            logger.info(f"[bridge] /goto → {ref}")
-            self._send(200, f"OK: {ref}")
-
-            # ── Update engine context + GUI fields ────────────────────────────
-            try:
-                import vv_streaming_master as _engine
-                # Parse "John 1:5" or "1 Corinthians 3:16" → book, chapter, verse
-                _parts = ref.split()
-                if _parts[0].isdigit() and len(_parts) > 1:
-                    _book   = f"{_parts[0]} {_parts[1]}"
-                    _rest   = _parts[2] if len(_parts) > 2 else ""
-                else:
-                    _book   = _parts[0]
-                    _rest   = _parts[1] if len(_parts) > 1 else ""
-                if ":" in _rest:
-                    _chapter, _verse = _rest.split(":", 1)
-                else:
-                    _chapter, _verse = _rest, ""
-                _engine.set_context(_book, _chapter, _verse)
-                logger.info(f"[bridge] Context updated → {_book} {_chapter}:{_verse}")
-
-                if _gui_app is not None:
-                    def _refresh_gui(b=_book, c=_chapter, v=_verse):
-                        try:
-                            _gui_app.ctx_book.delete(0, "end")
-                            _gui_app.ctx_chapter.delete(0, "end")
-                            _gui_app.ctx_verse.delete(0, "end")
-                            _gui_app.ctx_book.insert(0, b)
-                            _gui_app.ctx_chapter.insert(0, c)
-                            _gui_app.ctx_verse.insert(0, v)
-                        except Exception:
-                            pass
-                    _gui_app.after(0, _refresh_gui)
-            except Exception as _ctx_err:
-                logger.warning(f"[bridge] Context update failed: {_ctx_err}")
+            import vv_streaming_master as _engine
+            ok, msg = _engine.remote_present_verse(ref)
         except Exception as exc:
-            print(f"[Bridge] /goto FAILED during Selenium execution:")
-            traceback.print_exc()
             logger.error(f"[bridge] /goto failed: {exc}")
+            traceback.print_exc()
             self._send(500, f"Selenium error: {exc}")
+            return
+
+        if ok:
+            logger.info(f"[bridge] /goto → {ref}")
+            # No GUI nudge needed: remote_present_verse() already updated the
+            # engine context, and the GUI's own 2s poll (_refresh_context) picks
+            # that up automatically. Calling it here would spawn a second loop.
+            self._send(200, msg)
+        else:
+            # "not connected" → 503 so the bot tells the user to start the engine.
+            self._send(503 if "not connected" in msg.lower() else 500, msg)
+
+    def _handle_clear(self, params):
+        """Clear the currently displayed verse (panic / blank screen)."""
+        try:
+            import vv_streaming_master as _engine
+            ok, msg = _engine.remote_clear()
+        except Exception as exc:
+            logger.error(f"[bridge] /clear failed: {exc}")
+            self._send(500, f"Clear error: {exc}")
+            return
+        if ok:
+            logger.info("[bridge] /clear → screen cleared")
+            self._send(200, msg)
+        else:
+            self._send(503 if "not connected" in msg.lower() else 500, msg)
+
+    # ── Navigation (direct Selenium on the live driver) ───────────────────────
 
     def _handle_present(self, params):
-        if not self._check_connected():
+        driver = self._driver_or_503()
+        if driver is None:
             return
         try:
             from selenium.webdriver.common.by import By
-            driver = _controller.driver
-            btn    = driver.find_element(By.ID, "remote_bible_present")
+            btn = driver.find_element(By.ID, "remote_bible_present")
             driver.execute_script("arguments[0].click();", btn)
             logger.info("[bridge] /present clicked")
-            self._send(200, "OK: presented")
+            self._send(200, "Re-presented current verse")
         except Exception as exc:
             logger.error(f"[bridge] /present failed: {exc}")
             self._send(500, f"Selenium error: {exc}")
 
     def _handle_next(self, params):
         """Click the forward/next navigation button on control.html."""
-        if not self._check_connected():
+        driver = self._driver_or_503()
+        if driver is None:
             return
         try:
             from selenium.webdriver.common.by import By
-            driver = _controller.driver
-            # Try known IDs/selectors for the forward button.
-            # Add more selectors here if VerseView's UI changes.
             btn = self._find_any(driver, [
                 (By.ID,    "iconForward"),
                 (By.ID,    "remote_bible_forward"),
@@ -194,18 +236,18 @@ class _BridgeHandler(BaseHTTPRequestHandler):
                 return
             driver.execute_script("arguments[0].click();", btn)
             logger.info("[bridge] /next clicked")
-            self._send(200, "OK: next")
+            self._send(200, "Next verse")
         except Exception as exc:
             logger.error(f"[bridge] /next failed: {exc}")
             self._send(500, f"Selenium error: {exc}")
 
     def _handle_prev(self, params):
         """Click the backward/prev navigation button on control.html."""
-        if not self._check_connected():
+        driver = self._driver_or_503()
+        if driver is None:
             return
         try:
             from selenium.webdriver.common.by import By
-            driver = _controller.driver
             btn = self._find_any(driver, [
                 (By.ID,    "iconBack"),
                 (By.ID,    "iconBackward"),
@@ -223,55 +265,62 @@ class _BridgeHandler(BaseHTTPRequestHandler):
                 return
             driver.execute_script("arguments[0].click();", btn)
             logger.info("[bridge] /prev clicked")
-            self._send(200, "OK: prev")
+            self._send(200, "Previous verse")
         except Exception as exc:
             logger.error(f"[bridge] /prev failed: {exc}")
             self._send(500, f"Selenium error: {exc}")
 
     def _handle_close(self, params):
-        if not self._check_connected():
+        driver = self._driver_or_503()
+        if driver is None:
             return
         try:
             from selenium.webdriver.common.by import By
-            driver    = _controller.driver
             close_btn = driver.find_element(By.ID, "iconClose")
             driver.execute_script("arguments[0].click();", close_btn)
             logger.info("[bridge] /close clicked")
-            self._send(200, "OK: closed")
+            self._send(200, "Closed presentation")
         except Exception as exc:
             logger.error(f"[bridge] /close failed: {exc}")
             self._send(500, f"Selenium error: {exc}")
 
     def _handle_status(self, params):
-        if _controller is None:
-            logger.warning("Bridge: controller is None — engine not started yet")
-            self._send(503, "Not connected — engine not started")
-            return
-        if _controller.driver is None:
-            logger.warning("Bridge: controller.driver is None — engine not fully connected")
-            self._send(503, "Not connected — driver not initialized")
-            return
+        """Report engine running + connection + current verse as one line.
+
+        Always 200 so /status is a pure info query (the bot formats the body).
+        """
+        running   = _engine_running()
+        connected = False
+        context   = ""
         try:
-            # Light check — fetch the current page title to verify the driver is alive
-            _ = _controller.driver.title
-            self._send(200, "OK: connected")
+            import vv_streaming_master as _engine
+            snap = _engine.remote_status()
+            connected = bool(snap.get("connected"))
+            book, chap, vs = snap.get("book"), snap.get("chapter"), snap.get("verse")
+            if book and chap:
+                context = f"{book} {chap}" + (f":{vs}" if vs else "")
         except Exception as exc:
-            logger.warning(f"[bridge] /status driver ping failed: {exc}")
-            self._send(503, f"Driver error: {exc}")
+            logger.warning(f"[bridge] /status snapshot failed: {exc}")
+
+        if running and connected:
+            state = "🟢 Engine running and connected to VerseView"
+        elif running and not connected:
+            state = "🟡 Engine running — connecting to VerseView…"
+        else:
+            state = "🔴 Engine stopped (use /start to power it on)"
+        if context:
+            state += f"  ·  last verse: {context}"
+        self._send(200, state)
 
     # ── Helpers ────────────────────────────────────────────────────────────────
 
-    def _check_connected(self) -> bool:
-        """Return True if a live Selenium session exists; otherwise send 503."""
-        if _controller is None:
-            logger.warning("Bridge: controller is None — engine not started yet")
+    def _driver_or_503(self):
+        """Return the live Selenium driver, or send a 503 and return None."""
+        ctrl = _get_controller()
+        if ctrl is None or getattr(ctrl, "driver", None) is None:
             self._send(503, "VerseView not connected — start the engine first")
-            return False
-        if _controller.driver is None:
-            logger.warning("Bridge: controller.driver is None — engine not fully connected")
-            self._send(503, "VerseView not connected — driver not initialized")
-            return False
-        return True
+            return None
+        return ctrl.driver
 
     def _send(self, code: int, body: str):
         encoded = body.encode("utf-8")
@@ -284,7 +333,6 @@ class _BridgeHandler(BaseHTTPRequestHandler):
     @staticmethod
     def _find_any(driver, selectors):
         """Try each (By, selector) pair and return the first element found, or None."""
-        from selenium.webdriver.common.by import By  # noqa: F401 (imported for callers)
         for by, sel in selectors:
             try:
                 return driver.find_element(by, sel)
@@ -295,35 +343,44 @@ class _BridgeHandler(BaseHTTPRequestHandler):
 
 # ── Public API ─────────────────────────────────────────────────────────────────
 
-def start_bot_bridge(controller, port: int = 50011, gui_app=None):
+def start_bot_bridge(controller=None, port: int = 50011, gui_app=None):
     """
-    Start the HTTP bridge server in a background daemon thread.
+    Start (or refresh) the HTTP bridge server in a background daemon thread.
 
-    If the server is already running (e.g. engine restarted after a stop),
-    the existing socket is reused and only the controller reference is updated.
-    This prevents [Errno 48] / [Errno 10048] address-already-in-use errors
-    on engine restart.
+    Safe to call multiple times. The socket is bound only once; subsequent calls
+    just refresh the injected references. Call it once at app startup with only
+    `gui_app` (so remote /start works before the engine ever runs), and again
+    from the engine when it connects (so the controller fallback is current).
 
     Parameters
     ----------
-    controller : VerseController
-        The already-connected VerseController instance from vv_streaming_master.
+    controller : VerseController | None
+        Optional fallback controller. The live controller is normally read from
+        the engine module on each request, so this may be None.
     port : int
-        Port to listen on (default 50011).  Must differ from VerseView's port 50010.
+        Port to listen on (default 50011). Must differ from VerseView's port 50010.
     gui_app : VerseViewApp | None
-        Optional reference to the tkinter GUI app for thread-safe context field updates.
+        The tkinter GUI app — required for remote /start and /stop, and for
+        thread-safe context-field refreshes.
     """
     global _controller, _gui_app, _server
 
-    _controller = controller
-    _gui_app    = gui_app
+    if controller is not None:
+        _controller = controller
+    if gui_app is not None:
+        _gui_app = gui_app
 
     if _server is not None:
-        # Bridge already bound — just update the controller reference and return.
-        logger.info("[bridge] Bot bridge already running — controller re-injected")
+        # Bridge already bound — references refreshed above, nothing else to do.
+        logger.info("[bridge] Bot bridge already running — references refreshed")
         return _server
 
-    _server = HTTPServer(("127.0.0.1", port), _BridgeHandler)
+    try:
+        _server = HTTPServer(("127.0.0.1", port), _BridgeHandler)
+    except OSError as exc:
+        # Most likely the port is already held by a previous run in this process.
+        logger.error(f"[bridge] Could not bind port {port}: {exc}")
+        raise
 
     def _serve():
         logger.info(f"[bridge] Bot bridge listening on http://127.0.0.1:{port}")
