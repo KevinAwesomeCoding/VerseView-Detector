@@ -216,6 +216,13 @@ def fuzzy_correct_book_names(text: str) -> str:
 
 def convert_word_numbers_eng(text):
     text = text.replace("-", " ")
+    # Separate trailing sentence punctuation from tokens so number words at a
+    # clause/sentence end ("four." / "four,") are still recognized. Without this,
+    # "twenty four." → "20 four." (units digit dropped) so e.g. "Acts chapter
+    # twenty verse twenty four." mis-parsed to Acts 20:20 instead of 20:24.
+    # Colons and the Devanagari danda (।) are NOT stripped — they are verse
+    # separators used later in the parser.
+    text = re.sub(r"[.,!?;]+", " ", text)
     words = text.split()
     result = []
     i = 0
