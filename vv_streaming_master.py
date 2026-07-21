@@ -5479,11 +5479,24 @@ STT_STREAM_ROLE: "contextvars.ContextVar[str | None]" = contextvars.ContextVar(
 
 # Pass this as `extra=` on a logging call to mark the record as actual
 # transcript text (the spoken words), as opposed to status/startup/reconnect
-# noise.  Only records flagged this way are routed into a transcript pane; the
-# stream role (primary/secondary) is taken from STT_STREAM_ROLE.  Everything
-# else — including each stream's own connect/reconnect messages — stays in the
-# neutral log area so the transcript panes show transcript text only.
+# noise.  Only records flagged this way are routed into a transcript pane.
+# NOTE: this base flag carries NO stream role. Use _transcript_extra(is_secondary)
+# below so every transcript record also carries an EXPLICIT, immutable
+# `vv_stream_role` ("primary"/"secondary"). Pane routing must switch on that
+# explicit value — never on STT_STREAM_ROLE (a contextvar that is lost the moment
+# a transcript is logged outside the stream's asyncio task, e.g. from a provider
+# SDK callback thread or a run_in_executor continuation, which is exactly how
+# text leaked into the wrong pane). Everything else — each stream's own
+# connect/reconnect messages — stays unflagged and lands in the neutral log area.
 TRANSCRIPT_LOG_EXTRA = {"vv_transcript": True}
+
+
+def _transcript_extra(is_secondary: bool) -> dict:
+    """Return the `extra=` dict for a transcript log line, tagged with an
+    explicit, immutable stream role so the GUI routes it deterministically
+    without reading any implicit thread/task context."""
+    return {"vv_transcript": True,
+            "vv_stream_role": "secondary" if is_secondary else "primary"}
 
 
 def create_transcript_handler(controller, is_secondary: bool, tag: str, parser):
@@ -5493,6 +5506,10 @@ def create_transcript_handler(controller, is_secondary: bool, tag: str, parser):
     Finals go through the degenerate-chunk guard → full transcript pipeline.
     """
     partial_context = [""]
+    # Immutable per-stream role, bound ONCE at handler creation (this function is
+    # called separately for the primary and secondary streams, each with its own
+    # is_secondary). Stamped on every transcript record so routing is airtight.
+    _tx_extra = _transcript_extra(is_secondary)
 
     def handle_transcript(sentence: str, is_final: bool, metadata: dict = None):
         global full_sermon_transcript, full_sermon_transcript_secondary, _last_transcript_time
@@ -5510,7 +5527,7 @@ def create_transcript_handler(controller, is_secondary: bool, tag: str, parser):
         if _drop_if_degenerate(sentence, tag):
             return
 
-        logger.info(f"📝 {tag} {sentence}", extra=TRANSCRIPT_LOG_EXTRA)
+        logger.info(f"📝 {tag} {sentence}", extra=_tx_extra)
         if is_secondary:
             full_sermon_transcript_secondary += " " + sentence.strip()
         else:
@@ -5544,6 +5561,9 @@ def create_sarvam_transcript_handler(controller, is_secondary: bool, tag: str, p
         colon-notation references that only surface after translation
     """
     partial_context = [""]
+    # Immutable per-stream role (see create_transcript_handler) — stamped on every
+    # transcript record so routing never depends on implicit thread/task context.
+    _tx_extra = _transcript_extra(is_secondary)
 
     def handle_transcript(sentence: str, is_final: bool, metadata: dict = None):
         global full_sermon_transcript, full_sermon_transcript_secondary, _last_transcript_time
@@ -5558,14 +5578,14 @@ def create_sarvam_transcript_handler(controller, is_secondary: bool, tag: str, p
         english_text = translate_to_english(sentence)
 
         if transliteration:
-            logger.info(f"📝 {tag} [Manglish] {sentence}", extra=TRANSCRIPT_LOG_EXTRA)
+            logger.info(f"📝 {tag} [Manglish] {sentence}", extra=_tx_extra)
             if english_text and english_text != sentence:
-                logger.info(f"🔤 {tag} [Manglish→EN] {english_text}", extra=TRANSCRIPT_LOG_EXTRA)
+                logger.info(f"🔤 {tag} [Manglish→EN] {english_text}", extra=_tx_extra)
         else:
             display = sentence if show_malayalam_raw else english_text
-            logger.info(f"📝 {tag} {display}", extra=TRANSCRIPT_LOG_EXTRA)
+            logger.info(f"📝 {tag} {display}", extra=_tx_extra)
             if show_malayalam_raw and english_text != sentence:
-                logger.info(f"🔤 {tag} {english_text}", extra=TRANSCRIPT_LOG_EXTRA)
+                logger.info(f"🔤 {tag} {english_text}", extra=_tx_extra)
 
         check_verse_queue(english_text, controller)
 

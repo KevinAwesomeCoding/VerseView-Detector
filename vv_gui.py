@@ -79,6 +79,13 @@ ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
 
 
+# ── DESIGN SYSTEM ──
+# Established in Part 1, now sourced from the shared ui_theme module so the Live
+# Points tab (live_points_app.py) uses the EXACT same constants — one system, no
+# parallel styles. Star-import keeps every Part-1 reference (COL_*, FS_*, PAD_*)
+# working as a plain module global.
+from ui_theme import *  # noqa: F401,F403
+
 
 class GUILogHandler(logging.Handler):
     def __init__(self, callback):
@@ -87,22 +94,42 @@ class GUILogHandler(logging.Handler):
 
 
     def emit(self, record):
-        # Decide pane routing from EXPLICIT metadata, never by parsing the
-        # visible "[PRI-…]/[SEC-…]" text:
-        #   • record.vv_transcript (set via extra=) marks a line as transcript
-        #     text — only these are eligible for a transcript pane.
-        #   • engine.STT_STREAM_ROLE (a contextvar) tells which stream produced
-        #     it.  emit() runs synchronously inside the same asyncio task — and
-        #     therefore the same context — that logged the record, so the role
-        #     is still accurate here.
+        # Decide pane routing from an EXPLICIT, immutable per-stream identifier —
+        # never by parsing the visible "[PRI-…]/[SEC-…]" text, and never by an
+        # implicit thread/task context:
+        #   • record.vv_transcript marks a line as transcript text (only these
+        #     are eligible for a transcript pane).
+        #   • record.vv_stream_role ("primary"/"secondary") is stamped by the
+        #     engine's transcript handler at stream creation and travels WITH the
+        #     record, so it is correct regardless of which thread emits the log.
         # Status/startup/reconnect lines are NOT flagged vv_transcript, so they
         # resolve to role=None and stay in the neutral (primary) log area.
         stream_role = None
         if getattr(record, "vv_transcript", False):
-            try:
-                stream_role = engine.STT_STREAM_ROLE.get()
-            except Exception:
-                stream_role = None
+            role = getattr(record, "vv_stream_role", None)
+            if role in ("primary", "secondary"):
+                stream_role = role
+            else:
+                # Legacy/edge fallback ONLY (a transcript record without an
+                # explicit role): try the contextvar, else route to the neutral
+                # pane — never guess by content/timing.
+                try:
+                    cv = engine.STT_STREAM_ROLE.get()
+                except Exception:
+                    cv = None
+                if cv in ("primary", "secondary"):
+                    stream_role = cv
+                else:
+                    stream_role = None   # ambiguous → neutral pane
+                    # Defensive debug (stderr, never re-enters logging): a
+                    # transcript event with no resolvable role should not happen
+                    # once handlers stamp the role — surface it if it ever does.
+                    try:
+                        import sys as _sys
+                        print("[VerseView] transcript log with no stream role — "
+                              "routed to neutral pane", file=_sys.stderr)
+                    except Exception:
+                        pass
         self.callback(self.format(record), stream_role)
 
 
@@ -152,11 +179,71 @@ class VerseViewApp(ctk.CTk):
 
 
     # ─────────────────────────────────────────────────
+    # DESIGN-SYSTEM HELPERS  (reused across tabs — Part 2 too)
+    # ─────────────────────────────────────────────────
+    def _f(self, size=FS_BODY, weight="normal"):
+        """Font in the app's typographic scale."""
+        return ctk.CTkFont(size=size, weight=weight)
+
+    def _section_card(self, parent, title, *, pack=True):
+        """A section header label followed by a rounded card container.
+
+        Returns the card frame (column 0 stretches). Widgets grouped inside a
+        card read as one intentional block instead of a flat stack of rows."""
+        ctk.CTkLabel(
+            parent, text=title, anchor="w",
+            font=self._f(FS_SECTION, "bold"), text_color=COL_TEXT_MUTED,
+        ).pack(fill="x", padx=PAD_S, pady=(PAD_L, PAD_S))
+        card = ctk.CTkFrame(
+            parent, fg_color=COL_CARD, corner_radius=10,
+            border_width=1, border_color=COL_CARD_BORDER,
+        )
+        if pack:
+            card.pack(fill="x", padx=PAD_XS, pady=(0, PAD_S))
+        card.grid_columnconfigure(0, weight=1)
+        return card
+
+    def _card_field(self, card, r, label, *, show="", width=110,
+                    default="", placeholder=""):
+        """A label + entry row inside a card (label col 0, entry col 1 stretches).
+        Returns the entry so the caller can keep its widget reference/attr."""
+        card.grid_columnconfigure(1, weight=1)
+        ctk.CTkLabel(
+            card, text=label, anchor="w",
+            font=self._f(FS_LABEL), text_color=COL_TEXT,
+        ).grid(row=r, column=0, sticky="w", padx=(PAD_M, PAD_S), pady=PAD_S)
+        e = ctk.CTkEntry(card, width=width, show=show, placeholder_text=placeholder)
+        if default:
+            e.insert(0, default)
+        e.grid(row=r, column=1, sticky="ew", padx=(PAD_S, PAD_M), pady=PAD_S)
+        return e
+
+    def _neutral_button(self, parent, text, command, **kw):
+        """A consistent neutral / secondary button (outlined, muted)."""
+        opts = dict(
+            fg_color="transparent", border_width=1, border_color=COL_BTN_BORDER,
+            text_color=COL_BTN_TEXT, hover_color=COL_BTN_HOVER,
+            font=self._f(FS_BODY),
+        )
+        opts.update(kw)
+        return ctk.CTkButton(parent, text=text, command=command, **opts)
+
+    # ─────────────────────────────────────────────────
     # UI BUILD
     # ─────────────────────────────────────────────────
     def _build_ui(self):
         self.tabview = ctk.CTkTabview(self)
-        self.tabview.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+        self.tabview.pack(fill="both", expand=True, padx=PAD_M, pady=(0, PAD_M))
+        # Tie the tab bar to the design system so the selected tab uses the app
+        # accent — one cohesive shell across all three tabs.
+        self.tabview.configure(
+            segmented_button_selected_color=COL_ACCENT,
+            segmented_button_selected_hover_color=COL_ACCENT_HOVER,
+        )
+        try:
+            self.tabview._segmented_button.configure(font=self._f(FS_LABEL, "bold"))
+        except Exception:
+            pass
 
 
         # Add the two tabs
@@ -179,124 +266,160 @@ class VerseViewApp(ctk.CTk):
         left.grid_columnconfigure(0, weight=1)
 
 
+        # ── TOP TOOLBAR ──────────────────────────────────────────────────────
+        # Two visually distinct groups: PRIMARY session controls in a raised card
+        # on the left (Start / Stop / status), and secondary UTILITIES on the
+        # right, with the destructive Emergency Quit fenced off behind a divider.
         top = ctk.CTkFrame(left, fg_color="transparent")
-        top.grid(row=0, column=0, padx=10, pady=(10, 6), sticky="ew")
+        top.grid(row=0, column=0, padx=PAD_M, pady=(PAD_M, PAD_S), sticky="ew")
 
+        # ── Primary cluster: Start / Stop / status (carded) ──
+        session = ctk.CTkFrame(top, fg_color=COL_CARD, corner_radius=10,
+                               border_width=1, border_color=COL_CARD_BORDER)
+        session.pack(side="left")
 
         self.btn_start = ctk.CTkButton(
-            top, text="▶  START", width=130,
-            fg_color="#2a7a2a", hover_color="#1f5c1f",
-            font=ctk.CTkFont(size=13, weight="bold"),
+            session, text="▶  Start", width=104, height=34,
+            fg_color=COL_ACCENT, hover_color=COL_ACCENT_HOVER,
+            font=self._f(13, "bold"),
             command=self._start
         )
-        self.btn_start.pack(side="left", padx=(0, 8))
-
+        self.btn_start.pack(side="left", padx=(PAD_M, PAD_S), pady=PAD_M)
 
         self.btn_stop = ctk.CTkButton(
-            top, text="⏹  STOP", width=130,
-            fg_color="#7a2a2a", hover_color="#5c1f1f",
-            font=ctk.CTkFont(size=13, weight="bold"),
+            session, text="■  Stop", width=104, height=34,
+            fg_color=COL_DANGER, hover_color=COL_DANGER_HOVER,
+            font=self._f(13, "bold"),
             state="disabled", command=self._stop
         )
-        self.btn_stop.pack(side="left", padx=(0, 16))
-
+        self.btn_stop.pack(side="left", padx=(0, PAD_M), pady=PAD_M)
 
         self.lbl_status = ctk.CTkLabel(
-            top, text="● Stopped",
-            text_color="#666666",
-            font=ctk.CTkFont(size=13)
+            session, text="● Stopped",
+            text_color=COL_TEXT_MUTED,
+            font=self._f(13, "bold")
         )
-        self.lbl_status.pack(side="left")
+        self.lbl_status.pack(side="left", padx=(0, PAD_L))
 
-        self.btn_worship = ctk.CTkButton(
-            top, text="🎵 Worship Mode", width=130,
-            fg_color="transparent", border_color="#5a3a8a", border_width=2,
-            text_color=("gray20", "gray90"), hover_color="#3f2060",
-            font=ctk.CTkFont(size=13, weight="bold"),
-            command=self._toggle_worship_mode
-        )
-        self.btn_worship.pack(side="right", padx=(16, 0))
+        # ── Utility cluster: Worship / Update / Pin  |  Emergency Quit ──
+        utils = ctk.CTkFrame(top, fg_color="transparent")
+        utils.pack(side="right")
 
-        # Update / check-for-update button — always visible
-        self._update_info = None
-        self.btn_update = ctk.CTkButton(
-            top, text="⟳ Check for Update", width=160,
-            fg_color="transparent", border_color=("gray60", "gray40"), border_width=1,
-            text_color=("gray40", "gray70"), hover_color=("gray85", "gray25"),
-            font=ctk.CTkFont(size=12),
-            command=self._manual_check_update
-        )
-        self.btn_update.pack(side="right", padx=(8, 0))
-
-        # Always-on-top pin button
-        self.btn_pin = ctk.CTkButton(
-            top, text="📌", width=36,
-            fg_color="transparent", border_color=("gray60", "gray40"), border_width=1,
-            text_color=("gray40", "gray70"), hover_color=("gray85", "gray25"),
-            font=ctk.CTkFont(size=14),
-            command=self._toggle_pin
-        )
-        self.btn_pin.pack(side="right", padx=(4, 0))
-
-        # Emergency Quit button — force-kills STT, saves session, skips summariser
+        # Emergency Quit — guarded: fenced behind a divider, outlined danger so a
+        # deliberate click is required (packed first so it sits at the far right).
         self.btn_eq = ctk.CTkButton(
-            top, text="⏻", width=36,
-            fg_color="#7a1a1a", border_color="#cc2222", border_width=1,
-            text_color="white", hover_color="#a02020",
-            font=ctk.CTkFont(size=15, weight="bold"),
+            utils, text="⏻", width=40, height=34,
+            fg_color="transparent", border_color=COL_DANGER, border_width=2,
+            text_color=COL_DANGER, hover_color=COL_DANGER_TINT,
+            font=self._f(16, "bold"),
             command=self._emergency_quit
         )
-        self.btn_eq.pack(side="right", padx=(4, 0))
+        self.btn_eq.pack(side="right", padx=(PAD_M, 0))
 
+        ctk.CTkFrame(utils, width=1, height=26, fg_color=COL_DIVIDER).pack(
+            side="right", padx=PAD_M, pady=PAD_S)
+
+        # Always-on-top pin
+        self.btn_pin = ctk.CTkButton(
+            utils, text="📌", width=38, height=34,
+            fg_color="transparent", border_color=COL_BTN_BORDER, border_width=1,
+            text_color=COL_BTN_TEXT, hover_color=COL_BTN_HOVER,
+            font=self._f(14),
+            command=self._toggle_pin
+        )
+        self.btn_pin.pack(side="right", padx=PAD_S)
+
+        # Update / check-for-update — always visible
+        self._update_info = None
+        self.btn_update = ctk.CTkButton(
+            utils, text="⟳ Check for Update", width=156, height=34,
+            fg_color="transparent", border_color=COL_BTN_BORDER, border_width=1,
+            text_color=COL_BTN_TEXT, hover_color=COL_BTN_HOVER,
+            font=self._f(FS_SMALL),
+            command=self._manual_check_update
+        )
+        self.btn_update.pack(side="right", padx=PAD_S)
+
+        self.btn_worship = ctk.CTkButton(
+            utils, text="🎵 Worship", width=112, height=34,
+            fg_color="transparent", border_color=COL_TOGGLE, border_width=2,
+            text_color=COL_TEXT, hover_color=COL_TOGGLE_HOVER,
+            font=self._f(FS_BODY, "bold"),
+            command=self._toggle_worship_mode
+        )
+        self.btn_worship.pack(side="right", padx=PAD_S)
+
+
+        # ── VERTICAL SPLIT: transcript/history (top) ⇕ Suggestions (bottom) ──
+        # Dedicated container so the Suggestions panel resizes with the SAME
+        # draggable-divider pattern as the primary/secondary transcript split —
+        # only vertical. Row weights (in-memory, exactly like the transcript
+        # split's _left_weight/_right_weight) hold the ratio for the session.
+        self._sugg_top_weight    = 1000   # transcript + history region
+        self._sugg_bottom_weight = 300    # Suggestions panel
+        mid = ctk.CTkFrame(left, fg_color="transparent")
+        mid.grid(row=1, column=0, padx=PAD_M, pady=(0, PAD_M), sticky="nsew")
+        mid.grid_columnconfigure(0, weight=1)
+        mid.grid_rowconfigure(0, weight=self._sugg_top_weight)      # transcript/history — grows
+        mid.grid_rowconfigure(1, weight=0)                           # divider — fixed
+        mid.grid_rowconfigure(2, weight=self._sugg_bottom_weight)    # Suggestions — grows
+        self._sugg_split_container = mid
 
         # ── SPLIT FRAME FOR LOGS AND HISTORY ──
-        split_frame = ctk.CTkFrame(left, fg_color="transparent")
-        split_frame.grid(row=1, column=0, padx=10, pady=(0, 10), sticky="nsew")
+        split_frame = ctk.CTkFrame(mid, fg_color="transparent")
+        split_frame.grid(row=0, column=0, sticky="nsew")
         split_frame.grid_rowconfigure(1, weight=1)
-        split_frame.grid_columnconfigure(0, weight=1) 
+        split_frame.grid_columnconfigure(0, weight=1)
         split_frame.grid_columnconfigure(1, weight=0) # lock sidebar width
 
         # Container for the log area — expands horizontally to support split view
         self._log_container = ctk.CTkFrame(split_frame, fg_color="transparent")
-        self._log_container.grid(row=1, column=0, padx=(0, 2), sticky="nsew")
+        self._log_container.grid(row=1, column=0, padx=(0, PAD_S), sticky="nsew")
         self._log_container.grid_rowconfigure(1, weight=1)
         self._log_container.grid_columnconfigure(0, weight=1)   # primary — always present
-        self._log_container.grid_columnconfigure(1, weight=0)   # divider — fixed 2px
+        self._log_container.grid_columnconfigure(1, weight=0)   # divider — fixed
         self._log_container.grid_columnconfigure(2, weight=1)   # secondary — shown in dual mode
 
         # Primary header label (shown only in dual mode)
         self._pri_header = ctk.CTkLabel(
             self._log_container, text="Primary",
-            font=ctk.CTkFont(size=11, weight="bold"),
-            text_color=("gray35", "gray65"), anchor="w",
+            font=self._f(FS_SMALL, "bold"),
+            text_color=COL_TEXT_MUTED, anchor="w",
         )
         # NOT gridded yet — _set_dual_log_view() controls visibility
 
+        # Transcript pane styling — a calm sunken panel with a comfortable
+        # reading font so it scans cleanly during a live service.
         self.log_box = ctk.CTkTextbox(
             self._log_container, state="disabled",
-            font=("Segoe UI", 12), wrap="word"
+            font=("Segoe UI", 13), wrap="word",
+            fg_color=COL_INSET, corner_radius=8,
+            border_width=1, border_color=COL_CARD_BORDER,
         )
         self.log_box.grid(row=1, column=0, sticky="nsew")
 
         # Secondary header + panel (hidden until dual mode is enabled)
         self._sec_header = ctk.CTkLabel(
             self._log_container, text="Secondary",
-            font=ctk.CTkFont(size=11, weight="bold"),
-            text_color=("gray35", "gray65"), anchor="w",
+            font=self._f(FS_SMALL, "bold"),
+            text_color=COL_TEXT_MUTED, anchor="w",
         )
         self._sec_log_box = ctk.CTkTextbox(
             self._log_container, state="disabled",
-            font=("Segoe UI", 12), wrap="word"
+            font=("Segoe UI", 13), wrap="word",
+            fg_color=COL_INSET, corner_radius=8,
+            border_width=1, border_color=COL_CARD_BORDER,
         )
         self._left_weight = 1000
         self._right_weight = 1000
 
-        # Divider between the two panels (hidden until dual mode enabled)
+        # Divider between the two panels (hidden until dual mode enabled) —
+        # a clear, draggable rule so the split reads at a glance.
         self._log_divider = ctk.CTkFrame(
-            self._log_container, width=4, fg_color=("gray60", "gray40"),
+            self._log_container, width=3, fg_color=COL_DIVIDER,
             cursor="sb_h_double_arrow"
         )
-        
+
         def _on_divider_drag(event):
             c_width = self._log_container.winfo_width()
             if c_width < 100: return
@@ -315,7 +438,7 @@ class VerseViewApp(ctk.CTk):
 
 
         # Read the actual rendered bg color from log_box so scroll frames match exactly
-        _log_fg = ("gray86", "gray17")
+        _log_fg = COL_INSET
 
         history_right = ctk.CTkFrame(split_frame, fg_color="transparent", width=240)
         history_right.grid(row=1, column=1, padx=(2, 0), sticky="nsew")
@@ -397,51 +520,75 @@ class VerseViewApp(ctk.CTk):
         self.manual_verse_entry.bind("<Return>", lambda e: self._send_manual_verse())
 
 
-        # ── VERSE SUGGESTIONS PANEL (Contextual Watcher — Part 2) ──
-        # A compact, fixed-height panel that lives BELOW the transcript/history
-        # split (left row 2) and ABOVE the action buttons (moved to left row 3).
-        # It is entirely separate from the primary/secondary transcript panes in
-        # split_frame — it never touches log_box / _sec_log_box.
-        self._build_suggestions_panel(left)
+        # ── DRAGGABLE DIVIDER between transcript/history and the Suggestions panel ──
+        # Same interaction pattern as the transcript divider (self._log_divider),
+        # just horizontal: a thin COL_DIVIDER bar that adjusts grid ROW weights on
+        # <B1-Motion>, with min-size clamping so neither region collapses to zero.
+        def _on_sugg_divider_drag(event):
+            c_height = mid.winfo_height()
+            if c_height < 120:
+                return
+            y_rel = event.y_root - mid.winfo_rooty()
+            min_top    = 140   # transcript/history keeps a usable height
+            min_bottom = 70    # Suggestions keeps at least its header + status visible
+            if y_rel < min_top:
+                y_rel = min_top
+            elif y_rel > c_height - min_bottom:
+                y_rel = c_height - min_bottom
+            self._sugg_top_weight    = int((y_rel / c_height) * 1000)
+            self._sugg_bottom_weight = 1000 - self._sugg_top_weight
+            mid.grid_rowconfigure(0, weight=self._sugg_top_weight)
+            mid.grid_rowconfigure(2, weight=self._sugg_bottom_weight)
+
+        self._sugg_divider = ctk.CTkFrame(
+            mid, height=3, fg_color=COL_DIVIDER, cursor="sb_v_double_arrow"
+        )
+        self._sugg_divider.grid(row=1, column=0, sticky="ew", pady=PAD_S)
+        self._sugg_divider.bind("<B1-Motion>", _on_sugg_divider_drag)
+        self._sugg_divider.bind("<Button-1>", _on_sugg_divider_drag)
+        # Keep a reference (harmless) so the drag behaviour is unit-testable.
+        self._on_sugg_divider_drag = _on_sugg_divider_drag
+
+        # ── VERSE SUGGESTIONS PANEL (Contextual Watcher) ──
+        # Now a RESIZABLE panel: it lives at mid row 2 and grows/shrinks via the
+        # divider above. It is entirely separate from the primary/secondary
+        # transcript panes in split_frame — it never touches log_box / _sec_log_box.
+        self._build_suggestions_panel(mid)
 
         # ── ACTION BUTTONS ROW ──
         action_frame = ctk.CTkFrame(left, fg_color="transparent")
-        action_frame.grid(row=3, column=0, padx=10, pady=(0, 10), sticky="ew")
+        action_frame.grid(row=2, column=0, padx=PAD_M, pady=(0, PAD_M), sticky="ew")
         action_frame.grid_columnconfigure(1, weight=1)
 
-
-        ctk.CTkButton(
-            action_frame, text="Clear Log", height=28, width=70,
-            fg_color="transparent", border_width=1,
-            text_color=("gray40", "gray60"),
-            command=self._clear_log
-        ).grid(row=0, column=0, padx=(0, 5), sticky="w")
-
+        self._neutral_button(
+            action_frame, "Clear Log", self._clear_log,
+            height=32, width=84,
+        ).grid(row=0, column=0, padx=(0, PAD_M), sticky="w")
 
         self.btn_summary = ctk.CTkButton(
-            action_frame, text="📝 Generate Sermon Notes", height=32,
-            fg_color="#a07020", hover_color="#805010",
-            font=ctk.CTkFont(size=13, weight="bold"),
+            action_frame, text="📝  Generate Sermon Notes", height=34,
+            fg_color=COL_WARN, hover_color=COL_WARN_HOVER,
+            font=self._f(13, "bold"), text_color="white",
             command=self._generate_summary
         )
-        self.btn_summary.grid(row=0, column=1, padx=5, sticky="ew")
-
+        self.btn_summary.grid(row=0, column=1, padx=PAD_M, sticky="ew")
 
         self.btn_clear_sermon = ctk.CTkButton(
-            action_frame, text="🗑️ Clear Memory", height=28, width=70,
-            fg_color="transparent", border_width=1,
-            text_color=("#b53b3b", "#e05a5a"),
+            action_frame, text="🗑  Clear Memory", height=32, width=120,
+            fg_color="transparent", border_width=1, border_color=COL_DANGER,
+            text_color=COL_DANGER, hover_color=COL_DANGER_TINT,
+            font=self._f(FS_BODY),
             command=self._clear_sermon_memory
         )
-        self.btn_clear_sermon.grid(row=0, column=2, padx=(5, 0), sticky="e")
+        self.btn_clear_sermon.grid(row=0, column=2, padx=(PAD_M, 0), sticky="e")
 
 
         # ── RIGHT PANEL ──
         right = ctk.CTkScrollableFrame(
             self.tab_vv, label_text="⚙   Settings",
-            label_font=ctk.CTkFont(size=14, weight="bold")
+            label_font=self._f(FS_TITLE, "bold")
         )
-        right.grid(row=0, column=1, padx=(6, 12), pady=12, sticky="nsew")
+        right.grid(row=0, column=1, padx=(PAD_S, PAD_L), pady=PAD_L, sticky="nsew")
         right.grid_columnconfigure(0, weight=1)
 
 
@@ -452,10 +599,10 @@ class VerseViewApp(ctk.CTk):
             nonlocal row
             lbl = ctk.CTkLabel(
                 right, text=text, anchor="w",
-                font=ctk.CTkFont(size=12, weight="bold"),
-                text_color=("gray30", "gray70")
+                font=self._f(FS_SECTION, "bold"),
+                text_color=COL_TEXT_MUTED
             )
-            lbl.grid(row=row, column=0, sticky="ew", padx=14, pady=(14, 2))
+            lbl.grid(row=row, column=0, sticky="ew", padx=PAD_L, pady=(PAD_L, PAD_S))
             row += 1  # type: ignore
             return lbl
 
@@ -544,17 +691,17 @@ class VerseViewApp(ctk.CTk):
         # ── Dual STT toggle ──
         self._dual_stt_open = False
         self.btn_dual_stt = ctk.CTkButton(
-            right, text="▶   Dual STT Mode",
-            fg_color="transparent",
-            text_color=("gray40", "gray60"),
-            anchor="w", hover=False,
+            right, text="▶   Dual STT Mode", height=30,
+            fg_color="transparent", hover_color=COL_BTN_HOVER,
+            text_color=COL_TEXT_MUTED, font=self._f(FS_BODY, "bold"),
+            anchor="w",
             command=self._toggle_dual_stt
         )
-        self.btn_dual_stt.grid(row=row, column=0, sticky="ew", padx=10, pady=(4, 2))
+        self.btn_dual_stt.grid(row=row, column=0, sticky="ew", padx=PAD_M, pady=(PAD_S, PAD_XS))
         self._dual_stt_row = row
         row += 2  # row N+1 is reserved for dual_stt_frame when expanded
 
-        self.dual_stt_frame = ctk.CTkFrame(right)
+        self.dual_stt_frame = ctk.CTkFrame(right, fg_color="transparent")
         self.dual_stt_frame.grid_columnconfigure(0, weight=1)
         self._build_dual_stt()
 
@@ -572,14 +719,11 @@ class VerseViewApp(ctk.CTk):
         sep_label("Microphone")
         self.mic_var  = ctk.StringVar(value="Loading...")
         self.mic_menu = ctk.CTkOptionMenu(right, variable=self.mic_var, values=["Loading..."])
-        self.mic_menu.grid(row=row, column=0, sticky="ew", padx=14, pady=(0, 4))
+        self.mic_menu.grid(row=row, column=0, sticky="ew", padx=PAD_L, pady=(0, PAD_S))
         row += 1
-        ctk.CTkButton(
-            right, text="↺  Refresh Mics", height=28,
-            fg_color="transparent", border_width=1,
-            text_color=("gray40", "gray60"),
-            command=self._populate_mics
-        ).grid(row=row, column=0, sticky="ew", padx=14, pady=(0, 8))
+        self._neutral_button(
+            right, "↺  Refresh Mics", self._populate_mics, height=30,
+        ).grid(row=row, column=0, sticky="ew", padx=PAD_L, pady=(0, PAD_M))
         row += 1
 
 
@@ -614,66 +758,64 @@ class VerseViewApp(ctk.CTk):
 
 
         ctk.CTkButton(
-            right, text="📌  Set Context", height=28,
-            fg_color="#5a3a8a", hover_color="#3f2060",
+            right, text="📌  Set Context", height=32,
+            fg_color=COL_TOGGLE, hover_color=COL_TOGGLE_HOVER,
+            font=self._f(FS_BODY, "bold"),
             command=self._set_context
-        ).grid(row=row, column=0, sticky="ew", padx=14, pady=(0, 8))
+        ).grid(row=row, column=0, sticky="ew", padx=PAD_L, pady=(0, PAD_M))
         row += 1
 
 
         # ── Options toggle (checkboxes + confidence + panic) ──
         self._opts_open = False
         self.btn_opts = ctk.CTkButton(
-            right, text="▶   Options",
-            fg_color="transparent",
-            text_color=("gray40", "gray60"),
-            anchor="w", hover=False,
+            right, text="▶   Options", height=30,
+            fg_color="transparent", hover_color=COL_BTN_HOVER,
+            text_color=COL_TEXT_MUTED, font=self._f(FS_BODY, "bold"),
+            anchor="w",
             command=self._toggle_options
         )
-        self.btn_opts.grid(row=row, column=0, sticky="ew", padx=10, pady=(14, 2))
+        self.btn_opts.grid(row=row, column=0, sticky="ew", padx=PAD_M, pady=(PAD_L, PAD_XS))
         self._opts_row = row
         row += 2  # row N+1 is reserved for opts_frame when expanded
 
-        self.opts_frame = ctk.CTkFrame(right)
+        self.opts_frame = ctk.CTkFrame(right, fg_color="transparent")
         self.opts_frame.grid_columnconfigure(0, weight=1)
         self._build_options()
 
         # ── Advanced toggle ──
         self._adv_open = False
         self.btn_adv = ctk.CTkButton(
-            right, text="▶   Advanced Settings",
-            fg_color="transparent",
-            text_color=("gray40", "gray60"),
-            anchor="w", hover=False,
+            right, text="▶   Advanced Settings", height=30,
+            fg_color="transparent", hover_color=COL_BTN_HOVER,
+            text_color=COL_TEXT_MUTED, font=self._f(FS_BODY, "bold"),
+            anchor="w",
             command=self._toggle_advanced
         )
-        self.btn_adv.grid(row=row, column=0, sticky="ew", padx=10, pady=(4, 2))
+        self.btn_adv.grid(row=row, column=0, sticky="ew", padx=PAD_M, pady=(PAD_S, PAD_XS))
         self._adv_row = row
         row += 2  # row N+1 is reserved for adv_frame when expanded
 
-        self.adv_frame = ctk.CTkFrame(right)
+        self.adv_frame = ctk.CTkFrame(right, fg_color="transparent")
         self.adv_frame.grid_columnconfigure(1, weight=1)
         self._build_advanced()
 
         ctk.CTkButton(
-            right, text="💾  Save Settings",
-            fg_color="#1a5a8a", hover_color="#144a72",
+            right, text="💾  Save Settings", height=36,
+            fg_color=COL_ACCENT, hover_color=COL_ACCENT_HOVER,
+            font=self._f(13, "bold"),
             command=self._save_settings
-        ).grid(row=row + 10, column=0, sticky="ew", padx=14, pady=(16, 4))
+        ).grid(row=row + 10, column=0, sticky="ew", padx=PAD_L, pady=(PAD_L, PAD_S))
 
 
-        ctk.CTkButton(
-            right, text="📤  Export Settings",
-            fg_color="#4a4a4a", hover_color="#333333",
-            command=self._export_settings
-        ).grid(row=row + 11, column=0, sticky="ew", padx=14, pady=(0, 4))
+        self._neutral_button(
+            right, "📤  Export Settings", self._export_settings, height=30,
+        ).grid(row=row + 11, column=0, sticky="ew", padx=PAD_L, pady=(0, PAD_S))
 
 
-        ctk.CTkButton(
-            right, text="📥  Import Settings",
-            fg_color="#4a4a4a", hover_color="#333333",
-            command=self._import_settings
-        ).grid(row=row + 12, column=0, sticky="ew", padx=14, pady=(0, 8))
+        self._neutral_button(
+            right, "📥  Import Settings", self._import_settings, height=30,
+        ).grid(row=row + 12, column=0, sticky="ew", padx=PAD_L, pady=(0, PAD_M))
 
         # Version badge — 🏷 icon + app version + build tag, bottom-right of settings tab
         ver_frame = ctk.CTkFrame(self.tab_vv, fg_color="transparent")
@@ -706,31 +848,39 @@ class VerseViewApp(ctk.CTk):
     def _build_bot_tab(self):
         tab = self.tab_bot
         tab.grid_columnconfigure(0, weight=1)
-        tab.grid_rowconfigure(3, weight=1)
+        tab.grid_rowconfigure(5, weight=1)   # log box grows
 
         # ── Header ────────────────────────────────────────────────────────────
         ctk.CTkLabel(
-            tab, text="Discord Bot Control",
-            font=ctk.CTkFont(size=15, weight="bold")
-        ).grid(row=0, column=0, sticky="w", padx=16, pady=(14, 4))
+            tab, text="🤖  Discord Bot Control",
+            font=self._f(FS_TITLE, "bold"), text_color=COL_TEXT,
+        ).grid(row=0, column=0, sticky="w", padx=PAD_L, pady=(PAD_L, PAD_S))
 
-        # ── Config fields ─────────────────────────────────────────────────────
-        fields_frame = ctk.CTkFrame(tab)
-        fields_frame.grid(row=1, column=0, sticky="ew", padx=14, pady=(0, 8))
+        # ── Connection card ───────────────────────────────────────────────────
+        ctk.CTkLabel(
+            tab, text="Connection", anchor="w",
+            font=self._f(FS_SECTION, "bold"), text_color=COL_TEXT_MUTED,
+        ).grid(row=1, column=0, sticky="w", padx=PAD_L, pady=(PAD_S, PAD_S))
+
+        fields_frame = ctk.CTkFrame(tab, fg_color=COL_CARD, corner_radius=10,
+                                    border_width=1, border_color=COL_CARD_BORDER)
+        fields_frame.grid(row=2, column=0, sticky="ew", padx=PAD_L, pady=(0, PAD_M))
         fields_frame.grid_columnconfigure(1, weight=1)
 
         def field_row(parent, row, label, placeholder, show=None):
-            ctk.CTkLabel(parent, text=label, width=90, anchor="w").grid(
-                row=row, column=0, padx=(10, 6), pady=5, sticky="w")
+            ctk.CTkLabel(parent, text=label, width=118, anchor="w",
+                         font=self._f(FS_LABEL), text_color=COL_TEXT).grid(
+                row=row, column=0, padx=(PAD_M, PAD_S), pady=PAD_S, sticky="w")
             e = ctk.CTkEntry(parent, placeholder_text=placeholder, show=show or "")
-            e.grid(row=row, column=1, sticky="ew", padx=(0, 10), pady=5)
+            e.grid(row=row, column=1, sticky="ew", padx=(0, PAD_M), pady=PAD_S)
             return e
 
         # Token row with show/hide toggle
-        ctk.CTkLabel(fields_frame, text="Bot Token", width=90, anchor="w").grid(
-            row=0, column=0, padx=(10, 6), pady=5, sticky="w")
+        ctk.CTkLabel(fields_frame, text="Bot Token", width=118, anchor="w",
+                     font=self._f(FS_LABEL), text_color=COL_TEXT).grid(
+            row=0, column=0, padx=(PAD_M, PAD_S), pady=PAD_S, sticky="w")
         token_row = ctk.CTkFrame(fields_frame, fg_color="transparent")
-        token_row.grid(row=0, column=1, sticky="ew", padx=(0, 10), pady=5)
+        token_row.grid(row=0, column=1, sticky="ew", padx=(0, PAD_M), pady=PAD_S)
         token_row.grid_columnconfigure(0, weight=1)
 
         self._bot_token_shown = False
@@ -743,48 +893,60 @@ class VerseViewApp(ctk.CTk):
             self.bot_token_eye_btn.configure(text="🙈" if self._bot_token_shown else "👁")
 
         self.bot_token_eye_btn = ctk.CTkButton(
-            token_row, text="👁", width=32,
-            fg_color="transparent", hover_color=("gray80", "gray30"),
+            token_row, text="👁", width=34,
+            fg_color="transparent", border_width=1, border_color=COL_BTN_BORDER,
+            text_color=COL_BTN_TEXT, hover_color=COL_BTN_HOVER,
             command=_toggle_token_vis
         )
-        self.bot_token_eye_btn.grid(row=0, column=1, padx=(4, 0))
+        self.bot_token_eye_btn.grid(row=0, column=1, padx=(PAD_S, 0))
 
         self.bot_host_entry  = field_row(fields_frame, 1, "VV Host", "127.0.0.1")
         self.bot_port_entry  = field_row(fields_frame, 2, "VV Port", "50011")
         self.bot_guild_entry = field_row(fields_frame, 3, "Guild ID (optional)", "")
+        # Bottom breathing room inside the card
+        self.bot_guild_entry.grid_configure(pady=(PAD_S, PAD_M))
 
         # ── Start / Stop buttons ──────────────────────────────────────────────
         btn_row = ctk.CTkFrame(tab, fg_color="transparent")
-        btn_row.grid(row=2, column=0, sticky="ew", padx=14, pady=(0, 8))
-
-        self.bot_status_lbl = ctk.CTkLabel(
-            btn_row, text="● Stopped",
-            text_color="#cc4444",
-            font=ctk.CTkFont(size=13, weight="bold")
-        )
-        self.bot_status_lbl.pack(side="left", padx=(0, 16))
+        btn_row.grid(row=3, column=0, sticky="ew", padx=PAD_L, pady=(0, PAD_M))
 
         self.bot_start_btn = ctk.CTkButton(
-            btn_row, text="▶  Start Bot", width=120,
-            fg_color="#2a7a2a", hover_color="#1f5c1f",
+            btn_row, text="▶  Start Bot", width=120, height=34,
+            fg_color=COL_ACCENT, hover_color=COL_ACCENT_HOVER,
+            font=self._f(13, "bold"),
             command=self._start_bot
         )
-        self.bot_start_btn.pack(side="left", padx=(0, 8))
+        self.bot_start_btn.pack(side="left", padx=(0, PAD_M))
 
         self.bot_stop_btn = ctk.CTkButton(
-            btn_row, text="⏹  Stop Bot", width=120,
-            fg_color="#7a2a2a", hover_color="#5c1f1f",
+            btn_row, text="■  Stop Bot", width=120, height=34,
+            fg_color=COL_DANGER, hover_color=COL_DANGER_HOVER,
+            font=self._f(13, "bold"),
             state="disabled",
             command=self._stop_bot
         )
-        self.bot_stop_btn.pack(side="left")
+        self.bot_stop_btn.pack(side="left", padx=(0, PAD_L))
+
+        self.bot_status_lbl = ctk.CTkLabel(
+            btn_row, text="● Stopped",
+            text_color=COL_DANGER,
+            font=self._f(13, "bold")
+        )
+        self.bot_status_lbl.pack(side="left")
 
         # ── Log box ───────────────────────────────────────────────────────────
+        ctk.CTkLabel(
+            tab, text="Bot Log", anchor="w",
+            font=self._f(FS_SECTION, "bold"), text_color=COL_TEXT_MUTED,
+        ).grid(row=4, column=0, sticky="w", padx=PAD_L, pady=(PAD_S, PAD_S))
+
         self.bot_log = ctk.CTkTextbox(
             tab, state="disabled",
-            font=("Courier", 11), wrap="word"
+            font=("Cascadia Mono", 12), wrap="word",
+            fg_color=COL_INSET, corner_radius=8,
+            border_width=1, border_color=COL_CARD_BORDER,
         )
-        self.bot_log.grid(row=3, column=0, sticky="nsew", padx=14, pady=(0, 14))
+        self.bot_log.grid(row=5, column=0, sticky="nsew", padx=PAD_L, pady=(0, PAD_L))
 
         # Load saved config
         self._load_bot_config()
@@ -821,7 +983,7 @@ class VerseViewApp(ctk.CTk):
             self._bot_log("✅ Engine connected — bridge controller refreshed.")
             bot_online = bool(self._bot_process and self._bot_process.poll() is None)
             if not bot_online:
-                self.bot_status_lbl.configure(text="● Ready", text_color="#a07a00")
+                self.bot_status_lbl.configure(text="● Ready", text_color=COL_WARN)
                 self.bot_start_btn.configure(state="normal")
         self.after(0, _update)       # always schedule onto the tkinter thread
 
@@ -904,7 +1066,7 @@ class VerseViewApp(ctk.CTk):
 
         self.bot_start_btn.configure(state="disabled")
         self.bot_stop_btn.configure(state="normal")
-        self.bot_status_lbl.configure(text="● Running", text_color="#2a7a2a")
+        self.bot_status_lbl.configure(text="● Running", text_color=COL_OK)
         self._bot_log("▶ Bot started.")
 
         # Stream stdout to log box
@@ -927,139 +1089,125 @@ class VerseViewApp(ctk.CTk):
         self.bot_start_btn.configure(state="normal")
         self.bot_stop_btn.configure(state="disabled")
         if self._running:
-            self.bot_status_lbl.configure(text="● Ready", text_color="#a07a00")
+            self.bot_status_lbl.configure(text="● Ready", text_color=COL_WARN)
         else:
-            self.bot_status_lbl.configure(text="● Stopped", text_color="#cc4444")
+            self.bot_status_lbl.configure(text="● Stopped", text_color=COL_DANGER)
         self._bot_process = None
 
 
 
+    # Panic button "resting" fill — reused by _record_panic_key / _on_panic_recorded
+    _PANIC_BTN_FG    = ("gray80", "#3a3a44")
+    _PANIC_BTN_HOVER = ("gray72", "#4a4a55")
+
+    def _opt_checkbox(self, card, r, text, var, command=None, state="normal"):
+        """Add a body-text checkbox to an Options card at row r."""
+        cb = ctk.CTkCheckBox(
+            card, text=text, variable=var, command=command, state=state,
+            font=self._f(FS_BODY), text_color=COL_TEXT,
+            checkbox_width=20, checkbox_height=20,
+        )
+        cb.grid(row=r, column=0, sticky="w", padx=PAD_M, pady=(PAD_S, PAD_S))
+        return cb
+
     def _build_options(self):
         f = self.opts_frame
-        r = 0
 
-        def o_sep(text):
-            nonlocal r
-            lbl = ctk.CTkLabel(
-                f, text=text, anchor="w",
-                font=ctk.CTkFont(size=12, weight="bold"),
-                text_color=("gray30", "gray70")
-            )
-            lbl.grid(row=r, column=0, sticky="ew", padx=10, pady=(12, 2))
-            r += 1  # type: ignore
-            return lbl
-
-        # ── Confidence ──
-        self.conf_val_label = o_sep("Confidence Threshold: 75%")
+        # ── Detection Behavior ──
+        card = self._section_card(f, "Detection Behavior")
+        self.conf_val_label = ctk.CTkLabel(
+            card, text="Confidence Threshold: 75%", anchor="w",
+            font=self._f(FS_LABEL, "bold"), text_color=COL_TEXT,
+        )
+        self.conf_val_label.grid(row=0, column=0, sticky="w", padx=PAD_M, pady=(PAD_M, PAD_XS))
         self.conf_var = ctk.DoubleVar(value=0.75)
 
         def _update_conf(val):
             self.conf_val_label.configure(text=f"Confidence Threshold: {int(float(val)*100)}%")
             engine.CONFIDENCE_THRESHOLD = float(val)
 
-        self.conf_slider = ctk.CTkSlider(f, from_=0.5, to=1.0, variable=self.conf_var, command=_update_conf)
-        self.conf_slider.grid(row=r, column=0, sticky="ew", padx=10, pady=(0, 4))
-        r += 1
+        self.conf_slider = ctk.CTkSlider(
+            card, from_=0.5, to=1.0, variable=self.conf_var, command=_update_conf,
+            progress_color=COL_ACCENT, button_color=COL_ACCENT,
+            button_hover_color=COL_ACCENT_HOVER,
+        )
+        self.conf_slider.grid(row=1, column=0, sticky="ew", padx=PAD_M, pady=(0, PAD_M))
 
-        # ── Checkboxes ──
         self.manual_var = ctk.BooleanVar(value=True)
-        ctk.CTkCheckBox(f, text="Require Manual Confirmation (Ask Y/N for low-confidence verses)",
-                        variable=self.manual_var,
-                        command=lambda: setattr(engine, "REQUIRE_MANUAL_CONFIRM", self.manual_var.get())
-                        ).grid(row=r, column=0, sticky="w", padx=10, pady=(8, 3))
-        r += 1
-
+        self._opt_checkbox(card, 2, "Require Manual Confirmation (Ask Y/N for low-confidence verses)",
+                           self.manual_var,
+                           lambda: setattr(engine, "REQUIRE_MANUAL_CONFIRM", self.manual_var.get()))
         self.verify_var = ctk.BooleanVar(value=True)
-        ctk.CTkCheckBox(f, text="Require Verification (Hear verse twice before displaying)",
-                        variable=self.verify_var,
-                        command=lambda: setattr(engine, "REQUIRE_VERIFY", self.verify_var.get())
-                        ).grid(row=r, column=0, sticky="w", padx=10, pady=(0, 3))
-        r += 1
-
+        self._opt_checkbox(card, 3, "Require Verification (Hear verse twice before displaying)",
+                           self.verify_var,
+                           lambda: setattr(engine, "REQUIRE_VERIFY", self.verify_var.get()))
         self.verse_interrupt_var = ctk.BooleanVar(value=False)
-        ctk.CTkCheckBox(f, text="Verse Interrupt (wait for speaker to say verse; 60s timeout; new ref cancels)",
-                        variable=self.verse_interrupt_var,
-                        command=lambda: setattr(engine, "VERSE_INTERRUPT_ENABLED", self.verse_interrupt_var.get())
-                        ).grid(row=r, column=0, sticky="w", padx=10, pady=(0, 3))
-        r += 1
-
+        self._opt_checkbox(card, 4, "Verse Interrupt (wait for speaker to say verse; 60s timeout; new ref cancels)",
+                           self.verse_interrupt_var,
+                           lambda: setattr(engine, "VERSE_INTERRUPT_ENABLED", self.verse_interrupt_var.get()))
         self.spoken_numeral_var = ctk.BooleanVar(value=False)
-        ctk.CTkCheckBox(f, text="Spoken Numeral Mode ('John three sixteen' → John 3:16, no 'verse' keyword needed)",
-                        variable=self.spoken_numeral_var,
-                        command=lambda: setattr(engine, "SPOKEN_NUMERAL_MODE", self.spoken_numeral_var.get())
-                        ).grid(row=r, column=0, sticky="w", padx=10, pady=(0, 3))
-        r += 1
-
+        self._opt_checkbox(card, 5, "Spoken Numeral Mode ('John three sixteen' → John 3:16, no 'verse' keyword)",
+                           self.spoken_numeral_var,
+                           lambda: setattr(engine, "SPOKEN_NUMERAL_MODE", self.spoken_numeral_var.get()))
         self.smart_amen_var = ctk.BooleanVar(value=True)
-        ctk.CTkCheckBox(f, text="Smart Amen (auto-clear screen on 'Let us pray')",
-                        variable=self.smart_amen_var,
-                        command=lambda: setattr(engine, "SMART_AMEN_ENABLED", self.smart_amen_var.get())
-                        ).grid(row=r, column=0, sticky="w", padx=10, pady=(0, 3))
-        r += 1
+        _sa = self._opt_checkbox(card, 6, "Smart Amen (auto-clear screen on 'Let us pray')",
+                                 self.smart_amen_var,
+                                 lambda: setattr(engine, "SMART_AMEN_ENABLED", self.smart_amen_var.get()))
+        _sa.grid_configure(pady=(PAD_S, PAD_M))
 
-        # ── Malayalam Transliteration (Manglish) ──
+        # ── Language & Transliteration ──
+        card = self._section_card(f, "Language & Transliteration")
         self.ml_translit_var = ctk.BooleanVar(value=False)
         self.ml_translit_cb = ctk.CTkCheckBox(
-            f, text="Malayalam Transliteration — Manglish/Romanized output (Sarvam translit mode)",
+            card, text="Malayalam Transliteration — Manglish / Romanized output (Sarvam translit mode)",
             variable=self.ml_translit_var,
             state="disabled",  # enabled only when language is Malayalam
+            font=self._f(FS_BODY), text_color=COL_TEXT,
+            checkbox_width=20, checkbox_height=20,
             command=lambda: setattr(engine, "MALAYALAM_TRANSLITERATION", self.ml_translit_var.get()),
         )
-        self.ml_translit_cb.grid(row=r, column=0, sticky="w", padx=10, pady=(0, 3))
-        r += 1
+        self.ml_translit_cb.grid(row=0, column=0, sticky="w", padx=PAD_M, pady=PAD_M)
 
+        # ── Session & Startup ──
+        card = self._section_card(f, "Session & Startup")
         self.auto_save_var = ctk.BooleanVar(value=True)
-        ctk.CTkCheckBox(f, text="Auto-Save Sermon Notes on App Close",
-                        variable=self.auto_save_var).grid(row=r, column=0, sticky="w", padx=10, pady=(0, 3))
-        r += 1
-
+        self._opt_checkbox(card, 0, "Auto-Save Sermon Notes on App Close", self.auto_save_var)
         self.auto_start_var = ctk.BooleanVar(value=False)
-        ctk.CTkCheckBox(f, text="Auto-Start on Launch (starts engine automatically)",
-                        variable=self.auto_start_var).grid(row=r, column=0, sticky="w", padx=10, pady=(0, 3))
-        r += 1
-
+        self._opt_checkbox(card, 1, "Auto-Start on Launch (starts engine automatically)", self.auto_start_var)
         self.smart_schedule_var = ctk.BooleanVar(value=False)
-        ctk.CTkCheckBox(f, text="Smart Schedule (auto-set language by day & time)",
-                        variable=self.smart_schedule_var).grid(row=r, column=0, sticky="w", padx=10, pady=(0, 2))
-        r += 1
-        ctk.CTkLabel(f, text="  Sat→Malayalam  |  Sun 9:10 AM→English  |  10:40 AM→Malayalam  |  4:40 PM→Hindi",
-                     text_color=["#666666", "#888888"],
-                     font=ctk.CTkFont(size=11)).grid(row=r, column=0, sticky="w", padx=10, pady=(0, 6))
-        r += 1
+        _ss = self._opt_checkbox(card, 2, "Smart Schedule (auto-set language by day & time)", self.smart_schedule_var)
+        _ss.grid_configure(pady=(PAD_S, PAD_XS))
+        ctk.CTkLabel(
+            card, text="Sat → Malayalam    ·    Sun 9:10 → English    ·    10:40 → Malayalam    ·    4:40 PM → Hindi",
+            text_color=COL_TEXT_FAINT, font=self._f(FS_SMALL), anchor="w", justify="left",
+        ).grid(row=3, column=0, sticky="w", padx=(PAD_XL, PAD_M), pady=(0, PAD_M))
 
         # ── ATEM Chroma Key Overlay ──
-        o_sep("🎬 ATEM Chroma Key Overlay")
-
+        card = self._section_card(f, "🎬  ATEM Chroma Key Overlay")
         self.atem_var = ctk.BooleanVar(value=False)
-        ctk.CTkCheckBox(f, text="Enable ATEM Keyer on Verse Display",
-                        variable=self.atem_var,
-                        command=self._on_atem_toggle
-                        ).grid(
-            row=r, column=0, sticky="w", padx=10, pady=(0, 4))
-        r += 1
+        self._opt_checkbox(card, 0, "Enable ATEM Keyer on Verse Display", self.atem_var, self._on_atem_toggle)
 
-        atem_sub = ctk.CTkFrame(f, fg_color="transparent")
-        atem_sub.grid(row=r, column=0, sticky="ew", padx=10, pady=(0, 6))
+        atem_sub = ctk.CTkFrame(card, fg_color="transparent")
+        atem_sub.grid(row=1, column=0, sticky="ew", padx=PAD_M, pady=(0, PAD_M))
         atem_sub.grid_columnconfigure(1, weight=1)
-        r += 1
 
-        ctk.CTkLabel(atem_sub, text="ATEM IP", anchor="w", width=70).grid(
-            row=0, column=0, padx=(0, 6), pady=2, sticky="w")
+        ctk.CTkLabel(atem_sub, text="ATEM IP", anchor="w", width=72, font=self._f(FS_LABEL)).grid(
+            row=0, column=0, padx=(0, PAD_M), pady=PAD_XS, sticky="w")
         self.atem_ip_entry = ctk.CTkEntry(atem_sub, placeholder_text="Auto (or enter IP)")
-        self.atem_ip_entry.grid(row=0, column=1, sticky="ew", pady=2)
+        self.atem_ip_entry.grid(row=0, column=1, sticky="ew", pady=PAD_XS)
         self.atem_scan_btn = ctk.CTkButton(
-            atem_sub, text="🔍", width=28,
+            atem_sub, text="🔍", width=32,
             fg_color="#4a4a4a", hover_color="#666666",
             command=self._scan_atem_ip
         )
-        self.atem_scan_btn.grid(row=0, column=2, sticky="w", padx=(4, 0), pady=2)
+        self.atem_scan_btn.grid(row=0, column=2, sticky="w", padx=(PAD_S, 0), pady=PAD_XS)
 
-        ctk.CTkLabel(atem_sub, text="Key On (s)", anchor="w", width=70).grid(
-            row=1, column=0, padx=(0, 6), pady=2, sticky="w")
+        ctk.CTkLabel(atem_sub, text="Key On (s)", anchor="w", width=72, font=self._f(FS_LABEL)).grid(
+            row=1, column=0, padx=(0, PAD_M), pady=PAD_XS, sticky="w")
         self.atem_dur_entry = ctk.CTkEntry(atem_sub, placeholder_text="5.0")
-        self.atem_dur_entry.grid(row=1, column=1, sticky="ew", pady=2)
+        self.atem_dur_entry.grid(row=1, column=1, sticky="ew", pady=PAD_XS)
 
-        # ATEM manual test toggle
+        # ATEM manual test toggle (colors reset by _toggle_atem_keyer_manual)
         self._atem_sw       = None
         self._atem_keyer_on = False
         self.atem_test_btn  = ctk.CTkButton(
@@ -1070,27 +1218,25 @@ class VerseViewApp(ctk.CTk):
             hover_color="#555555",
             command=self._toggle_atem_keyer_manual
         )
-        self.atem_test_btn.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(6, 2))
+        self.atem_test_btn.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(PAD_M, PAD_XS))
 
-
-        # ── Panic keybind ──
-        o_sep("Panic Keybind")
+        # ── Panic Keybind ──
+        card = self._section_card(f, "Panic Keybind")
         self.panic_var = ctk.StringVar(value="esc")
         if sys.platform.startswith("win"):
             self.panic_btn = ctk.CTkButton(
-                f, text="Panic Key: esc",
-                fg_color="#4a4a4a", hover_color="#333333",
+                card, text="Panic Key: esc",
+                fg_color=self._PANIC_BTN_FG, hover_color=self._PANIC_BTN_HOVER,
+                text_color=COL_TEXT, font=self._f(FS_BODY),
                 command=self._record_panic_key
             )
-            self.panic_btn.grid(row=r, column=0, sticky="ew", padx=10, pady=(0, 8))
+            self.panic_btn.grid(row=0, column=0, sticky="ew", padx=PAD_M, pady=PAD_M)
         else:
             self.panic_btn = None
             ctk.CTkLabel(
-                f, text="⌨️  Panic Key: Shift + Escape (fixed on macOS)",
-                text_color=["#666666", "#888888"],
-                font=ctk.CTkFont(size=12)
-            ).grid(row=r, column=0, sticky="ew", padx=10, pady=(0, 8))
-        r += 1
+                card, text="⌨️  Panic Key: Shift + Escape (fixed on macOS)",
+                text_color=COL_TEXT_FAINT, font=self._f(FS_BODY),
+            ).grid(row=0, column=0, sticky="w", padx=PAD_M, pady=PAD_M)
 
 
     def _on_dual_stt_toggle(self):
@@ -1113,24 +1259,29 @@ class VerseViewApp(ctk.CTk):
             self.btn_dual_stt.configure(text="▶   Dual STT Mode")
 
     def _build_dual_stt(self):
-        f = self.dual_stt_frame
-        r = 0
+        # A single card so the dual-STT controls read as one grouped block.
+        card = ctk.CTkFrame(self.dual_stt_frame, fg_color=COL_CARD, corner_radius=10,
+                            border_width=1, border_color=COL_CARD_BORDER)
+        card.pack(fill="x", padx=PAD_XS, pady=(0, PAD_S))
+        card.grid_columnconfigure(0, weight=1)
+        f = card
 
         self.dual_stt_var = ctk.BooleanVar(value=False)
         ctk.CTkCheckBox(f, text="Enable Dual STT (run a second STT stream in parallel)",
                         variable=self.dual_stt_var,
+                        font=self._f(FS_BODY), text_color=COL_TEXT,
+                        checkbox_width=20, checkbox_height=20,
                         command=self._on_dual_stt_toggle).grid(
-            row=r, column=0, sticky="w", padx=10, pady=(10, 4))
-        r += 1
+            row=0, column=0, sticky="w", padx=PAD_M, pady=(PAD_M, PAD_S))
 
         sec_sub = ctk.CTkFrame(f, fg_color="transparent")
-        sec_sub.grid(row=r, column=0, sticky="ew", padx=10, pady=(0, 10))
+        sec_sub.grid(row=1, column=0, sticky="ew", padx=PAD_M, pady=(0, PAD_M))
         sec_sub.grid_columnconfigure(1, weight=1)
-        r += 1
 
         # ── Secondary Language row ──
-        ctk.CTkLabel(sec_sub, text="Secondary Language", anchor="w", width=130).grid(
-            row=0, column=0, padx=(0, 6), pady=2, sticky="w")
+        ctk.CTkLabel(sec_sub, text="Secondary Language", anchor="w", width=132,
+                     font=self._f(FS_LABEL)).grid(
+            row=0, column=0, padx=(0, PAD_M), pady=PAD_XS, sticky="w")
         self.sec_lang_var = ctk.StringVar(value="English")
         self.sec_lang_menu = ctk.CTkOptionMenu(
             sec_sub,
@@ -1138,11 +1289,12 @@ class VerseViewApp(ctk.CTk):
             values=["English", "Malayalam", "Hindi"],
             state="disabled",
         )
-        self.sec_lang_menu.grid(row=0, column=1, sticky="ew", pady=2)
+        self.sec_lang_menu.grid(row=0, column=1, sticky="ew", pady=PAD_XS)
 
         # ── Secondary STT Engine row ──
-        ctk.CTkLabel(sec_sub, text="Secondary Engine", anchor="w", width=130).grid(
-            row=1, column=0, padx=(0, 6), pady=2, sticky="w")
+        ctk.CTkLabel(sec_sub, text="Secondary Engine", anchor="w", width=132,
+                     font=self._f(FS_LABEL)).grid(
+            row=1, column=0, padx=(0, PAD_M), pady=PAD_XS, sticky="w")
         self.sec_engine_var = ctk.StringVar(value="Deepgram")
         self.sec_engine_menu = ctk.CTkOptionMenu(
             sec_sub,
@@ -1150,7 +1302,7 @@ class VerseViewApp(ctk.CTk):
             values=["Deepgram", "AssemblyAI (Universal-3 Pro)", "AssemblyAI (Universal-3 Multilingual)", "Google Cloud STT"],
             state="disabled",
         )
-        self.sec_engine_menu.grid(row=1, column=1, sticky="ew", pady=2)
+        self.sec_engine_menu.grid(row=1, column=1, sticky="ew", pady=PAD_XS)
 
         def _on_sec_lang_changed(val):
             """Swap secondary engine options when secondary language changes.
@@ -1184,46 +1336,33 @@ class VerseViewApp(ctk.CTk):
 
 
     def _build_advanced(self):
+        f = self.adv_frame
 
-        fields = [
-            ("Sample Rate",          "16000", "rate_entry"),
-            ("Chunk Size",           "4096",  "chunk_entry"),
-            ("Cooldown (s)",         "3.0",   "cooldown_entry"),
-            ("Dedup Window (s)",     "60",    "dedup_entry"),
-            ("Silence Timeout (s)", "60",    "silence_entry"),
-            ("AAI Turn Cutoff (s)",  "5",     "aai_cutoff_entry"),
-            ("GCP Interim Flush (s)", "4",    "gcp_flush_entry"),
+        # ── Audio & Timing ──
+        card = self._section_card(f, "Audio & Timing")
+        num_fields = [
+            ("Sample Rate",           "16000", "rate_entry"),
+            ("Chunk Size",            "4096",  "chunk_entry"),
+            ("Cooldown (s)",          "3.0",   "cooldown_entry"),
+            ("Dedup Window (s)",      "60",    "dedup_entry"),
+            ("Silence Timeout (s)",   "60",    "silence_entry"),
+            ("AAI Turn Cutoff (s)",   "5",     "aai_cutoff_entry"),
+            ("GCP Interim Flush (s)", "4",     "gcp_flush_entry"),
         ]
-        for i, (lbl, default, attr) in enumerate(fields):
-            ctk.CTkLabel(self.adv_frame, text=lbl, anchor="w").grid(
-                row=i, column=0, padx=10, pady=4, sticky="w"
-            )
-            e = ctk.CTkEntry(self.adv_frame, width=90)
-            e.insert(0, default)
-            e.grid(row=i, column=1, padx=10, pady=4, sticky="ew")
-            setattr(self, attr, e)
-
-
-        n = len(fields)
-
-
-        ctk.CTkLabel(self.adv_frame, text="LLM Fallback", anchor="w").grid(
-            row=n, column=0, padx=10, pady=4, sticky="w"
-        )
+        for i, (lbl, default, attr) in enumerate(num_fields):
+            setattr(self, attr, self._card_field(card, i, lbl, width=110, default=default))
+        # LLM Fallback option
+        rr = len(num_fields)
+        ctk.CTkLabel(card, text="LLM Fallback", anchor="w", font=self._f(FS_LABEL),
+                     text_color=COL_TEXT).grid(row=rr, column=0, sticky="w",
+                                               padx=(PAD_M, PAD_S), pady=(PAD_S, PAD_M))
         self.llm_var = ctk.StringVar(value="Enabled")
         ctk.CTkOptionMenu(
-            self.adv_frame, variable=self.llm_var,
-            values=["Enabled", "Disabled"], width=100
-        ).grid(row=n, column=1, padx=10, pady=4, sticky="ew")
+            card, variable=self.llm_var, values=["Enabled", "Disabled"], width=110
+        ).grid(row=rr, column=1, sticky="ew", padx=(PAD_S, PAD_M), pady=(PAD_S, PAD_M))
 
-
-        ctk.CTkLabel(
-            self.adv_frame, text="─── API Keys ───", anchor="w",
-            font=ctk.CTkFont(size=12, weight="bold"),
-            text_color=("gray30", "gray70")
-        ).grid(row=n+1, column=0, columnspan=2, padx=10, pady=(14, 2), sticky="ew")
-
-
+        # ── API Keys ──
+        card = self._section_card(f, "API Keys")
         key_fields = [
             ("Deepgram Key",              "dg_key_entry"),
             ("Cerebras API Key",          "cb_key_entry"),
@@ -1241,110 +1380,70 @@ class VerseViewApp(ctk.CTk):
             ("Discord Notes Webhook URL", "dc_notes_key_entry"),
         ]
         for j, (lbl, attr) in enumerate(key_fields):
-            ctk.CTkLabel(self.adv_frame, text=lbl, anchor="w").grid(
-                row=n+2+j, column=0, padx=10, pady=4, sticky="w"
-            )
-            e = ctk.CTkEntry(self.adv_frame, show="•", width=200,
-                             placeholder_text="Paste key here")
-            e.grid(row=n+2+j, column=1, padx=10, pady=4, sticky="ew")
-            setattr(self, attr, e)
+            setattr(self, attr, self._card_field(
+                card, j, lbl, show="•", width=200, placeholder="Paste key here"))
 
-        # ── Managed Google Cloud credentials ──
+        # ── Google Cloud Credentials ──
         # The path field above accepts a raw path (backward compatible), but the
         # recommended flow is this button: it copies the chosen service-account
         # JSON into the app's per-user managed store, which survives auto-updates
         # and can travel to other machines via Export Settings.
-        gcp_row = n + 2 + len(key_fields)
-        ctk.CTkLabel(
-            self.adv_frame, text="─── Google Cloud Credentials ───", anchor="w",
-            font=ctk.CTkFont(size=12, weight="bold"),
-            text_color=("gray30", "gray70")
-        ).grid(row=gcp_row, column=0, columnspan=2, padx=10, pady=(14, 2), sticky="ew")
-
-        self.btn_gcp_import = ctk.CTkButton(
-            self.adv_frame, text="📁  Import Service-Account JSON…", height=28,
-            fg_color="#1a5a8a", hover_color="#144a72",
-            command=self._import_gcp_credentials
+        card = self._section_card(f, "Google Cloud Credentials")
+        self.btn_gcp_import = self._neutral_button(
+            card, "📁  Import Service-Account JSON…", self._import_gcp_credentials, height=32,
         )
-        self.btn_gcp_import.grid(row=gcp_row + 1, column=0, columnspan=2,
-                                 padx=10, pady=(0, 2), sticky="ew")
-
+        self.btn_gcp_import.grid(row=0, column=0, columnspan=2, sticky="ew",
+                                 padx=PAD_M, pady=(PAD_M, PAD_XS))
         self.gcp_cred_status_lbl = ctk.CTkLabel(
-            self.adv_frame, text="", anchor="w",
-            font=ctk.CTkFont(size=11),
-            text_color=("gray35", "gray65")
+            card, text="", anchor="w",
+            font=self._f(FS_SMALL), text_color=COL_TEXT_MUTED,
         )
-        self.gcp_cred_status_lbl.grid(row=gcp_row + 2, column=0, columnspan=2,
-                                      padx=10, pady=(0, 4), sticky="ew")
+        self.gcp_cred_status_lbl.grid(row=1, column=0, columnspan=2, sticky="ew",
+                                      padx=PAD_M, pady=(0, PAD_M))
 
         # ── Settings Sync ──
-        sync_row = gcp_row + 4
-        ctk.CTkLabel(
-            self.adv_frame, text="─── Settings Sync ───", anchor="w",
-            font=ctk.CTkFont(size=12, weight="bold"),
-            text_color=("gray30", "gray70")
-        ).grid(row=sync_row, column=0, columnspan=2, padx=10, pady=(14, 2), sticky="ew")
-
-        ctk.CTkLabel(self.adv_frame, text="Sync URL", anchor="w").grid(
-            row=sync_row+1, column=0, padx=10, pady=4, sticky="w"
+        card = self._section_card(f, "Settings Sync")
+        self.sync_url_entry = self._card_field(
+            card, 0, "Sync URL", width=200,
+            placeholder="Direct download URL (Google Drive, etc.)")
+        self.btn_sync_now = self._neutral_button(
+            card, "⬇  Pull Now", self._sync_settings_now, height=32,
         )
-        self.sync_url_entry = ctk.CTkEntry(
-            self.adv_frame, width=200,
-            placeholder_text="Direct download URL (Google Drive, etc.)"
-        )
-        self.sync_url_entry.grid(row=sync_row+1, column=1, padx=10, pady=4, sticky="ew")
+        self.btn_sync_now.grid(row=1, column=0, columnspan=2, sticky="ew",
+                               padx=PAD_M, pady=(PAD_XS, PAD_M))
 
-        self.btn_sync_now = ctk.CTkButton(
-            self.adv_frame, text="⬇  Pull Now", height=28,
-            fg_color="#1a5a8a", hover_color="#144a72",
-            command=self._sync_settings_now
-        )
-        self.btn_sync_now.grid(row=sync_row+2, column=0, columnspan=2,
-                               padx=10, pady=(0, 8), sticky="ew")
-
-        # ── Contextual Watcher (experimental) ──────────────────────────────────
+        # ── Contextual Watcher (experimental) ──
         # A parallel LLM watcher that surfaces paraphrased / indirect scripture
         # references into the Suggestions panel. OFF by default (opt-in).
-        w_row = sync_row + 3
-        ctk.CTkLabel(
-            self.adv_frame, text="─── Contextual Watcher (Experimental) ───", anchor="w",
-            font=ctk.CTkFont(size=12, weight="bold"),
-            text_color=("gray30", "gray70")
-        ).grid(row=w_row, column=0, columnspan=2, padx=10, pady=(14, 2), sticky="ew")
-
+        card = self._section_card(f, "Contextual Watcher (Experimental)")
         self.watcher_enabled_var = ctk.BooleanVar(value=False)
         ctk.CTkCheckBox(
-            self.adv_frame,
+            card,
             text="Enable Contextual Verse Watcher (AI suggestions — off by default)",
             variable=self.watcher_enabled_var,
-        ).grid(row=w_row+1, column=0, columnspan=2, padx=10, pady=(2, 6), sticky="w")
+            font=self._f(FS_BODY), text_color=COL_TEXT,
+            checkbox_width=20, checkbox_height=20,
+        ).grid(row=0, column=0, columnspan=2, sticky="w", padx=PAD_M, pady=(PAD_M, PAD_S))
 
-        ctk.CTkLabel(self.adv_frame, text="Watcher Provider", anchor="w").grid(
-            row=w_row+2, column=0, padx=10, pady=4, sticky="w"
-        )
+        ctk.CTkLabel(card, text="Watcher Provider", anchor="w", font=self._f(FS_LABEL),
+                     text_color=COL_TEXT).grid(row=1, column=0, sticky="w",
+                                               padx=(PAD_M, PAD_S), pady=PAD_S)
         self.watcher_provider_var = ctk.StringVar(value="Groq")
         ctk.CTkOptionMenu(
-            self.adv_frame, variable=self.watcher_provider_var,
+            card, variable=self.watcher_provider_var,
             values=["Groq", "Cerebras", "Mistral"], width=140
-        ).grid(row=w_row+2, column=1, padx=10, pady=4, sticky="ew")
+        ).grid(row=1, column=1, sticky="ew", padx=(PAD_S, PAD_M), pady=PAD_S)
 
-        # Numeric tunables — same label+entry pattern as the fields above.
         watcher_fields = [
-            ("Batch Interval (s)",        "5.0",  "watcher_interval_entry"),
-            ("Auto-Suggest Confidence",   "0.85", "watcher_auto_conf_entry"),
-            ("Passive Confidence",        "0.60", "watcher_passive_conf_entry"),
-            ("Window Size (lines)",       "10",   "watcher_window_lines_entry"),
-            ("Window Size (seconds)",     "40",   "watcher_window_seconds_entry"),
-            ("Cooldown (s)",              "60",   "watcher_cooldown_entry"),
+            ("Batch Interval (s)",       "5.0",  "watcher_interval_entry"),
+            ("Auto-Suggest Confidence",  "0.85", "watcher_auto_conf_entry"),
+            ("Passive Confidence",       "0.60", "watcher_passive_conf_entry"),
+            ("Window Size (lines)",      "10",   "watcher_window_lines_entry"),
+            ("Window Size (seconds)",    "40",   "watcher_window_seconds_entry"),
+            ("Cooldown (s)",             "60",   "watcher_cooldown_entry"),
         ]
         for k, (lbl, default, attr) in enumerate(watcher_fields):
-            ctk.CTkLabel(self.adv_frame, text=lbl, anchor="w").grid(
-                row=w_row+3+k, column=0, padx=10, pady=4, sticky="w"
-            )
-            e = ctk.CTkEntry(self.adv_frame, width=90)
-            e.insert(0, default)
-            e.grid(row=w_row+3+k, column=1, padx=10, pady=4, sticky="ew")
-            setattr(self, attr, e)
+            setattr(self, attr, self._card_field(card, 2 + k, lbl, width=110, default=default))
 
 
     def _toggle_advanced(self):
@@ -1368,7 +1467,8 @@ class VerseViewApp(ctk.CTk):
             return  # no-op on macOS
         """ Allows the user to press a key combo to record it safely without typing """
         if self.panic_btn:
-            self.panic_btn.configure(text="Listening... Press a key now!", fg_color="#a07020", state="disabled")
+            self.panic_btn.configure(text="Listening... Press a key now!", fg_color=COL_WARN,
+                                     hover_color=COL_WARN_HOVER, state="disabled")
 
 
         def on_press(key):
@@ -1407,11 +1507,13 @@ class VerseViewApp(ctk.CTk):
         if combo:
             self.panic_var.set(combo)
             if self.panic_btn:
-                self.panic_btn.configure(text=f"Panic Key: {combo}", fg_color=["#3B8ED0", "#1F6AA5"], state="normal")
+                self.panic_btn.configure(text=f"Panic Key: {combo}", fg_color=self._PANIC_BTN_FG,
+                                         hover_color=self._PANIC_BTN_HOVER, state="normal")
             self._append_log(f"⌨️ Panic key updated to: {combo}")
         else:
             if self.panic_btn:
-                self.panic_btn.configure(text=f"Panic Key: {self.panic_var.get()}", fg_color=["#3B8ED0", "#1F6AA5"], state="normal")
+                self.panic_btn.configure(text=f"Panic Key: {self.panic_var.get()}", fg_color=self._PANIC_BTN_FG,
+                                         hover_color=self._PANIC_BTN_HOVER, state="normal")
 
 
     # ─────────────────────────────────────────────────
@@ -1431,7 +1533,7 @@ class VerseViewApp(ctk.CTk):
 
         # Reset Worship Mode button visually if it was active
         if self._worship_mode_active:
-            self.btn_worship.configure(fg_color="transparent", text_color=("gray20", "gray90"))
+            self.btn_worship.configure(fg_color="transparent", text_color=COL_TEXT)
         self._worship_mode_active = False
 
         self.manual_var.set(s.get("manual_confirm", True))
@@ -2458,7 +2560,7 @@ class VerseViewApp(ctk.CTk):
             self._notes_saved     = False   # reset note state for new session
             self._notes_generated = False
             self.btn_stop.configure(state="normal")
-            self.lbl_status.configure(text="● Running", text_color="#2a7a2a")
+            self.lbl_status.configure(text="● Running", text_color=COL_OK)
             self.lang_menu.configure(state="disabled")
             self.mic_menu.configure(state="disabled")
 
@@ -2489,7 +2591,7 @@ class VerseViewApp(ctk.CTk):
 
     def _stop(self):
         self.btn_stop.configure(state="disabled")
-        self.lbl_status.configure(text="● Stopping...", text_color="#a07020")
+        self.lbl_status.configure(text="● Stopping...", text_color=COL_WARN)
         engine.request_stop()
 
 
@@ -2503,14 +2605,14 @@ class VerseViewApp(ctk.CTk):
         if bot_online:
             self.bot_start_btn.configure(state="disabled")
             self.bot_stop_btn.configure(state="normal")
-            self.bot_status_lbl.configure(text="● Online (engine stopped)", text_color="#a07a00")
+            self.bot_status_lbl.configure(text="● Online (engine stopped)", text_color=COL_WARN)
             self._bot_log("ℹ️ Engine stopped — bot still online. Use /start in Discord to power it back on.")
         else:
             self.bot_start_btn.configure(state="normal")
             self.bot_stop_btn.configure(state="disabled")
-            self.bot_status_lbl.configure(text="● Stopped", text_color="#cc4444")
+            self.bot_status_lbl.configure(text="● Stopped", text_color=COL_DANGER)
         self.btn_stop.configure(state="disabled")
-        self.lbl_status.configure(text="● Stopped", text_color="#666666")
+        self.lbl_status.configure(text="● Stopped", text_color=COL_TEXT_MUTED)
         self.lang_menu.configure(state="normal")
         self.mic_menu.configure(state="normal")
         if getattr(self, "_closing", False):
@@ -2647,7 +2749,7 @@ class VerseViewApp(ctk.CTk):
         """Highlight the update button to show an update is available."""
         self.btn_update.configure(
             text="🔄 Update Available",
-            fg_color="#7a5a00", hover_color="#5c4400",
+            fg_color=COL_WARN, hover_color=COL_WARN_HOVER,
             border_width=0,
             text_color="white",
             state="normal",
@@ -2906,18 +3008,19 @@ class VerseViewApp(ctk.CTk):
         self.pinned = not self.pinned
         self.wm_attributes("-topmost", self.pinned)
         if self.pinned:
-            self.btn_pin.configure(fg_color="#5a3a8a", text_color="white", border_width=0)
+            self.btn_pin.configure(fg_color=COL_TOGGLE, text_color="white", border_width=0)
         else:
-            self.btn_pin.configure(fg_color="transparent", text_color=("gray40", "gray70"), border_width=1)
+            self.btn_pin.configure(fg_color="transparent", text_color=COL_BTN_TEXT,
+                                   border_color=COL_BTN_BORDER, border_width=1)
 
     def _toggle_worship_mode(self):
         self._worship_mode_active = not self._worship_mode_active
         engine.WORSHIP_MODE = self._worship_mode_active
         if self._worship_mode_active:
-            self.btn_worship.configure(fg_color="#5a3a8a", text_color="white")
+            self.btn_worship.configure(fg_color=COL_TOGGLE, text_color="white")
             self._append_log("🎵 Worship Mode ON — verse detection suspended")
         else:
-            self.btn_worship.configure(fg_color="transparent", text_color=("gray20", "gray90"))
+            self.btn_worship.configure(fg_color="transparent", text_color=COL_TEXT)
             self._append_log("🎵 Worship Mode OFF — verse detection resumed")
 
 
@@ -3220,7 +3323,10 @@ class VerseViewApp(ctk.CTk):
     _SUGG_EXPIRE_SEC = 90     # auto-remove a row this many seconds after it appears
 
     def _build_suggestions_panel(self, parent):
-        """Build the compact, fixed-height Suggestions panel (left column, row 2).
+        """Build the RESIZABLE Suggestions panel (parent = the vertical-split
+        container `mid`, row 2). Its scroll area fills the cell so the drag
+        divider above can grow/shrink it; the header + status stay pinned so the
+        panel is still legible when collapsed small.
 
         Deliberately self-contained: it creates its own frames and never touches
         the transcript panes (log_box / _sec_log_box) or their container.
@@ -3228,8 +3334,9 @@ class VerseViewApp(ctk.CTk):
         self._suggestion_rows = []          # list of dicts: {frame, ref, status, ts}
 
         container = ctk.CTkFrame(parent, fg_color="transparent")
-        container.grid(row=2, column=0, padx=10, pady=(0, 6), sticky="ew")
+        container.grid(row=2, column=0, sticky="nsew", pady=(0, 0))
         container.grid_columnconfigure(0, weight=1)
+        container.grid_rowconfigure(2, weight=1)   # scroll area (row 2) takes the extra space
 
         header = ctk.CTkFrame(container, fg_color="transparent")
         header.grid(row=0, column=0, sticky="ew")
@@ -3256,13 +3363,15 @@ class VerseViewApp(ctk.CTk):
         )
         self._watcher_status_lbl.grid(row=1, column=0, sticky="ew", pady=(2, 0))
 
+        # height is a small MINIMUM request; the grid weight above lets the drag
+        # divider expand it up or collapse it down (sticky nsew fills the cell).
         self.suggestions_frame = ctk.CTkScrollableFrame(
-            container, height=104,
+            container, height=60,
             fg_color=("gray86", "gray17"), corner_radius=8,
             scrollbar_button_color=("gray70", "gray30"),
             scrollbar_button_hover_color=("gray60", "gray40"),
         )
-        self.suggestions_frame.grid(row=2, column=0, sticky="ew", pady=(3, 0))
+        self.suggestions_frame.grid(row=2, column=0, sticky="nsew", pady=(3, 0))
         self.suggestions_frame.grid_columnconfigure(0, weight=1)
 
         # NOTE: everything inside suggestions_frame uses pack() (rows are added /
@@ -3751,7 +3860,7 @@ class VerseViewApp(ctk.CTk):
                 "⚠️ App closed without Stop — auto-generated summary and log attached"
             )
             self._append_log("⚠️ App closed without Stop — stopping engine before closing...")
-            self.lbl_status.configure(text="● Stopping...", text_color="#a07020")
+            self.lbl_status.configure(text="● Stopping...", text_color=COL_WARN)
             self.btn_stop.configure(state="disabled")
             self.btn_start.configure(state="disabled")
             self._closing = True   # flag so _on_stopped knows to finish the close
@@ -3783,7 +3892,7 @@ class VerseViewApp(ctk.CTk):
 
         # Auto-save summary if needed
         if self.auto_save_var.get() and not self._notes_saved and not self._notes_generated and engine.full_sermon_transcript and len(engine.full_sermon_transcript.strip()) > 100:
-            self.lbl_status.configure(text="● Auto-Saving Notes...", text_color="#a07020")
+            self.lbl_status.configure(text="● Auto-Saving Notes...", text_color=COL_WARN)
             self.update()
             try:
                 self._append_log("⚠️ Auto-generating summary before close...")

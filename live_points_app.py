@@ -1,6 +1,15 @@
 # -*- coding: utf-8 -*-
 import customtkinter as ctk
 
+# Shared design system (same constants the main tab uses — one cohesive style).
+from ui_theme import (
+    COL_ACCENT, COL_ACCENT_HOVER, COL_DANGER, COL_DANGER_HOVER,
+    COL_CARD, COL_CARD_BORDER, COL_INSET,
+    COL_TEXT, COL_TEXT_MUTED, COL_TEXT_FAINT,
+    FS_SECTION, FS_LABEL, FS_BODY, FS_SMALL,
+    PAD_S, PAD_M, PAD_L,
+)
+
 
 class LiveDisplayWindow(ctk.CTkToplevel):
     """ Secondary borderless window to display the live main points. """
@@ -41,72 +50,86 @@ class LivePointsController:
         self.parent.grid_columnconfigure(0, weight=1)
         self.parent.grid_rowconfigure(4, weight=2)
 
-        # Top Controls Bar
-        top_bar = ctk.CTkFrame(self.parent, fg_color="transparent")
-        top_bar.grid(row=0, column=0, padx=10, pady=10, sticky="ew")
+        # ── Controls card ─────────────────────────────────────────────────────
+        # Groups the primary action + its options into one calm block instead of
+        # a flat row of mismatched widgets.
+        controls = ctk.CTkFrame(self.parent, fg_color=COL_CARD, corner_radius=10,
+                                border_width=1, border_color=COL_CARD_BORDER)
+        controls.grid(row=0, column=0, padx=PAD_L, pady=(PAD_L, PAD_M), sticky="ew")
+
+        control_row = ctk.CTkFrame(controls, fg_color="transparent")
+        control_row.pack(fill="x", padx=PAD_M, pady=(PAD_M, PAD_S))
 
         self.btn_launch_display = ctk.CTkButton(
-            top_bar, text="🖥️ Launch Audience Display", width=200, height=36,
-            fg_color="#1a5a8a", hover_color="#144a72",
+            control_row, text="🖥️  Launch Audience Display", width=210, height=36,
+            fg_color=COL_ACCENT, hover_color=COL_ACCENT_HOVER,
             font=ctk.CTkFont(size=14, weight="bold"),
             command=self._toggle_audience_display
         )
-        self.btn_launch_display.pack(side="left", padx=(0, 10))
-
-        ctk.CTkLabel(
-            top_bar,
-            text="Note: Start the main Engine in VerseView tab to begin transcribing.",
-            text_color="gray50",
-            font=ctk.CTkFont(size=12, slant="italic")
-        ).pack(side="left", padx=10)
+        self.btn_launch_display.pack(side="left", padx=(0, PAD_L))
 
         # Toggle: only run AI Live Outline when explicitly enabled (saves Groq tokens)
         self.live_llm_enabled = ctk.BooleanVar(value=False)
         ctk.CTkCheckBox(
-            top_bar,
+            control_row,
             text="Enable AI Live Outline (tokens)",
-            variable=self.live_llm_enabled
-        ).pack(side="left", padx=(10, 0))
+            variable=self.live_llm_enabled,
+            font=ctk.CTkFont(size=FS_BODY), text_color=COL_TEXT,
+            checkbox_width=20, checkbox_height=20,
+        ).pack(side="left", padx=(0, PAD_L))
 
         # Display Monitor selector
         ctk.CTkLabel(
-            top_bar, text="Monitor:",
-            font=ctk.CTkFont(size=13)
-        ).pack(side="left", padx=(20, 4))
+            control_row, text="Monitor:",
+            font=ctk.CTkFont(size=FS_LABEL), text_color=COL_TEXT
+        ).pack(side="left", padx=(0, PAD_S))
 
         self.screen_var = ctk.StringVar(value="Display 2 (Right/Extended)")
         ctk.CTkOptionMenu(
-            top_bar,
+            control_row,
             variable=self.screen_var,
             values=["Display 1 (Primary)", "Display 2 (Right/Extended)", "Windowed (Test Mode)"],
-            width=220
-        ).pack(side="left", padx=(0, 10))
+            width=210
+        ).pack(side="left")
 
-        # AI Prompt Configuration
         ctk.CTkLabel(
-            self.parent, text="⚙️ AI Behavior Prompt (Instructions for Groq LLM)",
-            anchor="w", font=ctk.CTkFont(size=14, weight="bold")
-        ).grid(row=1, column=0, padx=10, pady=(10, 0), sticky="w")
+            controls,
+            text="Start the main Engine in the VerseView tab to begin transcribing.",
+            text_color=COL_TEXT_FAINT, anchor="w",
+            font=ctk.CTkFont(size=FS_SMALL, slant="italic")
+        ).pack(fill="x", padx=PAD_M, pady=(0, PAD_M))
+
+        # ── AI Prompt Configuration ───────────────────────────────────────────
+        ctk.CTkLabel(
+            self.parent, text="⚙️  AI Behavior Prompt (Instructions for Groq LLM)",
+            anchor="w", font=ctk.CTkFont(size=FS_SECTION, weight="bold"),
+            text_color=COL_TEXT_MUTED
+        ).grid(row=1, column=0, padx=PAD_L, pady=(PAD_S, PAD_S), sticky="w")
 
         self.prompt_box = ctk.CTkTextbox(
-            self.parent, height=120, font=("Segoe UI", 13), wrap="word"
+            self.parent, height=120, font=("Segoe UI", 13), wrap="word",
+            fg_color=COL_INSET, corner_radius=8,
+            border_width=1, border_color=COL_CARD_BORDER,
         )
-        self.prompt_box.grid(row=2, column=0, padx=10, pady=(5, 15), sticky="ew")
+        self.prompt_box.grid(row=2, column=0, padx=PAD_L, pady=(0, PAD_M), sticky="ew")
 
-        # Live Output Preview
+        # ── Live Output Preview ───────────────────────────────────────────────
         ctk.CTkLabel(
-            self.parent, text="👁️ Live Display Preview",
-            anchor="w", font=ctk.CTkFont(size=14, weight="bold")
-        ).grid(row=3, column=0, padx=10, pady=(5, 0), sticky="w")
+            self.parent, text="👁️  Live Display Preview",
+            anchor="w", font=ctk.CTkFont(size=FS_SECTION, weight="bold"),
+            text_color=COL_TEXT_MUTED
+        ).grid(row=3, column=0, padx=PAD_L, pady=(PAD_S, PAD_S), sticky="w")
 
         self.preview_box = ctk.CTkTextbox(
             self.parent,
             font=("Segoe UI", 16, "bold"),
             wrap="word",
-            fg_color="#1c1c1c",
-            text_color="#d0d0d0"
+            fg_color=COL_INSET,
+            text_color=COL_TEXT,
+            corner_radius=8,
+            border_width=1, border_color=COL_CARD_BORDER,
         )
-        self.preview_box.grid(row=4, column=0, padx=10, pady=(5, 10), sticky="nsew")
+        self.preview_box.grid(row=4, column=0, padx=PAD_L, pady=(0, PAD_L), sticky="nsew")
         self.preview_box.insert(
             "1.0",
             "When the engine is running, the generated points will appear here and on the audience display..."
@@ -127,8 +150,8 @@ class LivePointsController:
                 self.display_win.attributes("-fullscreen", False)
                 self.display_win.geometry("800x600")
             self.btn_launch_display.configure(
-                text="🖥️ Close Audience Display",
-                fg_color="#a02020", hover_color="#801010"
+                text="🖥️  Close Audience Display",
+                fg_color=COL_DANGER, hover_color=COL_DANGER_HOVER
             )
             self.update_live_points("")
             self.display_win.bind("<Destroy>", lambda e: self._reset_display_button())
@@ -139,8 +162,8 @@ class LivePointsController:
     def _reset_display_button(self):
         self.display_win = None
         self.btn_launch_display.configure(
-            text="🖥️ Launch Audience Display",
-            fg_color="#1a5a8a", hover_color="#144a72"
+            text="🖥️  Launch Audience Display",
+            fg_color=COL_ACCENT, hover_color=COL_ACCENT_HOVER
         )
 
     # ── Live Points Update ──
