@@ -20,6 +20,16 @@ try:
 except ImportError:
     _start_bot_bridge = None
 
+# ── Contextual Verse Watcher (Part 1 module) ─────────────────────────────────
+# Guarded so the engine still runs if the module is absent; when missing the
+# whole feature stays dormant and the Suggestions panel simply stays empty.
+try:
+    from contextual_watcher import ContextualVerseWatcher, WatcherStatus, WatcherConfig
+except ImportError:
+    ContextualVerseWatcher = None
+    WatcherStatus = None
+    WatcherConfig = None
+
 from parse_reference_eng import parse_references as parse_eng, normalize_numbers_only as norm_eng, resolve_book as resolve_book_eng, set_spoken_numeral_mode
 from parse_reference_hindi import parse_references as parse_hindi, normalize_numbers_only as norm_hindi
 from parse_reference_ml import parse_references as parse_ml, normalize_numbers_only as norm_ml
@@ -609,8 +619,10 @@ REQUIRE_MANUAL_CONFIRM = True
 CONFIRM_CALLBACK       = None
 REQUIRE_VERIFY         = True
 _vtc_pending_ref     = None
-_vtc_trigger_words   = [] 
+_vtc_trigger_words   = []
 _vtc_timer          = None
+_vtc_source          = "UNKNOWN"
+_vtc_stream          = None   # STT stream role that triggered the pending VTC
 PANIC_KEY              = "esc"
 
 LIVE_POINTS_PROMPT         = ""
@@ -936,6 +948,108 @@ SECONDARY_DEEPGRAM_MODEL      = "nova-3"
 SECONDARY_USE_SARVAM          = False
 SECONDARY_STT_ENGINE          = "deepgram"   # "deepgram" | "sarvam" | "assemblyai"
 full_sermon_transcript_secondary = ""  # clean secondary-only buffer
+
+# ── CONTEXTUAL VERSE WATCHER GLOBALS (Part 2 wiring) ──────────────────────────
+# The watcher instance is (re)built fresh inside configure() for each session.
+# WATCHER_SUGGESTION_CALLBACK is the GUI hook: the engine forwards every
+# actionable suggestion (auto + passive) to it so the Suggestions panel can
+# render. It is marshalled to the Tk thread on the GUI side — never called on it
+# here. Both stay None (feature dormant) if the module failed to import or no GUI
+# callback was supplied.
+_verse_watcher: "ContextualVerseWatcher | None" = None
+WATCHER_SUGGESTION_CALLBACK = None
+
+
+def _watcher_clients_for_provider(provider: str):
+    """Map the Part-3 provider setting to (primary_client, primary_model,
+    fallback_client, fallback_model), reusing the SAME chat clients already built
+    in configure() (groq_client / cerebras_client / mistral_client). The fallback
+    is always a different provider so a single-provider outage still yields a
+    result. Unknown/blank → Groq (the fast default). Missing clients just resolve
+    to None and the watcher degrades gracefully (skips that attempt)."""
+    p = (provider or "groq").lower().strip()
+    if p == "cerebras":
+        return (cerebras_client, "llama3.1-8b",
+                groq_client,     "llama-3.1-8b-instant")
+    if p == "mistral":
+        return (mistral_client,  "mistral-large-latest",
+                groq_client,     "llama-3.1-8b-instant")
+    # default: Groq primary, Cerebras fallback (mirrors extract_verse_with_llm /
+    # _llm_semantic_match model choices).
+    return (groq_client,     "llama-3.1-8b-instant",
+            cerebras_client, "llama3.1-8b")
+
+
+def _handle_watcher_suggestion(sug) -> None:
+    """on_suggestion sink for the ContextualVerseWatcher (runs on the engine
+    asyncio loop thread).
+
+    • AUTO_SUGGEST → present immediately through the SAME pathway the existing
+      LLM fallback uses (deliver_verse → controller.send_verse). This is
+      independent of the GUI, so auto-presentation still works even with no
+      Suggestions panel attached.
+    • Everything actionable (auto + passive) is then forwarded to the GUI panel
+      callback for display. The watcher only ever emits AUTO/PASSIVE (DISCARD is
+      dropped internally), so no filtering is needed here.
+    """
+    try:
+        ref = getattr(sug, "suggested_reference", None)
+
+        if (WatcherStatus is not None
+                and sug.status == WatcherStatus.AUTO_SUGGEST
+                and ref):
+            ctrl = _controller
+            if ctrl is not None:
+                # Present on a daemon thread, exactly like the LLM fallback path
+                # (llm_task): deliver_verse → send_verse does a blocking Selenium
+                # call, so keep it OFF the engine's asyncio loop thread.
+                # source="WATCHER" is in _BYPASS_SOURCES, so this mirrors the LLM
+                # auto-present behaviour (bypasses the confirmation gate /
+                # quarantine just like source="LLM").
+                _conf   = sug.confidence
+                _stream = getattr(sug, "stream", None)   # "primary" | "secondary"
+
+                def _present(_ref=ref, _c=_conf, _ctrl=ctrl, _st=_stream):
+                    try:
+                        deliver_verse(_ref, _ctrl, bypass_cooldown=False,
+                                      confidence=_c, source="WATCHER", stream=_st)
+                    except Exception as e:
+                        logger.error(f"🔭 watcher auto-present failed: {e}")
+
+                threading.Thread(target=_present, daemon=True).start()
+
+        cb = WATCHER_SUGGESTION_CALLBACK
+        if cb is not None:
+            try:
+                cb(sug)
+            except Exception as e:
+                logger.debug(f"🔭 watcher GUI callback error: {e}")
+    except Exception as e:
+        logger.debug(f"🔭 _handle_watcher_suggestion error: {e}")
+
+
+def get_watcher_status() -> dict:
+    """GUI-callable live status of the Contextual Verse Watcher, so the panel can
+    show whether it's actually running/reading (vs the silent 'No suggestions
+    yet' state). `active` is True only when the watcher was built this session
+    (i.e. enabled in settings)."""
+    w = _verse_watcher
+    if w is None:
+        return {
+            "active": False, "enabled": False, "has_clients": False,
+            "cycles": 0, "last_cycle_ts": 0.0, "suggested": 0,
+            "discarded": 0, "last_status": "", "provider": "",
+        }
+    try:
+        st = w.status()
+        st["active"] = True
+        return st
+    except Exception as e:
+        logger.debug(f"🔭 get_watcher_status error: {e}")
+        return {"active": False, "enabled": False, "has_clients": False,
+                "cycles": 0, "last_cycle_ts": 0.0, "suggested": 0,
+                "discarded": 0, "last_status": "", "provider": ""}
+
 
 # ── Issue B: SEC-ML repetition / noise detector ───────────────────────────────
 # Detects extreme token-loop degeneration (e.g. "I I I…", "go to go to…").
@@ -1508,6 +1622,15 @@ def configure(
     aai_turn_cutoff=5,
     gcp_interim_flush=4,
     malayalam_transliteration=False,
+    watcher_suggestion_callback=None,
+    watcher_enabled=False,
+    watcher_provider="groq",
+    watcher_batch_interval=5.0,
+    watcher_auto_confidence=0.85,
+    watcher_passive_confidence=0.60,
+    watcher_window_lines=10,
+    watcher_window_seconds=40,
+    watcher_cooldown=60,
 ):
     global DEEPGRAM_API_KEY, GROQ_API_KEY, GEMINI_API_KEY, CEREBRAS_API_KEY, MISTRAL_API_KEY, SARVAM_API_KEY
     global SARVAM_API_KEY_BACKUP, _sarvam_using_backup
@@ -1766,6 +1889,57 @@ def configure(
         SECONDARY_USE_SARVAM = False
         SECONDARY_STT_ENGINE = "deepgram"
         SECONDARY_PARSER     = None
+
+    # ── Contextual Verse Watcher — build fresh for this session ───────────────
+    # Constructed AFTER the language + client + dual-STT blocks above so it picks
+    # up the resolved PRIMARY_LANGUAGE / SECONDARY_LANGUAGE and the live LLM
+    # clients. A brand-new instance per session means no stale buffers/dedup
+    # state can bleed across starts. main() starts its run() task; the transcript
+    # handlers feed() it.
+    #
+    # ZERO-OVERHEAD WHEN DISABLED (Part 3 item 4): if the toggle is OFF we DON'T
+    # build the watcher at all — _verse_watcher stays None, so no buffer is
+    # touched by feed()/note_fastpath_reference() (both guard on `is not None`),
+    # no run() task is created in main(), and no LLM ever fires. The GUI panel
+    # simply stays empty. The feature also stays inert if the module is missing.
+    global _verse_watcher, WATCHER_SUGGESTION_CALLBACK
+    WATCHER_SUGGESTION_CALLBACK = watcher_suggestion_callback
+    _verse_watcher = None
+    if ContextualVerseWatcher is not None and watcher_enabled:
+        try:
+            _pc, _pm, _fc, _fm = _watcher_clients_for_provider(watcher_provider)
+            _wcfg = WatcherConfig(
+                enabled=True,
+                provider=(watcher_provider or "groq"),
+                primary_model=_pm,
+                fallback_model=_fm,
+                llm_interval_sec=watcher_batch_interval,
+                ctx_max_lines=watcher_window_lines,
+                ctx_max_age_sec=watcher_window_seconds,
+                conf_high=watcher_auto_confidence,
+                conf_medium=watcher_passive_confidence,
+                dedup_cooldown_sec=watcher_cooldown,
+            )
+            _verse_watcher = ContextualVerseWatcher(
+                primary_client=_pc,
+                fallback_client=_fc,
+                primary_language=PRIMARY_LANGUAGE,
+                secondary_language=(SECONDARY_LANGUAGE if DUAL_STT_ENABLED else None),
+                on_suggestion=_handle_watcher_suggestion,
+                config=_wcfg,
+            )
+            logger.info(
+                f"🔭 Contextual Verse Watcher : ON  "
+                f"(provider={_wcfg.provider}, primary={PRIMARY_LANGUAGE}"
+                f"{', secondary=' + str(SECONDARY_LANGUAGE) if DUAL_STT_ENABLED and SECONDARY_LANGUAGE else ''}, "
+                f"interval={_wcfg.llm_interval_sec}s, window={_wcfg.ctx_max_lines}L/{int(_wcfg.ctx_max_age_sec)}s, "
+                f"auto>={_wcfg.conf_high:.2f}, passive>={_wcfg.conf_medium:.2f}, cooldown={int(_wcfg.dedup_cooldown_sec)}s)"
+            )
+        except Exception as e:
+            _verse_watcher = None
+            logger.warning(f"⚠️ Contextual Verse Watcher init failed — feature disabled: {e}")
+    else:
+        logger.info("🔭 Contextual Verse Watcher : OFF (disabled in settings)")
 
 
 # ── CONTEXT TRACKING ─────────────────────────────────────────────────────────
@@ -2033,7 +2207,7 @@ def fetch_verse_text(ref: str) -> str | None:
 
 
 # ── VERSE INTERRUPT (wait for speaker to say verse, then display; 60s timeout; cancel on new ref) ─
-def deliver_verse(ref: str, controller, bypass_cooldown=False, confidence=1.0, source="UNKNOWN"):
+def deliver_verse(ref: str, controller, bypass_cooldown=False, confidence=1.0, source="UNKNOWN", stream=None):
     """
     Deliver a detected verse: if Verse Interrupt is on, wait for the speaker to say the verse
     (fetch text via Bible API, listen for trigger words, 60s timeout; new ref cancels current).
@@ -2078,6 +2252,29 @@ def deliver_verse(ref: str, controller, bypass_cooldown=False, confidence=1.0, s
     """
     global _gate_pending
 
+    # ── SOURCE-STREAM ATTRIBUTION ─────────────────────────────────────────────
+    # Which STT stream did this detection come from? Resolve from the caller's
+    # explicit `stream` (used by threaded paths like the LLM task, which run
+    # outside the stream's context) or fall back to the STT_STREAM_ROLE contextvar
+    # (correct for every synchronous fast-path detection). Threaded through to
+    # send_verse so a presented verse can name its source transcription when two
+    # STT streams are running.
+    if stream is None:
+        stream = _safe_stream_role()
+
+    # ── CONTEXTUAL WATCHER: record the fast-path reference for conflict gating ──
+    # deliver_verse is the single choke point every detection source funnels
+    # through (FAST-PATH, PARSER, CONTEXTUAL, SEQUENTIAL, RANGE, LLM, …), so this
+    # is the right place to tell the watcher what the fast path is currently
+    # detecting. The watcher uses it ONLY to downgrade a conflicting auto-suggest
+    # to passive; it never drives the fast path. Skip source="WATCHER" so the
+    # watcher's own auto-presentation doesn't feed back as a conflict.
+    if _verse_watcher is not None and ref and source != "WATCHER":
+        try:
+            _verse_watcher.note_fastpath_reference(ref, is_secondary=(stream == "secondary"))
+        except Exception:
+            pass
+
     # ── SCRIPTURE-READ MODE GATE ──────────────────────────────────────────────
     # While SCRIPTURE-READ is active, only verses within the locked passage
     # are allowed.  Verses in a different book or chapter, or too far outside
@@ -2094,7 +2291,7 @@ def deliver_verse(ref: str, controller, bypass_cooldown=False, confidence=1.0, s
     # LLM added to bypass — the LLM path now has its own internal guards
     # (anchor-match suppression + hardened prompt + paraphrase-content guard)
     # so the external gate withholding is no longer needed.
-    _BYPASS_SOURCES = {"FAST-PATH", "TRANSLATION-PATH", "QUEUE", "NEXT VERSE", "LLM"}
+    _BYPASS_SOURCES = {"FAST-PATH", "TRANSLATION-PATH", "QUEUE", "NEXT VERSE", "LLM", "WATCHER"}
     if source in _BYPASS_SOURCES or bypass_cooldown:
         # Condition A / C: explicit ref already verified upstream, or range/queue continuation
         # Condition B: bypass_cooldown=True is also set by ONWARDS in controller.send_verse
@@ -2110,9 +2307,9 @@ def deliver_verse(ref: str, controller, bypass_cooldown=False, confidence=1.0, s
             except (ValueError, IndexError):
                 pass
         if VERSE_INTERRUPT_ENABLED:
-            _start_vtc(ref, controller, source=source)
+            _start_vtc(ref, controller, source=source, stream=stream)
         else:
-            controller.send_verse(ref, bypass_cooldown=bypass_cooldown, confidence=confidence, source=source)
+            controller.send_verse(ref, bypass_cooldown=bypass_cooldown, confidence=confidence, source=source, stream=stream)
         return
 
     # ── SYSTEM-ACTION QUARANTINE CHECK ──
@@ -2141,9 +2338,9 @@ def deliver_verse(ref: str, controller, bypass_cooldown=False, confidence=1.0, s
         except (ValueError, IndexError):
             pass
     if VERSE_INTERRUPT_ENABLED:
-        _start_vtc(ref, controller, source=source)
+        _start_vtc(ref, controller, source=source, stream=stream)
     else:
-        controller.send_verse(ref, bypass_cooldown=bypass_cooldown, confidence=confidence, source=source)
+        controller.send_verse(ref, bypass_cooldown=bypass_cooldown, confidence=confidence, source=source, stream=stream)
 
 
 def get_verse_history() -> list:
@@ -2436,29 +2633,35 @@ def _stop_onwards():
     logger.info("⏹️ ONWARDS mode stopped")
 
 def _cancel_vtc():
-    global _vtc_pending_ref, _vtc_trigger_words, _vtc_timer, _vtc_source
+    global _vtc_pending_ref, _vtc_trigger_words, _vtc_timer, _vtc_source, _vtc_stream
     _vtc_source = "UNKNOWN"
+    _vtc_stream = None
     if _vtc_timer:
         _vtc_timer.cancel()
     _vtc_pending_ref   = None
     _vtc_trigger_words = []
     _vtc_timer         = None
 
-def _start_vtc(ref, controller, source="UNKNOWN"):
+def _start_vtc(ref, controller, source="UNKNOWN", stream=None):
     """Fetch verse text via Bible API, then use LLM semantic check to confirm it was spoken. New ref cancels previous."""
-    global _vtc_pending_ref, _vtc_trigger_words, _vtc_timer, _vtc_source
-    
+    global _vtc_pending_ref, _vtc_trigger_words, _vtc_timer, _vtc_source, _vtc_stream
+
+    # Which STT stream triggered this VTC — stashed so the deferred confirm-send
+    # (which fires from a worker thread with no stream context) can still name it.
+    _stream = stream if stream is not None else _safe_stream_role()
+
     # Chapter-only refs (e.g. "John 3") have no specific verse text to match — skip VTC
     if ':' not in ref:
         logger.debug(f"🔀 VTC skip: {ref} is chapter-only (no verse text to match)")
-        controller.send_verse(ref, bypass_cooldown=True, source=source)
+        controller.send_verse(ref, bypass_cooldown=True, source=source, stream=_stream)
         return
 
     if _vtc_pending_ref == ref:
         return # Ignore duplicate detections of the same verse we are already waiting for
-        
+
     _cancel_vtc()  # void any previous pending ref (cancel-on-new-ref)
     _vtc_source = source
+    _vtc_stream = _stream
 
     text = fetch_verse_text(ref)
     if not text:
@@ -2468,7 +2671,7 @@ def _start_vtc(ref, controller, source="UNKNOWN"):
         text = fetch_verse_text(ref)
     if not text:
         logger.warning(f"⚠️ VTC: Could not fetch text for {ref} after retry. Sending instantly.")
-        controller.send_verse(ref, bypass_cooldown=True, source=source)
+        controller.send_verse(ref, bypass_cooldown=True, source=source, stream=_stream)
         return
 
     _vtc_pending_ref   = ref
@@ -2524,9 +2727,10 @@ def check_vtc(text, controller) -> bool:
                         return
                     if _vtc_pending_ref == current_ref:
                         logger.info(f"✅ VTC confirmed: {current_ref}")
+                        _vtc_confirmed_stream = _vtc_stream
                         _cancel_vtc()
                         _mark_advance_offset()
-                        controller.send_verse(current_ref, bypass_cooldown=True)
+                        controller.send_verse(current_ref, bypass_cooldown=True, stream=_vtc_confirmed_stream)
             except Exception:
                 if _shutdown_flag.is_set():
                     return
@@ -3168,10 +3372,15 @@ class VerseController:
         except Exception as e:
             logger.debug(f"Could not click close button (maybe already closed): {e}")
 
-    def send_verse(self, ref, bypass_cooldown=False, confidence=1.0, source="UNKNOWN"):
+    def send_verse(self, ref, bypass_cooldown=False, confidence=1.0, source="UNKNOWN", stream=None):
         with self._send_lock:
             global current_book, current_chapter, current_verse, verses_cited
             global _session_verse_high_water
+            # Resolve which STT stream this detection came from (for dual-STT
+            # source labelling). Falls back to the contextvar for synchronous
+            # fast-path calls; threaded callers pass it explicitly.
+            if stream is None:
+                stream = _safe_stream_role()
             # Worship Mode is the master gate — detection ran and logged above, but
             # nothing gets sent to the display (Selenium / VerseView) while worship is active.
             if WORSHIP_MODE:
@@ -3226,7 +3435,7 @@ class VerseController:
                         )
                         if CONFIRM_CALLBACK(ref, confidence):
                             logger.info(f"✅ User manually approved: {ref}")
-                            self.send_verse(ref, bypass_cooldown=True, confidence=1.0, source=source)
+                            self.send_verse(ref, bypass_cooldown=True, confidence=1.0, source=source, stream=stream)
                         else:
                             logger.info(f"❌ User rejected: {ref}")
                     threading.Thread(target=_ask_thread, daemon=True).start()
@@ -3309,13 +3518,20 @@ class VerseController:
 
                 self.driver.execute_script("arguments[0].value = arguments[1];", self.box, ref)
                 self.driver.execute_script("arguments[0].click();", self.btn)
+                # When two STT streams are running, announce the verse AND which
+                # transcription it was detected from (e.g. Malayalam GCP vs
+                # English AssemblyAI). Single-STT keeps the original one-line log.
+                _src_desc = _describe_stream(stream) if DUAL_STT_ENABLED else ""
                 logger.info(f"✅ PRESENTED: {ref}")
+                if _src_desc:
+                    logger.info(f"   🎙️ Detected from: {_src_desc}")
                 _trigger_atem_keyer()
 
                 _verse_history.append({
                     "ref": ref,
                     "time": _dt.datetime.now().strftime("%H:%M:%S"),
-                    "layer": source
+                    "layer": source,
+                    "stream": _src_desc,
                 })
 
                 if ref not in verses_cited:
@@ -4808,6 +5024,11 @@ def detect_verse_hybrid(text, controller, confidence=1.0, parser=None) -> bool:
         logger.info(f"📞 LLM: '{text[:80]}'")
         _llm_in_flight = True
 
+        # Capture the stream role NOW, on the stream task's context, so the
+        # threaded llm_task below can attribute the detection to the right STT
+        # stream (a worker thread's fresh context would otherwise read None).
+        _llm_stream = _safe_stream_role()
+
         def llm_task():
             global _llm_in_flight, _last_explicit_ref_time
             try:
@@ -4880,7 +5101,7 @@ def detect_verse_hybrid(text, controller, confidence=1.0, parser=None) -> bool:
                             pass
                     if not _suppress_stale_llm:
                         _last_explicit_ref_time = time.time()
-                        deliver_verse(verse, controller, bypass_cooldown=False, confidence=confidence, source="LLM")
+                        deliver_verse(verse, controller, bypass_cooldown=False, confidence=confidence, source="LLM", stream=_llm_stream)
                         trigger_onwards_if_needed(verse, text)
                         check_and_queue_range(text, verse, controller)
             finally:
@@ -5295,6 +5516,14 @@ def create_transcript_handler(controller, is_secondary: bool, tag: str, parser):
         else:
             full_sermon_transcript += " " + sentence.strip()
 
+        # Contextual watcher: feed the same final line into the parallel watcher
+        # (per-stream). Non-blocking — buffers only, never calls the LLM here.
+        if _verse_watcher is not None:
+            try:
+                _verse_watcher.feed(sentence.strip(), is_secondary=is_secondary)
+            except Exception:
+                pass
+
         _last_transcript_time = time.time()
         _process_transcript_blob(sentence, partial_context, controller, parser=parser)
 
@@ -5347,6 +5576,14 @@ def create_sarvam_transcript_handler(controller, is_secondary: bool, tag: str, p
             full_sermon_transcript_secondary += " " + english_text.strip()
         else:
             full_sermon_transcript += " " + english_text.strip()
+
+        # Contextual watcher: feed the English translation (matches what goes into
+        # the sermon buffer for this Sarvam stream). Non-blocking.
+        if _verse_watcher is not None:
+            try:
+                _verse_watcher.feed(english_text.strip(), is_secondary=is_secondary)
+            except Exception:
+                pass
 
         _last_transcript_time = time.time()
 
@@ -5417,6 +5654,47 @@ def _stream_engine(is_secondary: bool = False) -> str:
     if SECONDARY_USE_SARVAM if is_secondary else USE_SARVAM:
         return "sarvam"
     return (SECONDARY_STT_ENGINE if is_secondary else STT_ENGINE or "deepgram").lower().strip()
+
+
+# ── Detection source attribution (which STT stream a verse came from) ─────────
+# Human-readable names so a presented verse can say WHICH transcription found it
+# when two STT streams are running (e.g. Malayalam GCP + English AssemblyAI).
+_ENGINE_DISPLAY_NAMES = {
+    "deepgram":      "Deepgram",
+    "assemblyai":    "AssemblyAI",
+    "sarvam":        "Sarvam AI",
+    "gladia":        "Gladia",
+    "gcp":           "Google Cloud STT",
+    "local_whisper": "Local Whisper",
+}
+_LANG_DISPLAY_NAMES = {
+    "en": "English", "hi": "Hindi", "ml": "Malayalam", "multi": "Multi-Language",
+}
+
+
+def _safe_stream_role():
+    """Return the current STT stream role ('primary'/'secondary') from the
+    contextvar, or None when called outside a stream task (e.g. a worker thread
+    whose fresh context has no role set)."""
+    try:
+        return STT_STREAM_ROLE.get()
+    except Exception:
+        return None
+
+
+def _describe_stream(role) -> str:
+    """Human description of the STT stream a detection came from, e.g.
+    'Primary STT · Google Cloud STT · Malayalam'. Returns '' when the role is
+    unknown (so callers can omit the suffix rather than show a wrong source)."""
+    if role not in ("primary", "secondary"):
+        return ""
+    is_sec    = (role == "secondary")
+    engine    = _stream_engine(is_secondary=is_sec)
+    lang      = (SECONDARY_LANGUAGE if is_sec else PRIMARY_LANGUAGE) or "en"
+    pos       = "Secondary STT" if is_sec else "Primary STT"
+    eng_name  = _ENGINE_DISPLAY_NAMES.get(engine, (engine or "Unknown").title())
+    lang_name = _LANG_DISPLAY_NAMES.get(lang, lang)
+    return f"{pos} · {eng_name} · {lang_name}"
 
 
 def _gcp_language_code(lang: str) -> str:
@@ -5659,6 +5937,14 @@ async def main():
         points_task   = asyncio.create_task(live_points_loop())
         watchdog_task = asyncio.create_task(_silence_watchdog())
 
+        # ── Contextual Verse Watcher driver ───────────────────────────────────
+        # Runs alongside live_points_loop; ticks on its own cadence and offloads
+        # every LLM call to a thread executor, so it never blocks this loop or the
+        # STT streams. Dormant/no-op if the watcher wasn't built.
+        watcher_task = None
+        if _verse_watcher is not None:
+            watcher_task = asyncio.create_task(_verse_watcher.run(stop_event))
+
         # ── Primary stream task ───────────────────────────────────────────────
         primary_task = launch_stt_task(_controller, is_secondary=False)
 
@@ -5703,6 +5989,11 @@ async def main():
             pass
         try:
             watchdog_task.cancel()
+        except Exception:
+            pass
+        try:
+            if watcher_task is not None:
+                watcher_task.cancel()
         except Exception:
             pass
         if panic_listener:

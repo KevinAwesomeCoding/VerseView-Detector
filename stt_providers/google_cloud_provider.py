@@ -180,27 +180,37 @@ class GoogleCloudProvider(STTProvider):
             alt_langs = alt_langs[:_MAX_ALTERNATIVE_LANGUAGES]
 
         # ── Credentials ─────────────────────────────────────────────────────────
-        if not credentials_path:
-            logger.error(
-                "❌ Google Cloud credentials path missing — cannot start stream. "
-                "Set gcp_credentials_path in Advanced Settings."
+        # Two supported auth modes, in priority order:
+        #   1. Explicit service-account key FILE (credentials_path set) — the
+        #      original behaviour: load the JSON key and pass it to the client.
+        #   2. Application Default Credentials (credentials_path blank) — let the
+        #      Google client discover ADC via google.auth.default().  This is what
+        #      `gcloud auth application-default login
+        #       [--impersonate-service-account=…]` sets up: keyless / impersonated
+        #      credentials with no JSON key file on disk.
+        # A configured-but-missing key file is still a hard error (misconfiguration
+        # we'd rather surface than silently paper over with ADC).
+        credentials = None
+        if credentials_path:
+            if not os.path.isfile(credentials_path):
+                logger.error(
+                    f"❌ GCP credentials file not found: {credentials_path}"
+                )
+                return
+            try:
+                credentials = service_account.Credentials.from_service_account_file(
+                    credentials_path,
+                    scopes=["https://www.googleapis.com/auth/cloud-platform"],
+                )
+            except Exception as exc:
+                logger.error(f"❌ Failed to load GCP credentials: {exc}")
+                return
+            logger.info(f"🔐 {tag} GCP auth: service-account key file")
+        else:
+            logger.info(
+                f"🔐 {tag} GCP auth: Application Default Credentials "
+                f"(no key file configured — using gcloud ADC / impersonation)"
             )
-            return
-
-        if not os.path.isfile(credentials_path):
-            logger.error(
-                f"❌ GCP credentials file not found: {credentials_path}"
-            )
-            return
-
-        try:
-            credentials = service_account.Credentials.from_service_account_file(
-                credentials_path,
-                scopes=["https://www.googleapis.com/auth/cloud-platform"],
-            )
-        except Exception as exc:
-            logger.error(f"❌ Failed to load GCP credentials: {exc}")
-            return
 
         # ── Microphone — bail early so teardown never runs with None handles ────
         try:
@@ -210,8 +220,26 @@ class GoogleCloudProvider(STTProvider):
             return
 
         # ── GCP client — created once; channel is reused across sessions ────────
-        loop   = asyncio.get_event_loop()
-        client = speech.SpeechAsyncClient(credentials=credentials)
+        # credentials=None → the client resolves google.auth.default() (ADC) at
+        # construction; a DefaultCredentialsError here means neither a key file
+        # nor ADC is set up, so surface a clear, actionable message and bail
+        # cleanly (tear down the mic we just opened).
+        loop = asyncio.get_event_loop()
+        try:
+            if credentials is not None:
+                client = speech.SpeechAsyncClient(credentials=credentials)
+            else:
+                client = speech.SpeechAsyncClient()
+        except Exception as exc:
+            logger.error(
+                f"❌ Could not initialise Google Cloud Speech client: {exc}\n"
+                f"   Provide a service-account key in Advanced Settings, OR set up "
+                f"Application Default Credentials:\n"
+                f"     gcloud auth application-default login "
+                f"[--impersonate-service-account=<sa-email>]"
+            )
+            teardown_microphone(audio, stream)
+            return
 
         # Recognition config is identical for every session in this run.
         recognition_kwargs = dict(

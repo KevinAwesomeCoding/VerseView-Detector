@@ -118,6 +118,7 @@ class VerseViewApp(ctk.CTk):
         self._s                   = cfg.load()
         self._running             = False
         self._closing             = False
+        self._clean_exit          = False   # set True only on an intentional, clean close
         self._engine_thread       = None
         self._notes_saved         = False   # True once notes have been written to a file
         self._notes_generated     = False   # True once notes have been generated (manually or auto)
@@ -138,6 +139,11 @@ class VerseViewApp(ctk.CTk):
         self._last_history_len = 0
         self.after(1000, self._update_history_loop)
         self.after(1500, self._update_chapter_browser_loop)
+        # Session autosave: periodically persist a restorable session snapshot so
+        # the previous session can always be restored on next launch — after a
+        # normal close AND after an unexpected crash / freeze / force-close.
+        # First tick after one interval — nothing to save before then.
+        self.after(self._AUTOSAVE_INTERVAL_MS, self._autosave_session_loop)
         # Silent update check — runs 15s after startup so it never delays launch
         self.after(15000, self._check_for_update_bg)
         # Settings sync — runs 3s after launch so UI is fully ready
@@ -391,9 +397,16 @@ class VerseViewApp(ctk.CTk):
         self.manual_verse_entry.bind("<Return>", lambda e: self._send_manual_verse())
 
 
+        # ── VERSE SUGGESTIONS PANEL (Contextual Watcher — Part 2) ──
+        # A compact, fixed-height panel that lives BELOW the transcript/history
+        # split (left row 2) and ABOVE the action buttons (moved to left row 3).
+        # It is entirely separate from the primary/secondary transcript panes in
+        # split_frame — it never touches log_box / _sec_log_box.
+        self._build_suggestions_panel(left)
+
         # ── ACTION BUTTONS ROW ──
         action_frame = ctk.CTkFrame(left, fg_color="transparent")
-        action_frame.grid(row=2, column=0, padx=10, pady=(0, 10), sticky="ew")
+        action_frame.grid(row=3, column=0, padx=10, pady=(0, 10), sticky="ew")
         action_frame.grid_columnconfigure(1, weight=1)
 
 
@@ -1289,6 +1302,50 @@ class VerseViewApp(ctk.CTk):
         self.btn_sync_now.grid(row=sync_row+2, column=0, columnspan=2,
                                padx=10, pady=(0, 8), sticky="ew")
 
+        # ── Contextual Watcher (experimental) ──────────────────────────────────
+        # A parallel LLM watcher that surfaces paraphrased / indirect scripture
+        # references into the Suggestions panel. OFF by default (opt-in).
+        w_row = sync_row + 3
+        ctk.CTkLabel(
+            self.adv_frame, text="─── Contextual Watcher (Experimental) ───", anchor="w",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            text_color=("gray30", "gray70")
+        ).grid(row=w_row, column=0, columnspan=2, padx=10, pady=(14, 2), sticky="ew")
+
+        self.watcher_enabled_var = ctk.BooleanVar(value=False)
+        ctk.CTkCheckBox(
+            self.adv_frame,
+            text="Enable Contextual Verse Watcher (AI suggestions — off by default)",
+            variable=self.watcher_enabled_var,
+        ).grid(row=w_row+1, column=0, columnspan=2, padx=10, pady=(2, 6), sticky="w")
+
+        ctk.CTkLabel(self.adv_frame, text="Watcher Provider", anchor="w").grid(
+            row=w_row+2, column=0, padx=10, pady=4, sticky="w"
+        )
+        self.watcher_provider_var = ctk.StringVar(value="Groq")
+        ctk.CTkOptionMenu(
+            self.adv_frame, variable=self.watcher_provider_var,
+            values=["Groq", "Cerebras", "Mistral"], width=140
+        ).grid(row=w_row+2, column=1, padx=10, pady=4, sticky="ew")
+
+        # Numeric tunables — same label+entry pattern as the fields above.
+        watcher_fields = [
+            ("Batch Interval (s)",        "5.0",  "watcher_interval_entry"),
+            ("Auto-Suggest Confidence",   "0.85", "watcher_auto_conf_entry"),
+            ("Passive Confidence",        "0.60", "watcher_passive_conf_entry"),
+            ("Window Size (lines)",       "10",   "watcher_window_lines_entry"),
+            ("Window Size (seconds)",     "40",   "watcher_window_seconds_entry"),
+            ("Cooldown (s)",              "60",   "watcher_cooldown_entry"),
+        ]
+        for k, (lbl, default, attr) in enumerate(watcher_fields):
+            ctk.CTkLabel(self.adv_frame, text=lbl, anchor="w").grid(
+                row=w_row+3+k, column=0, padx=10, pady=4, sticky="w"
+            )
+            e = ctk.CTkEntry(self.adv_frame, width=90)
+            e.insert(0, default)
+            e.grid(row=w_row+3+k, column=1, padx=10, pady=4, sticky="ew")
+            setattr(self, attr, e)
+
 
     def _toggle_advanced(self):
         self._adv_open = not self._adv_open
@@ -1533,6 +1590,22 @@ class VerseViewApp(ctk.CTk):
         self.sync_url_entry.delete(0, "end")
         self.sync_url_entry.insert(0, s.get("settings_sync_url", ""))
 
+        # ── Contextual Watcher ──
+        self.watcher_enabled_var.set(s.get("watcher_enabled", False))
+        _wprov_map = {"groq": "Groq", "cerebras": "Cerebras", "mistral": "Mistral"}
+        self.watcher_provider_var.set(_wprov_map.get(str(s.get("watcher_provider", "groq")).lower(), "Groq"))
+        for attr, key, default in [
+            ("watcher_interval_entry",        "watcher_batch_interval",     5.0),
+            ("watcher_auto_conf_entry",       "watcher_auto_confidence",    0.85),
+            ("watcher_passive_conf_entry",    "watcher_passive_confidence", 0.60),
+            ("watcher_window_lines_entry",    "watcher_window_lines",       10),
+            ("watcher_window_seconds_entry",  "watcher_window_seconds",     40),
+            ("watcher_cooldown_entry",        "watcher_cooldown",           60),
+        ]:
+            e = getattr(self, attr)
+            e.delete(0, "end")
+            e.insert(0, str(s.get(key, default)))
+
         self._update_gcp_cred_status()
 
 
@@ -1588,6 +1661,15 @@ class VerseViewApp(ctk.CTk):
             "atem_ip":                    self.atem_ip_entry.get().strip(),
             "atem_key_duration":          self._safe_float(self.atem_dur_entry, 5.0),
             "settings_sync_url":          self.sync_url_entry.get().strip(),
+            # ── Contextual Watcher ──
+            "watcher_enabled":            self.watcher_enabled_var.get(),
+            "watcher_provider":           self.watcher_provider_var.get().lower(),
+            "watcher_batch_interval":     self._safe_float(self.watcher_interval_entry,       5.0),
+            "watcher_auto_confidence":    self._safe_float(self.watcher_auto_conf_entry,      0.85),
+            "watcher_passive_confidence": self._safe_float(self.watcher_passive_conf_entry,   0.60),
+            "watcher_window_lines":       self._safe_int(self.watcher_window_lines_entry,     10),
+            "watcher_window_seconds":     self._safe_int(self.watcher_window_seconds_entry,   40),
+            "watcher_cooldown":           self._safe_int(self.watcher_cooldown_entry,         60),
             # ── Discord Bot ──
             "discord_bot_token":          self.bot_token_entry.get().strip(),
             "vv_host":                    self.bot_host_entry.get().strip(),
@@ -2142,9 +2224,23 @@ class VerseViewApp(ctk.CTk):
         has_log = bool(data.get("gui_log", "").strip())
         log_note = "\nActivity log from before will be restored." if has_log else ""
 
+        # Word the prompt for how the session ended: a manual Emergency Quit vs an
+        # abnormal exit (crash / freeze / force-close) recovered from autosave.
+        reason   = data.get("reason", "")
+        saved_at = data.get("saved_at", "")
+        when_note = f"\nSaved: {saved_at}" if saved_at else ""
+        if reason == "emergency":
+            lead = "A session was saved from an Emergency Quit."
+        elif reason == "clean":
+            lead = "Your previous session is still available."
+        else:
+            lead = ("VerseView didn't shut down normally last time "
+                    "(it may have crashed, frozen, or been force-closed).\n"
+                    "Your latest session was auto-saved.")
+
         msg = (
-            f"A session was saved from an Emergency Quit.\n"
-            f"{verse_count} verse(s) detected.{anchor_str}{log_note}\n\n"
+            f"{lead}\n"
+            f"{verse_count} verse(s) detected.{anchor_str}{when_note}{log_note}\n\n"
             f"Restore this session?"
         )
         if mb.askyesno("Restore Last Session", msg):
@@ -2253,9 +2349,14 @@ class VerseViewApp(ctk.CTk):
                 if not s.get("assemblyai_api_key"):
                     missing.append("AssemblyAI API Key")
             if _engine == "gcp":
+                # No hard block: GCP now supports BOTH a service-account key file
+                # AND keyless Application Default Credentials (gcloud ADC /
+                # impersonation), which the GUI can't detect here. If neither is
+                # set up, the provider logs a clear, actionable error and bails.
                 if not cfg.resolve_gcp_credentials_path(s):
-                    missing.append(
-                        "Google Cloud credentials (import a service-account JSON in Advanced Settings)"
+                    self._append_log(
+                        "ℹ️ No GCP key file configured — will use Application "
+                        "Default Credentials (gcloud ADC) if available."
                     )
             if _engine == "local_whisper":
                 if not s.get("local_whisper_endpoint"):
@@ -2272,10 +2373,12 @@ class VerseViewApp(ctk.CTk):
                 if _sec_engine in ("assemblyai", "assemblyai_pro", "assemblyai_multilingual") and not s.get("assemblyai_api_key"):
                     missing.append("AssemblyAI API Key (required for secondary stream)")
                 if _sec_engine == "gcp":
+                    # As above: no hard block — key file OR ADC both work; the
+                    # provider surfaces a clear error if neither is available.
                     if not cfg.resolve_gcp_credentials_path(s):
-                        missing.append(
-                            "Google Cloud credentials (required for secondary stream — "
-                            "import a service-account JSON in Advanced Settings)"
+                        self._append_log(
+                            "ℹ️ No GCP key file for secondary stream — will use "
+                            "Application Default Credentials (gcloud ADC) if available."
                         )
                 if _sec_engine == "local_whisper" and not s.get("local_whisper_endpoint"):
                     missing.append("Local Whisper Endpoint URL (required for secondary stream)")
@@ -2336,7 +2439,19 @@ class VerseViewApp(ctk.CTk):
                 aai_turn_cutoff            = s.get("aai_turn_cutoff", 5),
                 gcp_interim_flush          = s.get("gcp_interim_flush", 4),
                 malayalam_transliteration  = s.get("malayalam_transliteration", False),
+                watcher_suggestion_callback = self._on_watcher_suggestion,
+                watcher_enabled            = s.get("watcher_enabled", False),
+                watcher_provider           = s.get("watcher_provider", "groq"),
+                watcher_batch_interval     = s.get("watcher_batch_interval", 5.0),
+                watcher_auto_confidence    = s.get("watcher_auto_confidence", 0.85),
+                watcher_passive_confidence = s.get("watcher_passive_confidence", 0.60),
+                watcher_window_lines       = s.get("watcher_window_lines", 10),
+                watcher_window_seconds     = s.get("watcher_window_seconds", 40),
+                watcher_cooldown           = s.get("watcher_cooldown", 60),
             )
+
+            # Fresh session → start with an empty Suggestions panel.
+            self._clear_suggestions()
 
 
             self._running = True
@@ -3087,6 +3202,362 @@ class VerseViewApp(ctk.CTk):
             command=_resend
         ).pack(pady=(0, 12))
 
+    # ══════════════════════════════════════════════════════════════════════════
+    #  CONTEXTUAL VERSE WATCHER — Suggestions panel (Part 2)
+    # ══════════════════════════════════════════════════════════════════════════
+    #
+    #  Data flow:  engine watcher thread → engine._handle_watcher_suggestion →
+    #  WATCHER_SUGGESTION_CALLBACK (== self._on_watcher_suggestion, still on the
+    #  ENGINE thread) → self.after(0, …) hop onto the Tk main thread →
+    #  self._render_suggestion (the ONLY method that touches widgets).
+    #
+    #  Nothing here blocks: _on_watcher_suggestion only extracts primitives and
+    #  schedules; all widget work runs in short after() callbacks on the GUI
+    #  thread, exactly like _on_bridge_ready / _bot_log elsewhere in this file.
+
+    # Panel tunables (Part 3 will lift these into settings alongside the watcher's).
+    _SUGG_MAX_ROWS   = 6      # hard cap so a long service can't grow the panel
+    _SUGG_EXPIRE_SEC = 90     # auto-remove a row this many seconds after it appears
+
+    def _build_suggestions_panel(self, parent):
+        """Build the compact, fixed-height Suggestions panel (left column, row 2).
+
+        Deliberately self-contained: it creates its own frames and never touches
+        the transcript panes (log_box / _sec_log_box) or their container.
+        """
+        self._suggestion_rows = []          # list of dicts: {frame, ref, status, ts}
+
+        container = ctk.CTkFrame(parent, fg_color="transparent")
+        container.grid(row=2, column=0, padx=10, pady=(0, 6), sticky="ew")
+        container.grid_columnconfigure(0, weight=1)
+
+        header = ctk.CTkFrame(container, fg_color="transparent")
+        header.grid(row=0, column=0, sticky="ew")
+        header.grid_columnconfigure(0, weight=1)
+        ctk.CTkLabel(
+            header, text="💡 Verse Suggestions  ·  AI Watcher",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            text_color=("gray35", "gray65"), anchor="w",
+        ).grid(row=0, column=0, sticky="w")
+        self.btn_clear_suggestions = ctk.CTkButton(
+            header, text="Clear", height=20, width=50,
+            fg_color="transparent", border_width=1,
+            text_color=("gray40", "gray60"),
+            font=ctk.CTkFont(size=11),
+            command=self._clear_suggestions,
+        )
+        self.btn_clear_suggestions.grid(row=0, column=1, sticky="e")
+
+        # Live status line — a heartbeat so you can SEE whether the watcher is
+        # actually running/reading, instead of guessing from an empty list.
+        self._watcher_status_lbl = ctk.CTkLabel(
+            container, text="⚪ Watcher: checking…", anchor="w",
+            font=ctk.CTkFont(size=10), text_color=("gray45", "gray55"),
+        )
+        self._watcher_status_lbl.grid(row=1, column=0, sticky="ew", pady=(2, 0))
+
+        self.suggestions_frame = ctk.CTkScrollableFrame(
+            container, height=104,
+            fg_color=("gray86", "gray17"), corner_radius=8,
+            scrollbar_button_color=("gray70", "gray30"),
+            scrollbar_button_hover_color=("gray60", "gray40"),
+        )
+        self.suggestions_frame.grid(row=2, column=0, sticky="ew", pady=(3, 0))
+        self.suggestions_frame.grid_columnconfigure(0, weight=1)
+
+        # NOTE: everything inside suggestions_frame uses pack() (rows are added /
+        # removed dynamically) — the placeholder must too, never grid(), or Tk
+        # would deadlock on mixed geometry managers in one container.
+        self._sugg_placeholder = ctk.CTkLabel(
+            self.suggestions_frame,
+            text="No suggestions yet — the AI watcher will surface likely "
+                 "references here while a session is running.",
+            text_color=("gray50", "gray50"),
+            font=ctk.CTkFont(size=10), wraplength=360, justify="left", anchor="w",
+        )
+        self._sugg_placeholder.pack(padx=6, pady=6, anchor="w", fill="x")
+
+        # Periodic expiry sweep (also handles the cooldown-window requirement).
+        self.after(5000, self._expire_suggestions_loop)
+        # Live watcher heartbeat — refresh the status line every 2s.
+        self.after(2000, self._refresh_watcher_status)
+
+    def _refresh_watcher_status(self):
+        """Poll the engine for watcher activity and update the status line so the
+        operator can see it's alive (or why it's silent). Runs on the Tk thread;
+        cheap dict read, reschedules every 2s."""
+        try:
+            st = engine.get_watcher_status()
+            if not st.get("active"):
+                # Not built this session → the toggle is off.
+                text  = "⚪ Watcher OFF — enable it in Advanced Settings"
+                color = ("gray45", "gray55")
+            elif not st.get("has_clients"):
+                prov = (st.get("provider", "") or "provider").title()
+                text  = f"🟠 Watcher ON, but no {prov} API key — add one in Advanced Settings"
+                color = ("#a06a20", "#d0a050")
+            else:
+                cycles  = st.get("cycles", 0)
+                last_ts = st.get("last_cycle_ts", 0) or 0
+                if last_ts:
+                    last = datetime.datetime.fromtimestamp(last_ts).strftime("%H:%M:%S")
+                    laststat = st.get("last_status", "")
+                    text = f"🟢 Watching · {cycles} checks · last {last}"
+                    if laststat:
+                        text += f"  ({laststat})"
+                else:
+                    text = "🟢 Watching · warming up (waiting for enough speech)…"
+                color = ("#2a7a2a", "#5fd05f")
+            self._watcher_status_lbl.configure(text=text, text_color=color)
+        except Exception:
+            pass
+        finally:
+            if not getattr(self, "_closing", False):
+                self.after(2000, self._refresh_watcher_status)
+
+    # ── Engine-thread entry point (do NOT touch Tk widgets here) ───────────────
+    def _on_watcher_suggestion(self, sug):
+        """Called by the engine on ITS thread for every actionable suggestion.
+        Extract primitives, then hop to the Tk thread. Never blocks the engine."""
+        if getattr(self, "_closing", False):
+            return
+        try:
+            ref        = getattr(sug, "suggested_reference", None)
+            confidence = float(getattr(sug, "confidence", 0.0) or 0.0)
+            status_val = getattr(getattr(sug, "status", None), "value", "") or ""
+            stream     = getattr(sug, "stream", "")
+            reasoning  = getattr(sug, "reasoning", "") or ""
+        except Exception:
+            return
+        if not ref:
+            return
+        # Marshal onto the GUI thread — this is the only safe place to touch Tk.
+        self.after(0, lambda: self._render_suggestion(
+            ref, confidence, status_val, stream, reasoning))
+
+    # ── GUI-thread rendering ───────────────────────────────────────────────────
+    def _render_suggestion(self, ref, confidence, status_val, stream, reasoning):
+        """Add or update one suggestion row. Runs on the Tk main thread only."""
+        if getattr(self, "_closing", False):
+            return
+        if not hasattr(self, "suggestions_frame"):
+            return
+        try:
+            is_auto = (status_val == "auto_suggest")
+            now     = datetime.datetime.now().timestamp()
+
+            # De-dupe within the panel: if this ref is already shown, refresh it
+            # in place (bump confidence/status/timestamp) instead of stacking.
+            for entry in self._suggestion_rows:
+                if entry["ref"] == ref:
+                    entry["ts"]     = now
+                    entry["status"] = status_val
+                    self._style_suggestion_row(entry, ref, confidence,
+                                               status_val, stream, is_auto)
+                    return
+
+            self._hide_sugg_placeholder()
+
+            row = ctk.CTkFrame(
+                self.suggestions_frame,
+                fg_color=("gray80", "gray22"), corner_radius=6,
+            )
+            row.grid_columnconfigure(0, weight=1)
+            row.pack(fill="x", padx=2, pady=2)
+
+            lbl = ctk.CTkLabel(row, anchor="w", justify="left",
+                               font=ctk.CTkFont(size=11))
+            lbl.grid(row=0, column=0, sticky="w", padx=(8, 4), pady=(4, 4))
+
+            btn = ctk.CTkButton(
+                row, width=118, height=24,
+                font=ctk.CTkFont(size=11, weight="bold"),
+                command=lambda r=ref: self._send_suggestion(r),
+            )
+            btn.grid(row=0, column=1, padx=(4, 6), pady=(4, 4))
+
+            entry = {"frame": row, "label": lbl, "button": btn,
+                     "ref": ref, "status": status_val, "ts": now}
+            self._suggestion_rows.append(entry)
+            self._style_suggestion_row(entry, ref, confidence,
+                                       status_val, stream, is_auto)
+
+            # Enforce the max-rows cap — evict the oldest rows.
+            while len(self._suggestion_rows) > self._SUGG_MAX_ROWS:
+                oldest = self._suggestion_rows.pop(0)
+                self._destroy_sugg_row(oldest)
+            if not self._suggestion_rows:
+                self._show_sugg_placeholder()
+        except Exception as e:
+            # A render hiccup must never break the GUI loop.
+            self._append_log(f"⚠️ Suggestion render error: {e}")
+
+    def _style_suggestion_row(self, entry, ref, confidence, status_val, stream, is_auto):
+        """Set the label text + button appearance for a row (create or refresh)."""
+        pct       = int(round(max(0.0, min(1.0, confidence)) * 100))
+        lang_tag  = f" · {stream}" if stream else ""
+        if is_auto:
+            badge = "✓ auto-sent"
+            entry["label"].configure(
+                text=f"{ref}    {pct}%   {badge}{lang_tag}",
+                text_color=("#1f6f1f", "#5fd05f"),
+            )
+            entry["button"].configure(
+                text="Re-send",
+                fg_color="transparent", border_width=1,
+                hover_color=("gray75", "gray30"),
+                text_color=("gray25", "gray80"),
+            )
+        else:
+            badge = "○ suggestion"
+            entry["label"].configure(
+                text=f"{ref}    {pct}%   {badge}{lang_tag}",
+                text_color=("gray15", "gray90"),
+            )
+            entry["button"].configure(
+                text="Send to VerseView",
+                fg_color="#2a7a2a", hover_color="#1f5c1f",
+                border_width=0, text_color="white",
+            )
+
+    def _send_suggestion(self, ref: str):
+        """Operator clicked Send on a suggestion → present via the EXISTING
+        present pathway used by manual/history sends (engine.deliver_verse with
+        bypass_cooldown, the same call behind the history 'Send Again' button).
+        No new presentation pathway is introduced."""
+        ctrl = getattr(engine, "_controller", None)
+        if not ctrl or not getattr(ctrl, "driver", None):
+            mb.showerror("Not Connected",
+                         "VerseView is not connected.\nStart the engine first.")
+            return
+        try:
+            engine.deliver_verse(ref, ctrl, bypass_cooldown=True,
+                                 confidence=1.0, source="WATCHER-MANUAL")
+            self._append_log(f"💡 Suggestion sent: {ref}")
+            # Keep engine context + history in sync, mirroring _send_chapter_verse.
+            try:
+                parts = ref.split()
+                if len(parts) >= 2 and ":" in parts[-1]:
+                    book_ctx     = " ".join(parts[:-1])
+                    chap_ctx, v  = parts[-1].split(":")
+                    engine.set_context(book_ctx, chap_ctx, v)
+                elif len(parts) >= 2:
+                    engine.set_context(" ".join(parts[:-1]), parts[-1], "")
+            except Exception:
+                pass
+            try:
+                engine.add_to_verse_history(ref, source="WATCHER-SUGGESTION")
+            except Exception:
+                pass
+            # Remove the row now that it has been actioned.
+            self._remove_suggestion_by_ref(ref)
+        except Exception as e:
+            mb.showerror("Send Error", f"Failed to send verse:\n{e}")
+
+    # ── Row/panel housekeeping ─────────────────────────────────────────────────
+    def _remove_suggestion_by_ref(self, ref: str):
+        for entry in list(self._suggestion_rows):
+            if entry["ref"] == ref:
+                self._suggestion_rows.remove(entry)
+                self._destroy_sugg_row(entry)
+        if not self._suggestion_rows:
+            self._show_sugg_placeholder()
+
+    def _destroy_sugg_row(self, entry):
+        try:
+            entry["frame"].destroy()
+        except Exception:
+            pass
+
+    def _expire_suggestions_loop(self):
+        """Remove rows older than _SUGG_EXPIRE_SEC so the panel self-cleans during
+        long services. Reschedules itself every 5s."""
+        try:
+            if hasattr(self, "_suggestion_rows"):
+                now = datetime.datetime.now().timestamp()
+                for entry in list(self._suggestion_rows):
+                    if (now - entry["ts"]) > self._SUGG_EXPIRE_SEC:
+                        self._suggestion_rows.remove(entry)
+                        self._destroy_sugg_row(entry)
+                if not self._suggestion_rows:
+                    self._show_sugg_placeholder()
+        except Exception:
+            pass
+        finally:
+            if not getattr(self, "_closing", False):
+                self.after(5000, self._expire_suggestions_loop)
+
+    def _clear_suggestions(self):
+        if not hasattr(self, "_suggestion_rows"):
+            return
+        for entry in list(self._suggestion_rows):
+            self._destroy_sugg_row(entry)
+        self._suggestion_rows = []
+        self._show_sugg_placeholder()
+
+    def _hide_sugg_placeholder(self):
+        try:
+            if getattr(self, "_sugg_placeholder", None) is not None:
+                self._sugg_placeholder.pack_forget()
+        except Exception:
+            pass
+
+    def _show_sugg_placeholder(self):
+        try:
+            if getattr(self, "_sugg_placeholder", None) is not None:
+                self._sugg_placeholder.pack(padx=6, pady=6, anchor="w", fill="x")
+        except Exception:
+            pass
+
+    # ── CRASH-RECOVERY AUTOSAVE ───────────────────────────────────────────────
+    _AUTOSAVE_INTERVAL_MS = 15000   # persist a restorable snapshot every 15s
+
+    def _build_session_snapshot(self, reason: str) -> dict:
+        """Assemble the restorable session snapshot (engine state + settings +
+        GUI log). Shared by the periodic autosave and the Emergency-Quit button
+        so a crash-recovered session restores identically to an emergency-saved
+        one. Fully defensive — any missing piece degrades to a safe default."""
+        try:
+            snapshot = engine.get_session_snapshot()
+        except Exception:
+            snapshot = {}
+        try:
+            snapshot["settings"] = self._collect_settings()
+        except Exception:
+            snapshot["settings"] = {}
+        try:
+            snapshot["gui_log"] = self.log_box.get("1.0", "end").strip()
+        except Exception:
+            snapshot["gui_log"] = ""
+        snapshot["reason"]   = reason
+        try:
+            snapshot["saved_at"] = datetime.datetime.now().strftime("%b %d, %Y  %I:%M %p")
+        except Exception:
+            snapshot["saved_at"] = ""
+        return snapshot
+
+    def _autosave_session_loop(self):
+        """Periodically write a restorable session snapshot so the previous
+        session can be restored on next launch — whether the app was closed
+        normally or ended abnormally (crash / freeze / force-close).
+
+        Only writes when there is meaningful sermon data, so a fresh idle app
+        never leaves a stale file. A clean close writes a final 'clean' snapshot
+        in _finish_close; the restore prompt is offered on the next launch and
+        clears the file once the user decides."""
+        try:
+            if not self._closing:
+                transcript = (engine.full_sermon_transcript or "").strip()
+                has_data = len(transcript) >= 50 or bool(engine.get_verse_history())
+                if has_data:
+                    _session.save_session(self._build_session_snapshot("autosave"))
+        except Exception as ex:
+            print(f"[VerseView] Session autosave error: {ex}")
+        finally:
+            # Reschedule unless the app is closing.
+            if not self._closing:
+                self.after(self._AUTOSAVE_INTERVAL_MS, self._autosave_session_loop)
+
     def _emergency_quit(self):
         """Force-quit: save session, kill STT immediately, skip summariser, exit.
 
@@ -3106,14 +3577,7 @@ class VerseViewApp(ctk.CTk):
         # ── 1. Save session snapshot ─────────────────────────────────────────────
         try:
             cfg.save(self._collect_settings())
-            snapshot = engine.get_session_snapshot()
-            snapshot["settings"] = self._collect_settings()
-            # Capture the GUI log box text so it can be replayed on restore
-            try:
-                snapshot["gui_log"] = self.log_box.get("1.0", "end").strip()
-            except Exception:
-                snapshot["gui_log"] = ""
-            _session.save_session(snapshot)
+            _session.save_session(self._build_session_snapshot("emergency"))
             print(f"[VerseView] Emergency session saved → {_session.get_session_path()}")
         except Exception as e:
             print(f"[VerseView] Session save error: {e}")
@@ -3144,6 +3608,33 @@ class VerseViewApp(ctk.CTk):
         os._exit(0)
 
 
+    # Language code → 2-letter tag for the compact history badge.
+    _HISTORY_BADGE_LANGS = {
+        "English": "EN", "Malayalam": "ML", "Hindi": "HI", "Multi-Language": "MU",
+    }
+
+    def _history_badge(self, stream_desc: str):
+        """Turn a stored source description like
+        'Secondary STT · AssemblyAI · English' into a compact badge
+        (text, color) for the verse-history row, e.g. ('SEC·EN', '#a06a20').
+        Returns ('', '') when there's no source (single-STT / manual sends),
+        so no badge is drawn."""
+        desc = (stream_desc or "").strip()
+        if not desc:
+            return "", ""
+        low = desc.lower()
+        if low.startswith("primary"):
+            pos, color = "PRI", "#2a6f9e"      # blue — first / primary stream
+        elif low.startswith("secondary"):
+            pos, color = "SEC", "#a06a20"      # amber — second / secondary stream
+        else:
+            return "", ""
+        # Append the language code (the most human-meaningful differentiator)
+        # when the description carries it: "… · English" → "EN".
+        parts = [p.strip() for p in desc.split("·")]
+        lang  = self._HISTORY_BADGE_LANGS.get(parts[-1], "") if len(parts) >= 3 else ""
+        return (f"{pos}·{lang}" if lang else pos), color
+
     def _update_history_loop(self):
         try:
             hist = engine.get_verse_history()
@@ -3157,8 +3648,18 @@ class VerseViewApp(ctk.CTk):
                     for item in new_items:
                         ref  = item["ref"]
                         lbl  = f"[{item['time']}] {ref}"
+                        badge_text, badge_color = self._history_badge(item.get("stream", ""))
+
+                        # Row wrapper so the verse button and its source badge sit
+                        # side by side. When there's no source (single-STT or a
+                        # manual send) the badge is omitted and the button fills
+                        # the row exactly as before.
+                        row = ctk.CTkFrame(self.history_scroll_frame, fg_color="transparent")
+                        row.pack(fill="x", padx=2, pady=1)
+                        row.grid_columnconfigure(0, weight=1)
+
                         btn  = ctk.CTkButton(
-                            self.history_scroll_frame,
+                            row,
                             text=lbl,
                             anchor="w",
                             fg_color="transparent",
@@ -3168,7 +3669,16 @@ class VerseViewApp(ctk.CTk):
                             height=22,
                             command=lambda r=ref: self._open_verse_popup(r),
                         )
-                        btn.pack(fill="x", padx=2, pady=1)
+                        btn.grid(row=0, column=0, sticky="ew")
+
+                        if badge_text:
+                            badge = ctk.CTkLabel(
+                                row, text=badge_text,
+                                font=ctk.CTkFont(size=9, weight="bold"),
+                                fg_color=badge_color, text_color="white",
+                                corner_radius=6, width=44, height=16,
+                            )
+                            badge.grid(row=0, column=1, padx=(3, 0))
                     self._last_history_len = len(hist)
         except Exception:
             pass
@@ -3186,6 +3696,18 @@ class VerseViewApp(ctk.CTk):
             transcript = (engine.full_sermon_transcript or "").strip()
             if len(transcript) < 50:
                 return  # Nothing worth saving
+
+            # Crash safety net: persist a RESTORABLE session snapshot so an
+            # abrupt exit (SIGTERM, OS shutdown, uncaught error) can still be
+            # recovered on next launch. Skipped on a clean, intentional close,
+            # which already wrote its own 'clean' snapshot in _finish_close — so
+            # we don't overwrite that with an "autosave"/crash label.
+            try:
+                if not getattr(self, "_clean_exit", False):
+                    _session.save_session(self._build_session_snapshot("autosave"))
+                    print("[VerseView] Crash-recovery session snapshot written")
+            except Exception as _se:
+                print(f"[VerseView] Crash snapshot failed: {_se}")
 
             notes_folder = self._get_sermon_notes_dir()
             os.makedirs(notes_folder, exist_ok=True)
@@ -3240,6 +3762,25 @@ class VerseViewApp(ctk.CTk):
 
     def _finish_close(self):
         """Called after the engine has fully stopped (or was already stopped)."""
+        # Intentional, clean shutdown. Set _closing FIRST so the autosave loop
+        # can't fire while the summary block below pumps the event loop via
+        # self.update(); mark _clean_exit so the atexit safety net doesn't
+        # overwrite the snapshot we save right here.
+        self._closing    = True
+        self._clean_exit = True
+
+        # Keep the session available for restore even on a NORMAL close: save a
+        # final "clean" snapshot (when there's meaningful data) rather than
+        # clearing it, so next launch can still offer to restore the previous
+        # session. Saved before the summary block so a slow/failed summary can't
+        # lose it.
+        try:
+            transcript = (engine.full_sermon_transcript or "").strip()
+            if len(transcript) >= 50 or engine.get_verse_history():
+                _session.save_session(self._build_session_snapshot("clean"))
+        except Exception:
+            pass
+
         # Auto-save summary if needed
         if self.auto_save_var.get() and not self._notes_saved and not self._notes_generated and engine.full_sermon_transcript and len(engine.full_sermon_transcript.strip()) > 100:
             self.lbl_status.configure(text="● Auto-Saving Notes...", text_color="#a07020")

@@ -64,6 +64,17 @@ DEFAULTS = {
     # ── Live Points ──
     "live_points_prompt":         "",
     "live_points_llm_enabled":    False,
+    # ── Contextual Verse Watcher (experimental; OFF by default) ──
+    # Parallel LLM watcher that surfaces paraphrased / indirect scripture
+    # references into the Suggestions panel. Must be explicitly enabled.
+    "watcher_enabled":            False,
+    "watcher_provider":           "groq",   # "groq" | "cerebras" | "mistral"
+    "watcher_batch_interval":     5.0,      # seconds between LLM cycles per stream
+    "watcher_auto_confidence":    0.85,     # >= this (no fast-path conflict) → auto-present
+    "watcher_passive_confidence": 0.60,     # >= this → passive suggestion; below → discard
+    "watcher_window_lines":       10,       # rolling window size (transcript lines)
+    "watcher_window_seconds":     40,       # rolling window size (seconds of speech)
+    "watcher_cooldown":           60,       # suppress a repeated suggestion within this window
     # ── ATEM Chroma Key Overlay ──
     "atem_enabled":               False,
     "atem_ip":                    "",
