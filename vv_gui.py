@@ -37,10 +37,11 @@ def _get_python_executable() -> str:
     interpreter to spawn instead. From source, sys.executable is already correct.
     """
     if getattr(sys, "frozen", False):
-        meipass = getattr(sys, "_MEIPASS", "")
+        # NOTE: do NOT use _MEIPASS/python — in a PyInstaller bundle that file is
+        # a shared library (Mach-O dylib / .so), not a runnable interpreter; the
+        # execute bit is set so os.access(X_OK) passes, but exec'ing it fails with
+        # "[Errno 8] Exec format error". Only genuine system interpreters qualify.
         candidates = [
-            os.path.join(meipass, "python"),
-            os.path.join(meipass, "python3"),
             "/usr/bin/python3",
             "/usr/local/bin/python3",
             "/opt/homebrew/bin/python3",
@@ -1033,14 +1034,6 @@ class VerseViewApp(ctk.CTk):
 
         self._save_bot_config()
 
-        # Find vv_discord_bot.py next to this script or in _MEIPASS
-        import sys as _sys
-        base = _sys._MEIPASS if hasattr(_sys, "_MEIPASS") else os.path.dirname(os.path.abspath(__file__))
-        bot_script = os.path.join(base, "vv_discord_bot.py")
-        if not os.path.exists(bot_script):
-            mb.showerror("Not Found", f"vv_discord_bot.py not found at:\n{bot_script}")
-            return
-
         env = os.environ.copy()
         env["VV_BOT_TOKEN"] = token
         guild_id = self.bot_guild_entry.get().strip()
@@ -1048,10 +1041,33 @@ class VerseViewApp(ctk.CTk):
         env["VV_PORT"]      = port
         if guild_id:
             env["VV_GUILD_ID"] = guild_id
+        env["PYTHONUNBUFFERED"] = "1"   # flush bot log lines to the log box promptly
+
+        # ── Build the launch command ──────────────────────────────────────────
+        # Two fundamentally different cases:
+        #   • Frozen bundle (.app / .exe): there is NO loose Python interpreter to
+        #     run vv_discord_bot.py with — sys.executable IS the bundled app, and
+        #     _MEIPASS/python is a shared library (dylib), not an executable, so
+        #     exec'ing it fails with "[Errno 8] Exec format error". The bot's
+        #     dependency (discord.py) only exists INSIDE this bundle anyway. So we
+        #     RE-LAUNCH this same bundled executable in "bot mode" via VV_RUN_BOT=1,
+        #     which the entry point (bottom of this file) detects and uses to run
+        #     the bot instead of the GUI.
+        #   • From source: run the bot script with the current interpreter.
+        if getattr(sys, "frozen", False):
+            env["VV_RUN_BOT"] = "1"
+            cmd = [sys.executable]
+        else:
+            base = os.path.dirname(os.path.abspath(__file__))
+            bot_script = os.path.join(base, "vv_discord_bot.py")
+            if not os.path.exists(bot_script):
+                mb.showerror("Not Found", f"vv_discord_bot.py not found at:\n{bot_script}")
+                return
+            cmd = [_get_python_executable(), bot_script]
 
         try:
             self._bot_process = subprocess.Popen(
-                [_get_python_executable(), bot_script],
+                cmd,
                 env=env,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
@@ -3926,7 +3942,34 @@ class VerseViewApp(ctk.CTk):
         self.destroy()
 
 
+def _run_bot_mode() -> int:
+    """Frozen "bot mode" entry.
+
+    In a PyInstaller build there is no separate Python interpreter to launch the
+    Discord bot with (sys.executable IS this bundled app, and _MEIPASS/python is
+    a dylib that can't be exec'd). So _start_bot re-launches THIS bundled
+    executable with VV_RUN_BOT=1; we detect that here and run vv_discord_bot
+    inside this same interpreter — which has discord.py bundled — instead of
+    building the GUI. Runs the bot's own async loop and returns its exit code.
+    """
+    try:
+        import asyncio as _asyncio
+        import vv_discord_bot as _bot
+        _asyncio.run(_bot._run_forever())
+        return 0
+    except KeyboardInterrupt:
+        return 0
+    except Exception as _exc:
+        print(f"[VerseView] Bot mode crashed: {_exc}", file=sys.stderr)
+        return 1
+
+
 if __name__ == "__main__":
+    # Bot mode dispatch MUST come first — before any GUI is created — so the
+    # re-launched bundle runs the bot, not a second GUI window.
+    if os.environ.get("VV_RUN_BOT") == "1":
+        sys.exit(_run_bot_mode())
+
     app = VerseViewApp()
     app.protocol("WM_DELETE_WINDOW", app.on_closing)
 
