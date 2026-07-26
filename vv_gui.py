@@ -1428,6 +1428,112 @@ class VerseViewApp(ctk.CTk):
         self.btn_sync_now.grid(row=1, column=0, columnspan=2, sticky="ew",
                                padx=PAD_M, pady=(PAD_XS, PAD_M))
 
+        # ── Local LLM (Ollama) ──
+        # A locally-hosted model (Ollama, llama.cpp, LM Studio, vLLM …) offered as
+        # an ADDITIONAL provider alongside Groq / Cerebras / Mistral. OFF by
+        # default: with the master toggle off nothing here is ever contacted and
+        # every role keeps using its existing cloud provider.
+        card = self._section_card(f, "🖥️  Local LLM (Ollama)")
+        self.local_llm_enabled_var = ctk.BooleanVar(value=False)
+        ctk.CTkCheckBox(
+            card,
+            text="Use Local LLM (off by default — cloud providers unchanged)",
+            variable=self.local_llm_enabled_var,
+            command=self._on_local_llm_toggle,
+            font=self._f(FS_BODY), text_color=COL_TEXT,
+            checkbox_width=20, checkbox_height=20,
+        ).grid(row=0, column=0, columnspan=2, sticky="w", padx=PAD_M, pady=(PAD_M, PAD_S))
+
+        # Everything below lives in a sub-frame so the whole block can be
+        # enabled/disabled as one unit by the master toggle.
+        sub = ctk.CTkFrame(card, fg_color="transparent")
+        sub.grid(row=1, column=0, columnspan=2, sticky="ew", padx=0, pady=0)
+        sub.grid_columnconfigure(1, weight=1)
+        self._local_llm_sub = sub
+
+        conn_fields = [
+            ("Host / IP",      "127.0.0.1",   "local_llm_host_entry",
+             "127.0.0.1 or a LAN IP e.g. 192.168.1.50"),
+            ("Port",           "11434",       "local_llm_port_entry",  "11434"),
+            ("Model Name",     "llama3.1:8b", "local_llm_model_entry",
+             "e.g. llama3.1:8b  (see `ollama list`)"),
+            ("Timeout (s)",    "45",          "local_llm_timeout_entry",
+             "local inference can be slow"),
+        ]
+        for i, (lbl, default, attr, ph) in enumerate(conn_fields):
+            setattr(self, attr, self._card_field(
+                sub, i, lbl, width=180, default=default, placeholder=ph))
+
+        # Test Connection — verifies host/port/model without starting a session.
+        _r = len(conn_fields)
+        self.btn_local_llm_test = self._neutral_button(
+            sub, "🔌  Test Connection", self._test_local_llm, height=32,
+        )
+        self.btn_local_llm_test.grid(row=_r, column=0, columnspan=2, sticky="ew",
+                                     padx=PAD_M, pady=(PAD_S, PAD_XS))
+        self.local_llm_test_lbl = ctk.CTkLabel(
+            sub, text="", anchor="w", justify="left", wraplength=380,
+            font=self._f(FS_SMALL), text_color=COL_TEXT_MUTED,
+        )
+        self.local_llm_test_lbl.grid(row=_r + 1, column=0, columnspan=2, sticky="ew",
+                                     padx=PAD_M, pady=(0, PAD_S))
+
+        # ── Per-role routing ──
+        ctk.CTkLabel(
+            sub, text="Route to Local LLM (per role — not all-or-nothing)",
+            anchor="w", font=self._f(FS_SECTION, "bold"), text_color=COL_TEXT_MUTED,
+        ).grid(row=_r + 2, column=0, columnspan=2, sticky="w",
+               padx=PAD_M, pady=(PAD_M, PAD_XS))
+
+        self._LOCAL_ROLE_VALUES = ["Cloud (default)", "Local LLM"]
+        role_rows = [
+            ("Verse Detection LLM", "local_llm_role_verse_var"),
+            ("Live Outline LLM",    "local_llm_role_outline_var"),
+            ("Sermon Summary LLM",  "local_llm_role_summary_var"),
+        ]
+        for k, (lbl, var_attr) in enumerate(role_rows):
+            r = _r + 3 + k
+            ctk.CTkLabel(sub, text=lbl, anchor="w", font=self._f(FS_LABEL),
+                         text_color=COL_TEXT).grid(row=r, column=0, sticky="w",
+                                                   padx=(PAD_M, PAD_S), pady=PAD_S)
+            var = ctk.StringVar(value="Cloud (default)")
+            setattr(self, var_attr, var)
+            ctk.CTkOptionMenu(
+                sub, variable=var, values=self._LOCAL_ROLE_VALUES, width=160,
+            ).grid(row=r, column=1, sticky="ew", padx=(PAD_S, PAD_M), pady=PAD_S)
+
+        _rf = _r + 3 + len(role_rows)
+        ctk.CTkLabel(
+            sub,
+            text=("Contextual Watcher → choose \"Local LLM\" in its own Watcher Provider "
+                  "dropdown below.\nStart there: it is a simple classification task, runs "
+                  "fully in parallel, and never blocks the live transcript — the lowest-risk "
+                  "place to try a local model."),
+            anchor="w", justify="left", wraplength=420,
+            font=self._f(FS_SMALL), text_color=COL_TEXT_FAINT,
+        ).grid(row=_rf, column=0, columnspan=2, sticky="w", padx=PAD_M, pady=(PAD_XS, PAD_S))
+
+        ctk.CTkLabel(sub, text="If Local LLM fails", anchor="w", font=self._f(FS_LABEL),
+                     text_color=COL_TEXT).grid(row=_rf + 1, column=0, sticky="w",
+                                               padx=(PAD_M, PAD_S), pady=PAD_S)
+        self.local_llm_failure_var = ctk.StringVar(value="Fall back to cloud")
+        ctk.CTkOptionMenu(
+            sub, variable=self.local_llm_failure_var,
+            values=["Fall back to cloud", "Skip (stay local-only)"], width=180,
+        ).grid(row=_rf + 1, column=1, sticky="ew", padx=(PAD_S, PAD_M), pady=PAD_S)
+        ctk.CTkLabel(
+            sub,
+            text=("Unreachable / timed out / bad reply → the error is logged, then either the "
+                  "role's cloud provider is used, or that one cycle is skipped. Either way the "
+                  "app never blocks, stalls the transcript, or crashes."),
+            anchor="w", justify="left", wraplength=420,
+            font=self._f(FS_SMALL), text_color=COL_TEXT_FAINT,
+        ).grid(row=_rf + 2, column=0, columnspan=2, sticky="w",
+               padx=PAD_M, pady=(0, PAD_M))
+
+        # Start greyed out — the master toggle is off by default.
+        self._on_local_llm_toggle()
+
         # ── Contextual Watcher (experimental) ──
         # A parallel LLM watcher that surfaces paraphrased / indirect scripture
         # references into the Suggestions panel. OFF by default (opt-in).
@@ -1447,7 +1553,9 @@ class VerseViewApp(ctk.CTk):
         self.watcher_provider_var = ctk.StringVar(value="Groq")
         ctk.CTkOptionMenu(
             card, variable=self.watcher_provider_var,
-            values=["Groq", "Cerebras", "Mistral"], width=140
+            # "Local LLM" is honoured only when the Local LLM master toggle above
+            # is on; otherwise the engine logs a warning and uses Groq.
+            values=["Groq", "Cerebras", "Mistral", "Local LLM"], width=140
         ).grid(row=1, column=1, sticky="ew", padx=(PAD_S, PAD_M), pady=PAD_S)
 
         watcher_fields = [
@@ -1461,6 +1569,62 @@ class VerseViewApp(ctk.CTk):
         for k, (lbl, default, attr) in enumerate(watcher_fields):
             setattr(self, attr, self._card_field(card, 2 + k, lbl, width=110, default=default))
 
+
+    # ── Local LLM (Ollama) helpers ────────────────────────────────────────────
+    def _set_local_llm_state(self, state: str):
+        """Enable/disable every control in the Local LLM sub-block."""
+        try:
+            for child in self._local_llm_sub.winfo_children():
+                try:
+                    child.configure(state=state)
+                except Exception:
+                    pass   # plain CTkLabels have no state option
+        except Exception:
+            pass
+
+    def _on_local_llm_toggle(self):
+        """Grey the whole Local LLM sub-block out when the master toggle is off,
+        so it is visually obvious the feature is inert."""
+        self._set_local_llm_state(
+            "normal" if self.local_llm_enabled_var.get() else "disabled")
+
+    def _test_local_llm(self):
+        """Send one trivial request to the configured host/port/model and report
+        success or the SPECIFIC failure (refused / timeout / DNS / bad reply).
+
+        Runs on a daemon thread and marshals the result back with after(), so the
+        UI never freezes even when the endpoint hangs for the full timeout."""
+        host    = self.local_llm_host_entry.get().strip() or "127.0.0.1"
+        port    = self.local_llm_port_entry.get().strip() or "11434"
+        model   = self.local_llm_model_entry.get().strip()
+        # Cap the probe timeout so a wedged endpoint can't disable the button for
+        # minutes — the session timeout can still be much larger.
+        timeout = min(self._safe_float(self.local_llm_timeout_entry, 45.0), 20.0)
+
+        self.btn_local_llm_test.configure(state="disabled", text="Testing…")
+        self.local_llm_test_lbl.configure(
+            text=f"Contacting {host}:{port} …", text_color=COL_TEXT_MUTED)
+
+        def _done(ok: bool, msg: str):
+            if getattr(self, "_closing", False):
+                return
+            self.btn_local_llm_test.configure(state="normal", text="🔌  Test Connection")
+            self.local_llm_test_lbl.configure(
+                text=("✅  " if ok else "❌  ") + msg,
+                text_color=(COL_OK if ok else COL_DANGER),
+            )
+            self._append_log(("✅ Local LLM test OK — " if ok else "❌ Local LLM test failed — ")
+                             + msg.replace("\n", " | "))
+
+        def _task():
+            try:
+                ok, msg = engine.test_local_llm_connection(
+                    host=host, port=port, model=model, timeout=timeout)
+            except Exception as e:
+                ok, msg = False, f"{type(e).__name__}: {e}"
+            self.after(0, lambda: _done(ok, msg))
+
+        threading.Thread(target=_task, daemon=True).start()
 
     def _toggle_advanced(self):
         self._adv_open = not self._adv_open
@@ -1708,9 +1872,39 @@ class VerseViewApp(ctk.CTk):
         self.sync_url_entry.delete(0, "end")
         self.sync_url_entry.insert(0, s.get("settings_sync_url", ""))
 
+        # ── Local LLM (Ollama) ──
+        # The sub-block starts disabled (toggle defaults off) and a disabled
+        # CTkEntry silently ignores insert(), so enable it while populating and
+        # re-apply the real toggle state at the end.
+        self.local_llm_enabled_var.set(s.get("local_llm_enabled", False))
+        self._set_local_llm_state("normal")
+        for attr, key, default in [
+            ("local_llm_host_entry",    "local_llm_host",    "127.0.0.1"),
+            ("local_llm_port_entry",    "local_llm_port",    "11434"),
+            ("local_llm_model_entry",   "local_llm_model",   "llama3.1:8b"),
+            ("local_llm_timeout_entry", "local_llm_timeout", 45.0),
+        ]:
+            e = getattr(self, attr)
+            e.delete(0, "end")
+            e.insert(0, str(s.get(key, default)))
+        for var_attr, key in [
+            ("local_llm_role_verse_var",   "local_llm_role_verse"),
+            ("local_llm_role_outline_var", "local_llm_role_outline"),
+            ("local_llm_role_summary_var", "local_llm_role_summary"),
+        ]:
+            is_local = str(s.get(key, "cloud")).lower().strip() == "local"
+            getattr(self, var_attr).set("Local LLM" if is_local else "Cloud (default)")
+        self.local_llm_failure_var.set(
+            "Skip (stay local-only)"
+            if str(s.get("local_llm_on_failure", "fallback")).lower().strip() == "skip"
+            else "Fall back to cloud"
+        )
+        self._on_local_llm_toggle()
+
         # ── Contextual Watcher ──
         self.watcher_enabled_var.set(s.get("watcher_enabled", False))
-        _wprov_map = {"groq": "Groq", "cerebras": "Cerebras", "mistral": "Mistral"}
+        _wprov_map = {"groq": "Groq", "cerebras": "Cerebras",
+                      "mistral": "Mistral", "local": "Local LLM"}
         self.watcher_provider_var.set(_wprov_map.get(str(s.get("watcher_provider", "groq")).lower(), "Groq"))
         for attr, key, default in [
             ("watcher_interval_entry",        "watcher_batch_interval",     5.0),
@@ -1779,9 +1973,22 @@ class VerseViewApp(ctk.CTk):
             "atem_ip":                    self.atem_ip_entry.get().strip(),
             "atem_key_duration":          self._safe_float(self.atem_dur_entry, 5.0),
             "settings_sync_url":          self.sync_url_entry.get().strip(),
+            # ── Local LLM (Ollama) ──
+            "local_llm_enabled":          self.local_llm_enabled_var.get(),
+            "local_llm_host":             self.local_llm_host_entry.get().strip(),
+            "local_llm_port":             self.local_llm_port_entry.get().strip(),
+            "local_llm_model":            self.local_llm_model_entry.get().strip(),
+            "local_llm_timeout":          self._safe_float(self.local_llm_timeout_entry, 45.0),
+            "local_llm_on_failure":       ("skip" if self.local_llm_failure_var.get().startswith("Skip")
+                                           else "fallback"),
+            "local_llm_role_verse":       self._role_code(self.local_llm_role_verse_var),
+            "local_llm_role_outline":     self._role_code(self.local_llm_role_outline_var),
+            "local_llm_role_summary":     self._role_code(self.local_llm_role_summary_var),
             # ── Contextual Watcher ──
             "watcher_enabled":            self.watcher_enabled_var.get(),
-            "watcher_provider":           self.watcher_provider_var.get().lower(),
+            # "Local LLM" → "local"; the three cloud labels lower-case as before.
+            "watcher_provider":           ("local" if self.watcher_provider_var.get() == "Local LLM"
+                                           else self.watcher_provider_var.get().lower()),
             "watcher_batch_interval":     self._safe_float(self.watcher_interval_entry,       5.0),
             "watcher_auto_confidence":    self._safe_float(self.watcher_auto_conf_entry,      0.85),
             "watcher_passive_confidence": self._safe_float(self.watcher_passive_conf_entry,   0.60),
@@ -2217,6 +2424,12 @@ class VerseViewApp(ctk.CTk):
         except: return d
 
 
+    @staticmethod
+    def _role_code(var) -> str:
+        """Per-role provider dropdown label → persisted value."""
+        return "local" if var.get() == "Local LLM" else "cloud"
+
+
     # ─────────────────────────────────────────────────
     # ENGINE CONTROL & CALLBACKS
     # ─────────────────────────────────────────────────
@@ -2566,6 +2779,16 @@ class VerseViewApp(ctk.CTk):
                 watcher_window_lines       = s.get("watcher_window_lines", 10),
                 watcher_window_seconds     = s.get("watcher_window_seconds", 40),
                 watcher_cooldown           = s.get("watcher_cooldown", 60),
+                # ── Local LLM (Ollama) — inert unless local_llm_enabled is True ──
+                local_llm_enabled          = s.get("local_llm_enabled", False),
+                local_llm_host             = s.get("local_llm_host", "127.0.0.1"),
+                local_llm_port             = s.get("local_llm_port", "11434"),
+                local_llm_model            = s.get("local_llm_model", ""),
+                local_llm_timeout          = s.get("local_llm_timeout", 45.0),
+                local_llm_on_failure       = s.get("local_llm_on_failure", "fallback"),
+                local_llm_role_verse       = s.get("local_llm_role_verse", "cloud"),
+                local_llm_role_outline     = s.get("local_llm_role_outline", "cloud"),
+                local_llm_role_summary     = s.get("local_llm_role_summary", "cloud"),
             )
 
             # Fresh session → start with an empty Suggestions panel.
@@ -3418,8 +3641,13 @@ class VerseViewApp(ctk.CTk):
                 text  = "⚪ Watcher OFF — enable it in Advanced Settings"
                 color = ("gray45", "gray55")
             elif not st.get("has_clients"):
-                prov = (st.get("provider", "") or "provider").title()
-                text  = f"🟠 Watcher ON, but no {prov} API key — add one in Advanced Settings"
+                _p = (st.get("provider", "") or "").lower()
+                if _p == "local":
+                    text = ("🟠 Watcher ON with Local LLM, but no local client — "
+                            "enable \"Use Local LLM\" and set a model in Advanced Settings")
+                else:
+                    prov = (st.get("provider", "") or "provider").title()
+                    text = f"🟠 Watcher ON, but no {prov} API key — add one in Advanced Settings"
                 color = ("#a06a20", "#d0a050")
             else:
                 cycles  = st.get("cycles", 0)

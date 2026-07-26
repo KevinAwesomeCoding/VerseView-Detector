@@ -68,13 +68,30 @@ DEFAULTS = {
     # Parallel LLM watcher that surfaces paraphrased / indirect scripture
     # references into the Suggestions panel. Must be explicitly enabled.
     "watcher_enabled":            False,
-    "watcher_provider":           "groq",   # "groq" | "cerebras" | "mistral"
+    "watcher_provider":           "groq",   # "groq" | "cerebras" | "mistral" | "local"
     "watcher_batch_interval":     5.0,      # seconds between LLM cycles per stream
     "watcher_auto_confidence":    0.85,     # >= this (no fast-path conflict) → auto-present
     "watcher_passive_confidence": 0.60,     # >= this → passive suggestion; below → discard
     "watcher_window_lines":       10,       # rolling window size (transcript lines)
     "watcher_window_seconds":     40,       # rolling window size (seconds of speech)
     "watcher_cooldown":           60,       # suppress a repeated suggestion within this window
+    # ── Local LLM (Ollama) — opt-in, per-role; OFF by default ──
+    # Master toggle OFF means the app behaves exactly as it always has: no local
+    # client is built, no local endpoint is contacted, and every LLM role stays
+    # on its existing cloud provider. Host may be 127.0.0.1 or any LAN address
+    # (e.g. 192.168.1.50) when the model runs on another machine.
+    "local_llm_enabled":          False,
+    "local_llm_host":             "127.0.0.1",
+    "local_llm_port":             "11434",       # Ollama's standard port
+    "local_llm_model":            "llama3.1:8b", # free text — whatever you pulled
+    "local_llm_timeout":          45.0,          # seconds; local inference is slower
+    "local_llm_on_failure":       "fallback",    # "fallback" (use cloud) | "skip"
+    # Per-role routing: "cloud" keeps today's provider cascade, "local" sends
+    # that role to the local model. The Contextual Watcher is routed via its own
+    # existing "watcher_provider" dropdown (which now also accepts "local").
+    "local_llm_role_verse":       "cloud",
+    "local_llm_role_outline":     "cloud",
+    "local_llm_role_summary":     "cloud",
     # ── ATEM Chroma Key Overlay ──
     "atem_enabled":               False,
     "atem_ip":                    "",
