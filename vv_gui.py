@@ -1478,36 +1478,90 @@ class VerseViewApp(ctk.CTk):
         self.local_llm_test_lbl.grid(row=_r + 1, column=0, columnspan=2, sticky="ew",
                                      padx=PAD_M, pady=(0, PAD_S))
 
-        # ── Per-role routing ──
+        # ── Per-role routing + model names ──
         ctk.CTkLabel(
             sub, text="Route to Local LLM (per role — not all-or-nothing)",
             anchor="w", font=self._f(FS_SECTION, "bold"), text_color=COL_TEXT_MUTED,
         ).grid(row=_r + 2, column=0, columnspan=2, sticky="w",
                padx=PAD_M, pady=(PAD_M, PAD_XS))
 
+        # Each role gets three rows: [Label / Dropdown], [Suggested Model], [Custom Override].
         self._LOCAL_ROLE_VALUES = ["Cloud (default)", "Local LLM"]
-        role_rows = [
-            ("Verse Detection LLM", "local_llm_role_verse_var"),
-            ("Live Outline LLM",    "local_llm_role_outline_var"),
-            ("Sermon Summary LLM",  "local_llm_role_summary_var"),
+        self._LOCAL_MODEL_OPTIONS = [
+            "gemma3:4b",
+            "gemma3:12b",
+            "qwen3:8b",
+            "qwen3:14b",
+            "llama3.1:8b"
         ]
-        for k, (lbl, var_attr) in enumerate(role_rows):
-            r = _r + 3 + k
-            ctk.CTkLabel(sub, text=lbl, anchor="w", font=self._f(FS_LABEL),
-                         text_color=COL_TEXT).grid(row=r, column=0, sticky="w",
-                                                   padx=(PAD_M, PAD_S), pady=PAD_S)
+        
+        role_rows = [
+            ("Verse Detection LLM",  "fast/small", "local_llm_role_verse_var",
+             "local_llm_model_verse_dropdown_var", "local_llm_model_verse_dropdown", "local_llm_model_verse_entry", "verse"),
+            ("Live Outline LLM",     "balanced/medium", "local_llm_role_outline_var",
+             "local_llm_model_outline_dropdown_var", "local_llm_model_outline_dropdown", "local_llm_model_outline_entry", "outline"),
+            ("Sermon Summary LLM",   "strongest/final pass", "local_llm_role_summary_var",
+             "local_llm_model_summary_dropdown_var", "local_llm_model_summary_dropdown", "local_llm_model_summary_entry", "summary"),
+        ]
+        for k, (lbl, helper, var_attr, dd_var_attr, dd_attr, entry_attr, role) in enumerate(role_rows):
+            r = _r + 3 + k * 3   # three rows per role
+
+            # Row 1: label + cloud/local dropdown
+            label_frame = ctk.CTkFrame(sub, fg_color="transparent")
+            label_frame.grid(row=r, column=0, sticky="w", padx=(PAD_M, PAD_S), pady=(PAD_S, 0))
+            
+            ctk.CTkLabel(label_frame, text=lbl, anchor="w", font=self._f(FS_LABEL),
+                         text_color=COL_TEXT).pack(side="left", padx=(0, PAD_S))
+            ctk.CTkLabel(label_frame, text=f"({helper})", anchor="w", font=self._f(FS_SMALL),
+                         text_color=COL_TEXT_MUTED).pack(side="left")
+
             var = ctk.StringVar(value="Cloud (default)")
             setattr(self, var_attr, var)
             ctk.CTkOptionMenu(
                 sub, variable=var, values=self._LOCAL_ROLE_VALUES, width=160,
-            ).grid(row=r, column=1, sticky="ew", padx=(PAD_S, PAD_M), pady=PAD_S)
+            ).grid(row=r, column=1, sticky="ew", padx=(PAD_S, PAD_M), pady=(PAD_S, 0))
 
-        _rf = _r + 3 + len(role_rows)
+            # Row 2: Suggested Model dropdown
+            ctk.CTkLabel(sub, text="Suggested Model", anchor="e",
+                         font=self._f(FS_SMALL), text_color=COL_TEXT_MUTED,
+                         ).grid(row=r + 1, column=0, sticky="e",
+                                padx=(PAD_M, PAD_S), pady=(2, 0))
+                                
+            dd_var = ctk.StringVar(value=cfg.get_recommended_local_model(role))
+            setattr(self, dd_var_attr, dd_var)
+            dd = ctk.CTkOptionMenu(
+                sub, variable=dd_var, values=self._LOCAL_MODEL_OPTIONS, width=160,
+            )
+            dd.grid(row=r + 1, column=1, sticky="ew",
+                       padx=(PAD_S, PAD_M), pady=(2, 0))
+            setattr(self, dd_attr, dd)
+
+            # Row 3: Custom Override entry
+            ctk.CTkLabel(sub, text="Custom Override", anchor="e",
+                         font=self._f(FS_SMALL), text_color=COL_TEXT_MUTED,
+                         ).grid(row=r + 2, column=0, sticky="e",
+                                padx=(PAD_M, PAD_S), pady=(0, PAD_S))
+            entry = ctk.CTkEntry(sub, width=160, placeholder_text="e.g. my-custom-model",
+                                 font=self._f(FS_SMALL))
+            entry.grid(row=r + 2, column=1, sticky="ew",
+                       padx=(PAD_S, PAD_M), pady=(0, PAD_S))
+            setattr(self, entry_attr, entry)
+
         ctk.CTkLabel(
             sub,
-            text=("Contextual Watcher → choose \"Local LLM\" in its own Watcher Provider "
+            text=("Effective model resolution: 1) Custom override 2) Suggested dropdown 3) Default. "
+                  "Blank fields fall back to recommended models."),
+            anchor="w", justify="left", wraplength=420,
+            font=self._f(FS_SMALL), text_color=COL_TEXT_FAINT,
+        ).grid(row=_r + 3 + len(role_rows) * 3, column=0, columnspan=2, sticky="w",
+               padx=PAD_M, pady=(0, PAD_XS))
+
+        _rf = _r + 3 + len(role_rows) * 3 + 1
+        ctk.CTkLabel(
+            sub,
+            text=("Contextual Watcher \u2192 choose \"Local LLM\" in its own Watcher Provider "
                   "dropdown below.\nStart there: it is a simple classification task, runs "
-                  "fully in parallel, and never blocks the live transcript — the lowest-risk "
+                  "fully in parallel, and never blocks the live transcript \u2014 the lowest-risk "
                   "place to try a local model."),
             anchor="w", justify="left", wraplength=420,
             font=self._f(FS_SMALL), text_color=COL_TEXT_FAINT,
@@ -1523,7 +1577,7 @@ class VerseViewApp(ctk.CTk):
         ).grid(row=_rf + 1, column=1, sticky="ew", padx=(PAD_S, PAD_M), pady=PAD_S)
         ctk.CTkLabel(
             sub,
-            text=("Unreachable / timed out / bad reply → the error is logged, then either the "
+            text=("Unreachable / timed out / bad reply \u2192 the error is logged, then either the "
                   "role's cloud provider is used, or that one cycle is skipped. Either way the "
                   "app never blocks, stalls the transcript, or crashes."),
             anchor="w", justify="left", wraplength=420,
@@ -1596,7 +1650,11 @@ class VerseViewApp(ctk.CTk):
         UI never freezes even when the endpoint hangs for the full timeout."""
         host    = self.local_llm_host_entry.get().strip() or "127.0.0.1"
         port    = self.local_llm_port_entry.get().strip() or "11434"
-        model   = self.local_llm_model_entry.get().strip()
+        model   = self.local_llm_model_entry.get().strip() or (
+            cfg.get_effective_local_model("verse", getattr(self, "local_llm_model_verse_dropdown_var", ctk.StringVar()).get(), getattr(self, "local_llm_model_verse_entry", ctk.StringVar()).get()) or
+            cfg.get_effective_local_model("outline", getattr(self, "local_llm_model_outline_dropdown_var", ctk.StringVar()).get(), getattr(self, "local_llm_model_outline_entry", ctk.StringVar()).get()) or
+            cfg.get_effective_local_model("summary", getattr(self, "local_llm_model_summary_dropdown_var", ctk.StringVar()).get(), getattr(self, "local_llm_model_summary_entry", ctk.StringVar()).get())
+        )
         # Cap the probe timeout so a wedged endpoint can't disable the button for
         # minutes — the session timeout can still be much larger.
         timeout = min(self._safe_float(self.local_llm_timeout_entry, 45.0), 20.0)
@@ -1881,12 +1939,35 @@ class VerseViewApp(ctk.CTk):
         for attr, key, default in [
             ("local_llm_host_entry",    "local_llm_host",    "127.0.0.1"),
             ("local_llm_port_entry",    "local_llm_port",    "11434"),
-            ("local_llm_model_entry",   "local_llm_model",   "llama3.1:8b"),
+            ("local_llm_model_entry",   "local_llm_model",   ""),
             ("local_llm_timeout_entry", "local_llm_timeout", 45.0),
         ]:
             e = getattr(self, attr)
             e.delete(0, "end")
             e.insert(0, str(s.get(key, default)))
+            
+        def _setup_role_model(role_name, dd_var, dd_widget, custom_entry, saved_val):
+            recommended = cfg.get_recommended_local_model(role_name)
+            options = ["gemma3:4b", "gemma3:12b", "qwen3:8b", "qwen3:14b", "llama3.1:8b"]
+            
+            custom_entry.delete(0, "end")
+            saved_val = (saved_val or "").strip()
+            
+            if saved_val:
+                if saved_val in options:
+                    dd_var.set(saved_val)
+                else:
+                    options.append(saved_val)
+                    dd_var.set(recommended)
+                    custom_entry.insert(0, saved_val)
+            else:
+                dd_var.set(recommended)
+                
+            dd_widget.configure(values=options)
+
+        _setup_role_model("verse", self.local_llm_model_verse_dropdown_var, self.local_llm_model_verse_dropdown, self.local_llm_model_verse_entry, s.get("local_llm_model_verse", ""))
+        _setup_role_model("outline", self.local_llm_model_outline_dropdown_var, self.local_llm_model_outline_dropdown, self.local_llm_model_outline_entry, s.get("local_llm_model_outline", ""))
+        _setup_role_model("summary", self.local_llm_model_summary_dropdown_var, self.local_llm_model_summary_dropdown, self.local_llm_model_summary_entry, s.get("local_llm_model_summary", ""))
         for var_attr, key in [
             ("local_llm_role_verse_var",   "local_llm_role_verse"),
             ("local_llm_role_outline_var", "local_llm_role_outline"),
@@ -1984,6 +2065,9 @@ class VerseViewApp(ctk.CTk):
             "local_llm_role_verse":       self._role_code(self.local_llm_role_verse_var),
             "local_llm_role_outline":     self._role_code(self.local_llm_role_outline_var),
             "local_llm_role_summary":     self._role_code(self.local_llm_role_summary_var),
+            "local_llm_model_verse":      cfg.get_effective_local_model("verse", self.local_llm_model_verse_dropdown_var.get(), self.local_llm_model_verse_entry.get()),
+            "local_llm_model_outline":    cfg.get_effective_local_model("outline", self.local_llm_model_outline_dropdown_var.get(), self.local_llm_model_outline_entry.get()),
+            "local_llm_model_summary":    cfg.get_effective_local_model("summary", self.local_llm_model_summary_dropdown_var.get(), self.local_llm_model_summary_entry.get()),
             # ── Contextual Watcher ──
             "watcher_enabled":            self.watcher_enabled_var.get(),
             # "Local LLM" → "local"; the three cloud labels lower-case as before.
@@ -2789,6 +2873,9 @@ class VerseViewApp(ctk.CTk):
                 local_llm_role_verse       = s.get("local_llm_role_verse", "cloud"),
                 local_llm_role_outline     = s.get("local_llm_role_outline", "cloud"),
                 local_llm_role_summary     = s.get("local_llm_role_summary", "cloud"),
+                local_llm_model_verse      = s.get("local_llm_model_verse", ""),
+                local_llm_model_outline    = s.get("local_llm_model_outline", ""),
+                local_llm_model_summary    = s.get("local_llm_model_summary", ""),
             )
 
             # Fresh session → start with an empty Suggestions panel.

@@ -83,7 +83,7 @@ DEFAULTS = {
     "local_llm_enabled":          False,
     "local_llm_host":             "127.0.0.1",
     "local_llm_port":             "11434",       # Ollama's standard port
-    "local_llm_model":            "llama3.1:8b", # free text — whatever you pulled
+    "local_llm_model":            "",            # shared fallback; blank = must set per-role
     "local_llm_timeout":          45.0,          # seconds; local inference is slower
     "local_llm_on_failure":       "fallback",    # "fallback" (use cloud) | "skip"
     # Per-role routing: "cloud" keeps today's provider cascade, "local" sends
@@ -92,6 +92,14 @@ DEFAULTS = {
     "local_llm_role_verse":       "cloud",
     "local_llm_role_outline":     "cloud",
     "local_llm_role_summary":     "cloud",
+    # Per-role model overrides: blank means fall through to local_llm_model above.
+    # Recommended defaults for RTX 2080 Ti (11 GB VRAM):
+    #   verse   → gemma3:4b   (~3 GB VRAM, fast response for live detection)
+    #   outline → gemma3:12b  (~8 GB VRAM, coherent live structure)
+    #   summary → qwen3:14b   (~9-10 GB VRAM Q4, runs once at sermon end)
+    "local_llm_model_verse":      "",            # blank = use local_llm_model
+    "local_llm_model_outline":    "",            # blank = use local_llm_model
+    "local_llm_model_summary":    "",            # blank = use local_llm_model
     # ── ATEM Chroma Key Overlay ──
     "atem_enabled":               False,
     "atem_ip":                    "",
@@ -450,3 +458,25 @@ def import_settings() -> dict | None:
     except Exception as e:
         mb.showerror("Import Failed", str(e))
         return None
+
+
+# ── Local Model Helpers ──
+def get_recommended_local_model(role: str) -> str:
+    """Return the recommended default model for a specific role."""
+    if role == "verse":
+        return "gemma3:4b"
+    elif role == "outline":
+        return "gemma3:12b"
+    elif role == "summary":
+        return "qwen3:14b"
+    return ""
+
+def get_effective_local_model(role: str, dropdown_val: str, custom_val: str) -> str:
+    """Resolve the effective model: custom > dropdown > default."""
+    custom_val = (custom_val or "").strip()
+    if custom_val:
+        return custom_val
+    dropdown_val = (dropdown_val or "").strip()
+    if dropdown_val:
+        return dropdown_val
+    return get_recommended_local_model(role)
