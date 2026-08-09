@@ -9,6 +9,10 @@ import tkinter.messagebox as mb
 
 logger = logging.getLogger("VerseViewSTT")
 
+# Endpoint used by every Local LLM role when nothing else is configured. This is
+# Ollama's own default, so the machine that actually runs Ollama needs no setup.
+DEFAULT_LOCAL_LLM_ENDPOINT = "http://127.0.0.1:11434"
+
 DEFAULTS = {
     # ── API Keys ──
     "deepgram_api_key":           "",
@@ -78,13 +82,31 @@ DEFAULTS = {
     # ── Local LLM (Ollama) — opt-in, per-role; OFF by default ──
     # Master toggle OFF means the app behaves exactly as it always has: no local
     # client is built, no local endpoint is contacted, and every LLM role stays
-    # on its existing cloud provider. Host may be 127.0.0.1 or any LAN address
-    # (e.g. 192.168.1.50) when the model runs on another machine.
+    # on its existing cloud provider.
     "local_llm_enabled":          False,
+    # ONE endpoint shared by every Local LLM role. The model host stays on
+    # DEFAULT_LOCAL_LLM_ENDPOINT; a remote VerseView computer points this at the
+    # protected HTTPS front door of the model host (Cloudflare Tunnel / reverse
+    # proxy), e.g. "https://ollama.example.com". Ollama's own port is never
+    # exposed. Default is BLANK, not the local URL: blank means "not configured
+    # here", which lets resolve_local_llm_endpoint() fall through to the legacy
+    # host/port pair. A literal default would mask a LAN host set on an older
+    # build and silently redirect that user back to their own machine.
+    "local_llm_endpoint":         "",
+    # LEGACY, read-only. Older settings files carry these instead of an endpoint;
+    # resolve_local_llm_endpoint() migrates them on load. Nothing writes them.
     "local_llm_host":             "127.0.0.1",
     "local_llm_port":             "11434",       # Ollama's standard port
-    "local_llm_model":            "",            # shared fallback; blank = must set per-role
-    "local_llm_timeout":          45.0,          # seconds; local inference is slower
+    # ── Optional remote authentication (blank = none, which is correct for a
+    # loopback endpoint). Sent on EVERY Local LLM request. Never logged.
+    "local_llm_auth_token":       "",            # → "Authorization: Bearer <token>"
+    # Free-form extra request headers as a JSON object, for a proxy that needs
+    # something other than a bearer token. Cloudflare Access service tokens go
+    # here (see docs/LOCAL_LLM_REMOTE_ACCESS.md):
+    #   {"CF-Access-Client-Id": "<id>.access", "CF-Access-Client-Secret": "<secret>"}
+    "local_llm_extra_headers":    "",
+    "local_llm_model":            "",            # shared fallback; blank = per-role defaults apply
+    "local_llm_timeout":          45.0,          # seconds; per-role timeouts are derived from this
     "local_llm_on_failure":       "fallback",    # "fallback" (use cloud) | "skip"
     # Per-role routing: "cloud" keeps today's provider cascade, "local" sends
     # that role to the local model. The Contextual Watcher is routed via its own
@@ -461,6 +483,40 @@ def import_settings() -> dict | None:
 
 
 # ── Local Model Helpers ──
+def resolve_local_llm_endpoint(settings) -> str:
+    """Return the raw endpoint string every Local LLM role should use.
+
+    Accepts the whole settings dict (or a raw string). Priority:
+      1. "local_llm_endpoint" when set — the field the user edits today.
+      2. the legacy "local_llm_host" / "local_llm_port" pair, so a settings file
+         written before the endpoint field existed keeps working untouched.
+      3. DEFAULT_LOCAL_LLM_ENDPOINT — a settings file with neither is a fresh or
+         very old install, and localhost is the safe assumption.
+
+    Only whitespace and trailing slashes are trimmed here. Full URL shaping
+    (scheme, default port, path) is vv_streaming_master.normalize_ollama_endpoint,
+    which is the single owner of that logic for both the GUI and the engine.
+    """
+    if not isinstance(settings, dict):
+        text = (settings or "").strip().rstrip("/")
+        return text or DEFAULT_LOCAL_LLM_ENDPOINT
+
+    endpoint = str(settings.get("local_llm_endpoint", "") or "").strip().rstrip("/")
+    if endpoint:
+        return endpoint
+
+    host = str(settings.get("local_llm_host", "") or "").strip().rstrip("/")
+    if host:
+        port = str(settings.get("local_llm_port", "") or "").strip()
+        # A legacy host box could already hold a full URL or a "host:port" pair;
+        # in both cases the port field was ignored then and is ignored now.
+        if "://" in host or (":" in host and not host.endswith("]")):
+            return host
+        return f"{host}:{port}" if port else host
+
+    return DEFAULT_LOCAL_LLM_ENDPOINT
+
+
 def get_recommended_local_model(role: str) -> str:
     """Return the recommended default model for a specific role."""
     if role == "verse":

@@ -1451,21 +1451,48 @@ class VerseViewApp(ctk.CTk):
         sub.grid_columnconfigure(1, weight=1)
         self._local_llm_sub = sub
 
-        conn_fields = [
-            ("Host / IP",      "127.0.0.1",   "local_llm_host_entry",
-             "127.0.0.1 or a LAN IP e.g. 192.168.1.50"),
-            ("Port",           "11434",       "local_llm_port_entry",  "11434"),
-            ("Model Name",     "llama3.1:8b", "local_llm_model_entry",
-             "e.g. llama3.1:8b  (see `ollama list`)"),
-            ("Timeout (s)",    "45",          "local_llm_timeout_entry",
-             "local inference can be slow"),
-        ]
-        for i, (lbl, default, attr, ph) in enumerate(conn_fields):
-            setattr(self, attr, self._card_field(
-                sub, i, lbl, width=180, default=default, placeholder=ph))
+        # ── Endpoint + optional remote authentication ──
+        # One endpoint shared by every role below. On the computer that actually
+        # runs Ollama this stays on loopback and needs no credentials; on another
+        # computer it points at that machine's protected HTTPS front door.
+        self.local_llm_endpoint_entry = self._card_field(
+            sub, 0, "Local Ollama Endpoint", width=180,
+            default=cfg.DEFAULT_LOCAL_LLM_ENDPOINT,
+            placeholder="http://127.0.0.1:11434")
+        ctk.CTkLabel(
+            sub,
+            text=("Use http://127.0.0.1:11434 on the model host. Use your protected "
+                  "HTTPS endpoint on remote VerseView computers."),
+            anchor="w", justify="left", wraplength=420,
+            font=self._f(FS_SMALL), text_color=COL_TEXT_FAINT,
+        ).grid(row=1, column=0, columnspan=2, sticky="w", padx=PAD_M, pady=(0, PAD_XS))
 
-        # Test Connection — verifies host/port/model without starting a session.
-        _r = len(conn_fields)
+        conn_fields = [
+            ("Auth Token (optional)",  "",            "local_llm_auth_token_entry",
+             "blank for 127.0.0.1 — sent as Authorization: Bearer", "•"),
+            ("Extra Headers (optional)", "",          "local_llm_extra_headers_entry",
+             '{"CF-Access-Client-Id": "…", "CF-Access-Client-Secret": "…"}', "•"),
+            ("Model Name",             "llama3.1:8b", "local_llm_model_entry",
+             "shared fallback — see `ollama list` on the model host", ""),
+            ("Timeout (s)",            "45",          "local_llm_timeout_entry",
+             "base budget; verse is shorter, summary longer", ""),
+        ]
+        for i, (lbl, default, attr, ph, show) in enumerate(conn_fields):
+            setattr(self, attr, self._card_field(
+                sub, 2 + i, lbl, width=180, default=default, placeholder=ph, show=show))
+
+        _r = 2 + len(conn_fields)
+        ctk.CTkLabel(
+            sub,
+            text=("Leave both optional fields blank for a local endpoint. A remote "
+                  "endpoint behind Cloudflare Access needs a service token pasted "
+                  "into Extra Headers — see docs/LOCAL_LLM_REMOTE_ACCESS.md."),
+            anchor="w", justify="left", wraplength=420,
+            font=self._f(FS_SMALL), text_color=COL_TEXT_FAINT,
+        ).grid(row=_r, column=0, columnspan=2, sticky="w", padx=PAD_M, pady=(0, PAD_XS))
+
+        # Test Connection — verifies endpoint/auth/model without starting a session.
+        _r += 1
         self.btn_local_llm_test = self._neutral_button(
             sub, "🔌  Test Connection", self._test_local_llm, height=32,
         )
@@ -1643,14 +1670,18 @@ class VerseViewApp(ctk.CTk):
             "normal" if self.local_llm_enabled_var.get() else "disabled")
 
     def _test_local_llm(self):
-        """Send one trivial request to the configured host/port/model and report
-        success or the SPECIFIC failure (refused / timeout / DNS / bad reply).
+        """Send one trivial request to the configured endpoint/model and report
+        success or the SPECIFIC failure (refused / timeout / DNS / not
+        authenticated / model not installed / bad reply).
 
         Runs on a daemon thread and marshals the result back with after(), so the
-        UI never freezes even when the endpoint hangs for the full timeout."""
-        host    = self.local_llm_host_entry.get().strip() or "127.0.0.1"
-        port    = self.local_llm_port_entry.get().strip() or "11434"
-        model   = self.local_llm_model_entry.get().strip() or (
+        UI never freezes even when the endpoint hangs for the full timeout. No
+        credential VALUE is ever shown or logged — only header names."""
+        endpoint = engine.normalize_ollama_endpoint(
+            self.local_llm_endpoint_entry.get())
+        token    = self.local_llm_auth_token_entry.get().strip()
+        headers  = self.local_llm_extra_headers_entry.get().strip()
+        model    = self.local_llm_model_entry.get().strip() or (
             cfg.get_effective_local_model("verse", getattr(self, "local_llm_model_verse_dropdown_var", ctk.StringVar()).get(), getattr(self, "local_llm_model_verse_entry", ctk.StringVar()).get()) or
             cfg.get_effective_local_model("outline", getattr(self, "local_llm_model_outline_dropdown_var", ctk.StringVar()).get(), getattr(self, "local_llm_model_outline_entry", ctk.StringVar()).get()) or
             cfg.get_effective_local_model("summary", getattr(self, "local_llm_model_summary_dropdown_var", ctk.StringVar()).get(), getattr(self, "local_llm_model_summary_entry", ctk.StringVar()).get())
@@ -1661,7 +1692,7 @@ class VerseViewApp(ctk.CTk):
 
         self.btn_local_llm_test.configure(state="disabled", text="Testing…")
         self.local_llm_test_lbl.configure(
-            text=f"Contacting {host}:{port} …", text_color=COL_TEXT_MUTED)
+            text=f"Contacting {endpoint} …", text_color=COL_TEXT_MUTED)
 
         def _done(ok: bool, msg: str):
             if getattr(self, "_closing", False):
@@ -1677,7 +1708,8 @@ class VerseViewApp(ctk.CTk):
         def _task():
             try:
                 ok, msg = engine.test_local_llm_connection(
-                    host=host, port=port, model=model, timeout=timeout)
+                    endpoint=endpoint, model=model, timeout=timeout,
+                    auth_token=token, extra_headers=headers)
             except Exception as e:
                 ok, msg = False, f"{type(e).__name__}: {e}"
             self.after(0, lambda: _done(ok, msg))
@@ -1936,11 +1968,17 @@ class VerseViewApp(ctk.CTk):
         # re-apply the real toggle state at the end.
         self.local_llm_enabled_var.set(s.get("local_llm_enabled", False))
         self._set_local_llm_state("normal")
+        # Endpoint: resolve_local_llm_endpoint() migrates a settings file that
+        # still carries the older host/port pair, so an upgrade keeps working
+        # without the user touching anything.
+        self.local_llm_endpoint_entry.delete(0, "end")
+        self.local_llm_endpoint_entry.insert(
+            0, engine.normalize_ollama_endpoint(cfg.resolve_local_llm_endpoint(s)))
         for attr, key, default in [
-            ("local_llm_host_entry",    "local_llm_host",    "127.0.0.1"),
-            ("local_llm_port_entry",    "local_llm_port",    "11434"),
-            ("local_llm_model_entry",   "local_llm_model",   ""),
-            ("local_llm_timeout_entry", "local_llm_timeout", 45.0),
+            ("local_llm_auth_token_entry",    "local_llm_auth_token",    ""),
+            ("local_llm_extra_headers_entry", "local_llm_extra_headers", ""),
+            ("local_llm_model_entry",         "local_llm_model",         ""),
+            ("local_llm_timeout_entry",       "local_llm_timeout",       45.0),
         ]:
             e = getattr(self, attr)
             e.delete(0, "end")
@@ -2056,8 +2094,13 @@ class VerseViewApp(ctk.CTk):
             "settings_sync_url":          self.sync_url_entry.get().strip(),
             # ── Local LLM (Ollama) ──
             "local_llm_enabled":          self.local_llm_enabled_var.get(),
-            "local_llm_host":             self.local_llm_host_entry.get().strip(),
-            "local_llm_port":             self.local_llm_port_entry.get().strip(),
+            # Normalised on save so whitespace / a trailing slash / a missing
+            # scheme can never reach a request. Supersedes local_llm_host+port,
+            # which are now read-only legacy keys (see settings.DEFAULTS).
+            "local_llm_endpoint":         engine.normalize_ollama_endpoint(
+                                              self.local_llm_endpoint_entry.get()),
+            "local_llm_auth_token":       self.local_llm_auth_token_entry.get().strip(),
+            "local_llm_extra_headers":    self.local_llm_extra_headers_entry.get().strip(),
             "local_llm_model":            self.local_llm_model_entry.get().strip(),
             "local_llm_timeout":          self._safe_float(self.local_llm_timeout_entry, 45.0),
             "local_llm_on_failure":       ("skip" if self.local_llm_failure_var.get().startswith("Skip")
@@ -2865,8 +2908,11 @@ class VerseViewApp(ctk.CTk):
                 watcher_cooldown           = s.get("watcher_cooldown", 60),
                 # ── Local LLM (Ollama) — inert unless local_llm_enabled is True ──
                 local_llm_enabled          = s.get("local_llm_enabled", False),
-                local_llm_host             = s.get("local_llm_host", "127.0.0.1"),
-                local_llm_port             = s.get("local_llm_port", "11434"),
+                # One endpoint for every role; falls back to the legacy host/port
+                # pair for a settings file written before the field existed.
+                local_llm_endpoint         = cfg.resolve_local_llm_endpoint(s),
+                local_llm_auth_token       = s.get("local_llm_auth_token", ""),
+                local_llm_extra_headers    = s.get("local_llm_extra_headers", ""),
                 local_llm_model            = s.get("local_llm_model", ""),
                 local_llm_timeout          = s.get("local_llm_timeout", 45.0),
                 local_llm_on_failure       = s.get("local_llm_on_failure", "fallback"),
@@ -3731,7 +3777,8 @@ class VerseViewApp(ctk.CTk):
                 _p = (st.get("provider", "") or "").lower()
                 if _p == "local":
                     text = ("🟠 Watcher ON with Local LLM, but no local client — "
-                            "enable \"Use Local LLM\" and set a model in Advanced Settings")
+                            "enable \"Use Local LLM\" and check the endpoint in "
+                            "Advanced Settings")
                 else:
                     prov = (st.get("provider", "") or "provider").title()
                     text = f"🟠 Watcher ON, but no {prov} API key — add one in Advanced Settings"

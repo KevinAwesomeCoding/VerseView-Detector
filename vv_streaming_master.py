@@ -13,6 +13,7 @@ import certifi
 import threading
 import datetime as _dt
 import json
+from urllib.parse import urlsplit as _urlsplit
 
 # ── Bot Bridge (Discord → Selenium) ──────────────────────────────────────────
 try:
@@ -218,15 +219,200 @@ class _MistralClient:
 # is tried first; on 404/405/501 the native dialect is tried, and whichever
 # answered is cached so later calls are a single request. That also means a
 # non-Ollama OpenAI-compatible server (llama.cpp, LM Studio, vLLM…) works.
+#
+# ── ONE HOST, MANY CLIENTS ───────────────────────────────────────────────────
+# The endpoint is a full URL rather than a host/port pair, because the model host
+# and the machines that use it are not always the same computer:
+#
+#   on the model host       http://127.0.0.1:11434        (no auth — loopback)
+#   on a remote VerseView   https://ollama.example.com    (Cloudflare Tunnel /
+#                                                          reverse proxy + auth)
+#
+# Everything else is identical: same roles, same models, same failure policy.
+# Ollama's own port is never exposed to the internet; the tunnel is.
+
+DEFAULT_LOCAL_LLM_ENDPOINT = "http://127.0.0.1:11434"
+
+# Internal role id → the name used in Local Ollama log lines.
+LOCAL_LLM_ROLE_LOG_NAMES = {
+    "verse":   "verse_detection",
+    "outline": "live_outline",
+    "summary": "sermon_summary",
+    "watcher": "contextual_watcher",
+}
+
+# Mirrors settings.get_recommended_local_model(). Duplicated deliberately: the
+# engine must not import settings.py (which pulls in tkinter dialogs), and this
+# is only the last-resort fallback for a settings file saved before the per-role
+# model fields existed. Keep the two in sync if the recommendations change.
+LOCAL_LLM_RECOMMENDED_MODELS = {
+    "verse":   "gemma3:4b",     # fast / small — fires on nearly every utterance
+    "outline": "gemma3:12b",    # balanced     — every ~90s in the background
+    "summary": "qwen3:14b",     # strongest    — once, at the end of the sermon
+}
+
+# Dialect ("openai" | "native") discovered per endpoint, shared by every role's
+# client so only the FIRST request of a session can pay the extra round-trip.
+_LOCAL_DIALECT_CACHE: dict = {}
+
+# Header names whose VALUES must never reach a log or the GUI. Anything matching
+# is reported by name only.
+_SENSITIVE_HEADER_HINTS = ("authorization", "token", "secret", "key",
+                           "cookie", "password", "credential")
+
+
+def normalize_ollama_endpoint(value, default_port: int = 11434) -> str:
+    """Turn whatever the user typed into a usable "scheme://host[:port][/path]".
+
+    Accepts a bare host ("127.0.0.1"), a host:port pair ("192.168.1.50:11500"),
+    or a full URL ("https://ollama.example.com/", "http://box:11434").
+
+    Rules:
+      • blank / unparseable      → the local default (backward compatible: a
+        settings file with no endpoint at all still talks to localhost)
+      • no scheme                → http://
+      • http:// with no port     → :11434 appended (loopback and LAN hosts)
+      • https:// with no port    → left alone. 443 is what a tunnel or reverse
+        proxy listens on; appending 11434 here is what breaks a remote endpoint.
+      • trailing slashes trimmed; an explicit path prefix ("/ollama") preserved
+      • query, fragment and any user:pass@ prefix are dropped — Ollama uses none
+        of them, and credentials belong in headers where they are never logged.
+    """
+    raw = str(value or "").strip().strip('"').strip("'").strip()
+    if not raw:
+        return DEFAULT_LOCAL_LLM_ENDPOINT
+    if "://" not in raw:
+        raw = "http://" + raw.lstrip("/")
+    try:
+        parts = _urlsplit(raw)
+        host   = parts.hostname or ""
+        port   = parts.port          # raises ValueError on a non-numeric port
+        scheme = (parts.scheme or "http").lower()
+        path   = (parts.path or "").rstrip("/")
+    except Exception:
+        return DEFAULT_LOCAL_LLM_ENDPOINT
+    if not host:
+        return DEFAULT_LOCAL_LLM_ENDPOINT
+    if scheme not in ("http", "https"):
+        scheme = "http"
+    if ":" in host and not host.startswith("["):   # urlsplit unwraps IPv6 literals
+        host = f"[{host}]"
+    if port is None and scheme == "http":
+        port = default_port
+    netloc = f"{host}:{port}" if port else host
+    return f"{scheme}://{netloc}{path}"
+
+
+def local_llm_endpoint_kind(base_url: str) -> str:
+    """"local" for a loopback endpoint, "remote" for anything else.
+
+    Safe to log: it says which SIDE of the tunnel we are on without printing the
+    host name of a private endpoint.
+    """
+    try:
+        host = (_urlsplit(base_url).hostname or "").lower()
+    except Exception:
+        return "remote"
+    return "local" if host in ("127.0.0.1", "localhost", "::1", "0.0.0.0", "") else "remote"
+
+
+def parse_local_llm_headers(value) -> tuple:
+    """Parse the "extra request headers" setting → (headers: dict, error: str).
+
+    Never raises and never logs a value. Accepts a JSON object as text (what the
+    GUI stores) or an already-parsed dict. A non-empty error means the setting is
+    unusable and should be reported to the user, not silently applied.
+    """
+    if isinstance(value, dict):
+        obj = value
+    else:
+        raw = str(value or "").strip()
+        if not raw:
+            return ({}, "")
+        try:
+            obj = json.loads(raw)
+        except Exception:
+            return ({}, 'not valid JSON — expected an object like '
+                        '{"CF-Access-Client-Id": "…", "CF-Access-Client-Secret": "…"}')
+        if not isinstance(obj, dict):
+            return ({}, "must be a JSON object of header-name → value")
+    out = {}
+    for k, v in obj.items():
+        name = str(k).strip()
+        if not name or v is None:
+            continue
+        if isinstance(v, (dict, list, tuple)):
+            return ({}, f"header '{name}' must be a plain string value")
+        text = str(v).strip()
+        # A newline in either half would let a malformed paste inject a second
+        # header; refuse rather than send something the user did not intend.
+        if "\n" in name or "\r" in name or "\n" in text or "\r" in text:
+            return ({}, f"header '{name[:32]}' contains a line break")
+        out[name] = text
+    return (out, "")
+
+
+def build_local_llm_headers(auth_token: str = "", extra_headers=None) -> tuple:
+    """Compose the headers for every Local LLM request → (headers, error).
+
+    Both inputs are optional and blank by default, so a loopback endpoint works
+    with no authentication settings at all. The bearer token wins over an
+    Authorization header supplied through the extra-headers JSON, because it is
+    the more explicit field.
+    """
+    headers = {"Content-Type": "application/json"}
+    extra, err = parse_local_llm_headers(extra_headers)
+    if err:
+        return (headers, err)
+    headers.update(extra)
+    token = str(auth_token or "").strip()
+    if token:
+        # Accept a full "Bearer …" / "Basic …" paste as well as a bare token.
+        headers["Authorization"] = (
+            token if token.lower().startswith(("bearer ", "basic ", "token "))
+            else f"Bearer {token}"
+        )
+    return (headers, "")
+
+
+def describe_local_llm_headers(headers: dict) -> str:
+    """Header NAMES only, for logs and the Test Connection panel. Values of
+    anything that looks like a credential never leave this process."""
+    names = [k for k in (headers or {}) if k.lower() != "content-type"]
+    if not names:
+        return "none"
+    return ", ".join(sorted(names))
+
+
+def local_llm_role_timeout(base_timeout: float, role: str) -> float:
+    """Shape the ONE configured timeout into a sensible per-role budget.
+
+    Verse detection runs on the live path and a slow answer is worthless by the
+    time it arrives; the sermon summary runs once, on a long transcript, and is
+    worth waiting for. Derived rather than three more settings fields so there is
+    still a single knob in the UI.
+    """
+    try:
+        base = max(3.0, min(600.0, float(base_timeout or 45.0)))
+    except (TypeError, ValueError):
+        base = 45.0
+    if role in ("verse", "watcher"):
+        return max(5.0, min(base, 20.0))        # short  — live path
+    if role == "summary":
+        return max(base, min(600.0, base * 4))  # longer — one long final pass
+    return base                                  # medium — live outline
+
 
 class LocalLLMError(RuntimeError):
     """A local-LLM call failed. `kind` classifies it so the GUI Test Connection
     button (and the logs) can say WHY rather than just "it broke":
-        "refused"  — nothing listening on that host:port
+        "refused"  — nothing listening at that endpoint
         "timeout"  — reachable but no answer within the configured timeout
         "dns"      — host name could not be resolved
         "network"  — other transport-level failure (unreachable, reset, TLS…)
-        "http"     — the server answered with an error status
+        "auth"     — rejected or bounced to a login page by the proxy in front
+        "model"    — the server is up but that model is not installed on it
+        "http"     — the server answered with some other error status
         "invalid"  — the server answered, but not with a usable completion
     """
     def __init__(self, kind: str, detail: str):
@@ -263,11 +449,19 @@ def _classify_local_llm_exception(exc: Exception) -> tuple:
 
 
 class _LocalLLMCompletions:
-    def __init__(self, base_url: str, model: str, timeout: float):
+    def __init__(self, base_url: str, model: str, timeout: float,
+                 headers: dict = None, role: str = ""):
         self._base    = (base_url or "").rstrip("/")
         self._model   = model or ""
         self._timeout = timeout
-        self._style   = None   # "openai" | "native" — cached after the first success
+        self._headers = dict(headers or {"Content-Type": "application/json"})
+        self._role    = role or ""
+        self._kind    = local_llm_endpoint_kind(self._base)
+
+    @property
+    def _style(self):
+        """Dialect for this endpoint, shared across every role's client."""
+        return _LOCAL_DIALECT_CACHE.get(self._base)
 
     def _post(self, path: str, payload: dict):
         url = f"{self._base}{path}"
@@ -275,16 +469,28 @@ class _LocalLLMCompletions:
         # A LAN box is plain http; only pay for cert verification if it is https.
         if url.lower().startswith("https://"):
             kw["verify"] = certifi.where()
+        # Do NOT follow redirects: an access proxy that has not authenticated the
+        # request answers 302 → its own login page, and following that would hand
+        # us an HTML page to parse as JSON instead of a clear "not authenticated".
         return requests.post(
-            url, headers={"Content-Type": "application/json"}, json=payload, **kw
+            url, headers=self._headers, json=payload, allow_redirects=False, **kw
         )
+
+    def _role_tag(self) -> str:
+        return LOCAL_LLM_ROLE_LOG_NAMES.get(self._role, self._role or "llm")
 
     def create(self, model=None, messages=None, temperature=0.2, max_tokens=None, **kw):
         """`model` is accepted for interface parity and intentionally ignored —
         the configured local model name is always used (see class comment)."""
         if not self._model:
             raise LocalLLMError("invalid", "no local model name configured")
-        order = ["native", "openai"] if self._style == "native" else ["openai", "native"]
+        role_tag = self._role_tag()
+        logger.info(
+            f"🖥️ Local Ollama request: role={role_tag} model={self._model} "
+            f"endpoint={self._kind}"
+        )
+        style_hint = self._style
+        order = ["native", "openai"] if style_hint == "native" else ["openai", "native"]
         last_http = ""
         for style in order:
             try:
@@ -303,28 +509,88 @@ class _LocalLLMCompletions:
                     r = self._post("/api/chat", body)
             except Exception as e:
                 kind, msg = _classify_local_llm_exception(e)
+                logger.warning(
+                    f"🖥️ Local Ollama request failed: role={role_tag} "
+                    f"status={kind} endpoint={self._kind}"
+                )
                 raise LocalLLMError(kind, f"{self._base} — {msg}") from e
 
+            body_txt = ""
+            if r.status_code >= 300:
+                body_txt = (r.text or "")[:200].replace("\n", " ")
+                logger.warning(
+                    f"🖥️ Local Ollama request failed: role={role_tag} "
+                    f"status={r.status_code} endpoint={self._kind}"
+                )
+
+            # An access proxy in front of Ollama bounces an unauthenticated call
+            # to its login page (3xx) or rejects it outright (401/403). Report
+            # that as an auth problem, not as "the model is broken".
+            if r.status_code in (301, 302, 303, 307, 308):
+                raise LocalLLMError(
+                    "auth",
+                    f"{self._base} redirected to a login page (HTTP {r.status_code}) — "
+                    f"the request is not authenticated for this endpoint",
+                )
+            if r.status_code in (401, 403):
+                raise LocalLLMError(
+                    "auth",
+                    f"{self._base} rejected the request (HTTP {r.status_code}) — "
+                    f"check the token / access headers for this endpoint",
+                )
+            # Ollama answers 404 for BOTH "wrong dialect" and "model not pulled";
+            # only the body tells them apart. Match narrowly — a plain "404 Not
+            # Found" from a server that simply lacks this path must still fall
+            # through to the other dialect below, not be reported as a missing
+            # model. Ollama's own wording is:
+            #   model "gemma3:4b" not found, try pulling it first
+            _low = body_txt.lower()
+            if r.status_code == 404 and (
+                    "try pulling" in _low
+                    or (self._model.lower() in _low and "not found" in _low)):
+                raise LocalLLMError(
+                    "model",
+                    f"model '{self._model}' is not installed on {self._base} — "
+                    f"`ollama pull {self._model}` on the model host",
+                )
             # Wrong dialect for this server → try the other one.
             if r.status_code in (404, 405, 501) and style != order[-1]:
                 last_http = f"HTTP {r.status_code} on {style} endpoint"
                 continue
             if r.status_code >= 400:
-                body_txt = (r.text or "")[:200].replace("\n", " ")
                 raise LocalLLMError("http", f"HTTP {r.status_code} — {body_txt}")
 
             try:
                 j = r.json()
-                content = (j["choices"][0]["message"]["content"] if style == "openai"
-                           else j["message"]["content"])
+                if style == "openai":
+                    _choice   = j["choices"][0]
+                    _msg      = _choice["message"]
+                    _stop     = str(_choice.get("finish_reason") or "")
+                    _thinking = _msg.get("reasoning_content") or _msg.get("reasoning") or ""
+                else:
+                    _msg      = j["message"]
+                    _stop     = str(j.get("done_reason") or "")
+                    _thinking = _msg.get("thinking") or ""
+                content = _msg.get("content")
             except Exception as e:
                 raise LocalLLMError(
                     "invalid",
                     f"unexpected response shape from {self._base} ({type(e).__name__})",
                 ) from e
             if not content or not str(content).strip():
+                # A reasoning model (qwen3, deepseek-r1, …) emits its chain of
+                # thought into a separate field first. If the token budget runs
+                # out mid-thought the answer is empty — which is NOT "the server
+                # is broken", so say what actually happened.
+                if str(_thinking).strip() or _stop == "length":
+                    raise LocalLLMError(
+                        "invalid",
+                        f"'{self._model}' is a reasoning model and used its whole "
+                        f"token budget thinking before it answered — raise the "
+                        f"token limit or choose a non-reasoning model for this role",
+                    )
                 raise LocalLLMError("invalid", "server returned an empty completion")
-            self._style = style
+            _LOCAL_DIALECT_CACHE[self._base] = style
             return _GroqResponse(content)
 
         raise LocalLLMError(
@@ -334,8 +600,8 @@ class _LocalLLMCompletions:
 
 
 class _LocalLLMChat:
-    def __init__(self, base_url, model, timeout):
-        self.completions = _LocalLLMCompletions(base_url, model, timeout)
+    def __init__(self, base_url, model, timeout, headers=None, role=""):
+        self.completions = _LocalLLMCompletions(base_url, model, timeout, headers, role)
 
 
 class _LocalLLMClient:
@@ -344,39 +610,59 @@ class _LocalLLMClient:
     Built ONLY when the master "Use Local LLM" toggle is on; stays None
     otherwise so not a single line of this class executes in the default
     configuration.
+
+    One instance per role: same endpoint and headers, but the role's own model
+    and its own timeout budget. `host`/`port` are still accepted so any older
+    caller keeps working; `endpoint` supersedes them when given.
     """
-    def __init__(self, host="127.0.0.1", port=11434, model="", timeout=45.0):
-        self.host    = (host or "127.0.0.1").strip()
-        self.port    = int(port or 11434)
-        self.model   = (model or "").strip()
-        self.timeout = float(timeout or 45.0)
-        self.base_url = _local_llm_base_url(self.host, self.port)
-        self.chat = _LocalLLMChat(self.base_url, self.model, self.timeout)
+    def __init__(self, endpoint="", model="", timeout=45.0, headers=None, role="",
+                 host="", port=11434):
+        raw = str(endpoint or "").strip()
+        if not raw and str(host or "").strip():
+            raw = _legacy_host_port_endpoint(host, port)
+        self.base_url = normalize_ollama_endpoint(raw)
+        self.model    = (model or "").strip()
+        self.role     = role or ""
+        try:
+            self.timeout = float(timeout or 45.0)
+        except (TypeError, ValueError):
+            self.timeout = 45.0
+        self.headers       = dict(headers or {"Content-Type": "application/json"})
+        self.endpoint_kind = local_llm_endpoint_kind(self.base_url)
+        self.chat = _LocalLLMChat(self.base_url, self.model, self.timeout,
+                                  self.headers, self.role)
 
     def __repr__(self):
-        return f"<LocalLLM {self.base_url} model={self.model!r} timeout={self.timeout}s>"
+        # Header NAMES only — a token value must never reach a repr or a log.
+        return (f"<LocalLLM {self.base_url} ({self.endpoint_kind}) role={self.role!r} "
+                f"model={self.model!r} timeout={self.timeout}s "
+                f"headers=[{describe_local_llm_headers(self.headers)}]>")
 
 
-def _local_llm_base_url(host: str, port) -> str:
-    """Accepts a bare host/IP ("192.168.1.50"), a host:port pair, or a full URL
-    and returns a normalised scheme://host:port base."""
-    h = (host or "127.0.0.1").strip()
+def _legacy_host_port_endpoint(host: str, port) -> str:
+    """Join a legacy host + port pair into one endpoint string.
+
+    Only reached for settings files written before the endpoint field existed,
+    and for any caller still passing host/port. The result goes through
+    normalize_ollama_endpoint() like every other endpoint.
+    """
+    h = str(host or "").strip().rstrip("/")
     if not h:
-        h = "127.0.0.1"
+        return DEFAULT_LOCAL_LLM_ENDPOINT
     try:
         p = int(port or 11434)
     except (TypeError, ValueError):
         p = 11434
-    if h.lower().startswith(("http://", "https://")):
-        base = h.rstrip("/")
-        # Only append the port when the URL does not already carry one.
-        tail = base.split("://", 1)[1]
-        if ":" not in tail.split("/", 1)[0]:
-            base = f"{base}:{p}"
-        return base
-    if ":" in h and not h.startswith("["):     # "host:port" typed into the host box
-        return f"http://{h}"
-    return f"http://{h}:{p}"
+    # A full URL, or a "host:port" pair typed into the host box, already carries
+    # its own port; the separate port field was ignored then and is ignored now.
+    if "://" in h or (":" in h and not h.endswith("]")):
+        return h
+    return f"{h}:{p}"
+
+
+def _local_llm_base_url(host: str, port) -> str:
+    """Back-compat wrapper: bare host/IP, host:port pair or full URL → base URL."""
+    return normalize_ollama_endpoint(_legacy_host_port_endpoint(host, port))
 
 
 # ── LOGGING ──────────────────────────────────────────────────────────────────
@@ -1058,13 +1344,16 @@ mistral_client  = None   # sermon summary primary           (Mistral mistral-lar
 # below short-circuits on the first term and NOTHING local-LLM-related runs in
 # the default configuration.
 LOCAL_LLM_ENABLED    = False
-LOCAL_LLM_HOST       = "127.0.0.1"
-LOCAL_LLM_PORT       = 11434
-LOCAL_LLM_MODEL      = ""
-LOCAL_LLM_TIMEOUT    = 45.0
-LOCAL_LLM_ON_FAILURE = "fallback"   # "fallback" (use the cloud tier) | "skip"
-LOCAL_LLM_ROLES: dict = {}          # role → "cloud" | "local"; empty when disabled
-local_llm_client     = None
+LOCAL_LLM_ENDPOINT   = DEFAULT_LOCAL_LLM_ENDPOINT
+LOCAL_LLM_HOST       = "127.0.0.1"   # legacy mirror, kept for external readers
+LOCAL_LLM_PORT       = 11434         # legacy mirror, kept for external readers
+LOCAL_LLM_MODEL      = ""            # shared fallback model (also the watcher's)
+LOCAL_LLM_TIMEOUT    = 45.0          # base timeout; per-role budgets derive from it
+LOCAL_LLM_ON_FAILURE = "fallback"    # "fallback" (use the cloud tier) | "skip"
+LOCAL_LLM_ROLES: dict = {}           # role → "cloud" | "local"; empty when disabled
+LOCAL_LLM_MODELS: dict = {}          # role → effective model name; empty when disabled
+local_llm_clients: dict = {}         # role → _LocalLLMClient; empty when disabled
+local_llm_client     = None          # legacy alias → the verse-role client
 
 # Role ids used by the per-role selector. The Contextual Watcher is deliberately
 # NOT in this map: it already has its own provider dropdown, and "local" is now
@@ -1073,8 +1362,17 @@ LOCAL_LLM_ROLE_IDS = ("verse", "outline", "summary")
 
 
 def _local_llm_available() -> bool:
-    """True when the master toggle is on AND a client was successfully built."""
-    return bool(LOCAL_LLM_ENABLED) and local_llm_client is not None
+    """True when the master toggle is on AND at least one client was built."""
+    return bool(LOCAL_LLM_ENABLED) and bool(local_llm_clients)
+
+
+def _local_client_for(role: str):
+    """The client that serves `role` — its own model and its own timeout budget.
+
+    Falls back to the verse client (the small/fast one) for any role that was not
+    given a client of its own, e.g. the Contextual Watcher.
+    """
+    return local_llm_clients.get(role) or local_llm_clients.get("verse")
 
 
 def _local_llm_active_for(role: str) -> bool:
@@ -1082,21 +1380,26 @@ def _local_llm_active_for(role: str) -> bool:
 
     First term is the master toggle, so when the feature is off this is a single
     boolean read — no dict lookup, no client attribute access, no network."""
-    return bool(LOCAL_LLM_ENABLED) and local_llm_client is not None \
-        and LOCAL_LLM_ROLES.get(role) == "local"
+    return bool(LOCAL_LLM_ENABLED) and LOCAL_LLM_ROLES.get(role) == "local" \
+        and local_llm_clients.get(role) is not None
 
 
 def _log_local_llm_failure(role: str, exc: Exception) -> None:
     kind = getattr(exc, "kind", "error")
+    client = local_llm_clients.get(role)
+    where  = client.endpoint_kind if client is not None else "unknown"
     hint = {
-        "refused": "is Ollama running?  `ollama serve`",
+        "refused": "is Ollama running on the model host?  `ollama serve`",
         "timeout": "raise the Local LLM timeout, or use a smaller model",
-        "dns":     "check the host/IP in Advanced Settings",
+        "dns":     "check the Local Ollama Endpoint in Advanced Settings",
+        "auth":    "set the token / access headers for this remote endpoint",
+        "model":   "`ollama list` on the model host shows what is installed",
         "http":    "check the model name — `ollama list` shows what is pulled",
         "invalid": "the endpoint answered but not with a chat completion",
     }.get(kind, "")
     logger.error(
-        f"🖥️ Local LLM [{role}] failed ({kind}): {exc}"
+        f"🖥️ Local Ollama request failed: role={LOCAL_LLM_ROLE_LOG_NAMES.get(role, role)} "
+        f"status={kind} endpoint={where} — {exc}"
         + (f"  →  {hint}" if hint else "")
     )
 
@@ -1118,9 +1421,10 @@ def _role_completion(role: str, messages: list, cloud_client, cloud_model: str,
     delays only that background task, never the STT pipeline.
     """
     if _local_llm_active_for(role):
+        _client = _local_client_for(role)
         try:
-            return local_llm_client.chat.completions.create(
-                model=LOCAL_LLM_MODEL, messages=messages,
+            return _client.chat.completions.create(
+                model=_client.model, messages=messages,
                 temperature=temperature, max_tokens=max_tokens,
             )
         except Exception as e:
@@ -1146,35 +1450,56 @@ def _role_has_llm(role: str, *cloud_clients) -> bool:
     return _local_llm_active_for(role) or any(c is not None for c in cloud_clients)
 
 
-def test_local_llm_connection(host: str = "", port=11434, model: str = "",
-                              timeout: float = 10.0) -> tuple:
-    """GUI-callable one-shot probe of a local LLM endpoint.
+def test_local_llm_connection(endpoint: str = "", model: str = "",
+                              timeout: float = 10.0,
+                              auth_token: str = "", extra_headers="",
+                              host: str = "", port=11434) -> tuple:
+    """GUI-callable one-shot probe of a local OR remote Ollama endpoint.
 
     Returns (ok: bool, message: str). Never raises, never touches any engine
-    state, and works with the engine stopped — the GUI calls it from a daemon
-    thread behind the "Test Connection" button.
+    state, works with the engine stopped, and never puts a credential value in
+    its message — the GUI calls it from a daemon thread behind the
+    "Test Connection" button.
+
+    `host`/`port` remain accepted so an older caller still works; `endpoint`
+    supersedes them.
     """
-    host  = (host or "").strip() or "127.0.0.1"
+    raw = str(endpoint or "").strip()
+    if not raw:
+        raw = _legacy_host_port_endpoint(host, port)
+    base  = normalize_ollama_endpoint(raw)
+    kind  = local_llm_endpoint_kind(base)
     model = (model or "").strip()
     try:
         timeout = max(1.0, min(120.0, float(timeout or 10.0)))
     except (TypeError, ValueError):
         timeout = 10.0
-    base = _local_llm_base_url(host, port)
 
     if not model:
         return (False, "No model name set. Enter e.g. llama3.1:8b (see `ollama list`).")
 
-    # Best-effort informational probe: Ollama lists pulled models here. A server
-    # that is not Ollama simply 404s and we fall through to the real chat test.
+    headers, hdr_err = build_local_llm_headers(auth_token, extra_headers)
+    if hdr_err:
+        return (False, f"Extra request headers: {hdr_err}")
+    hdr_names = describe_local_llm_headers(headers)
+
+    # Best-effort informational probe: Ollama lists installed models here. A
+    # server that is not Ollama simply 404s and we fall through to the chat test.
     available = []
     try:
         vkw = {"timeout": min(timeout, 8.0)}
         if base.lower().startswith("https://"):
             vkw["verify"] = certifi.where()
-        tr = requests.get(f"{base}/api/tags", **vkw)
+        tr = requests.get(f"{base}/api/tags", headers=headers,
+                          allow_redirects=False, **vkw)
         if tr.status_code == 200:
             available = [m.get("name", "") for m in (tr.json().get("models") or [])]
+        elif tr.status_code in (301, 302, 303, 307, 308, 401, 403):
+            return (False,
+                    f"{base} did not authenticate the request (HTTP {tr.status_code}).\n"
+                    f"Sent headers: {hdr_names}\n"
+                    f"A protected endpoint needs a service token / bearer token — see "
+                    f"docs/LOCAL_LLM_REMOTE_ACCESS.md.")
     except Exception:
         pass   # not fatal — the chat call below is the actual test
 
@@ -1182,27 +1507,37 @@ def test_local_llm_connection(host: str = "", port=11434, model: str = "",
         # Ollama also resolves "llama3.1" → "llama3.1:latest"; accept that.
         if not any(a.split(":")[0] == model.split(":")[0] for a in available):
             return (False,
-                    f"Connected to {base}, but model '{model}' is not pulled.\n"
+                    f"Connected to {base}, but model '{model}' is not installed there.\n"
                     f"Available: {', '.join(available[:8]) or '(none)'}\n"
-                    f"Run:  ollama pull {model}")
+                    f"On the model host run:  ollama pull {model}")
 
     t0 = time.time()
     try:
-        client = _LocalLLMClient(host=host, port=port, model=model, timeout=timeout)
+        client = _LocalLLMClient(endpoint=base, model=model, timeout=timeout,
+                                 headers=headers, role="")
         resp = client.chat.completions.create(
             model=model,
             messages=[{"role": "user", "content": "Reply with the single word: OK"}],
-            temperature=0.0, max_tokens=8,
+            # Generous on purpose. A reasoning model (qwen3, deepseek-r1, …)
+            # spends tokens thinking BEFORE it answers, so a tight cap here made
+            # a perfectly healthy model look broken.
+            temperature=0.0, max_tokens=256,
         )
         reply = (resp.choices[0].message.content or "").strip()
     except LocalLLMError as e:
         pretty = {
             "refused": f"Connection refused — nothing is listening on {base}.\n"
-                       f"Start it with:  ollama serve\n"
-                       f"(remote host? it must run with OLLAMA_HOST=0.0.0.0)",
+                       f"On the model host, Ollama should already be running "
+                       f"(it starts with Windows).\n"
+                       f"From another computer, point this at your protected HTTPS "
+                       f"endpoint, not at port 11434.",
             "timeout": f"Timed out after {timeout:g}s waiting for {base}.\n"
-                       f"The host is reachable but slow — raise the timeout or use a smaller model.",
-            "dns":     f"Could not resolve host '{host}'. Check the address in Advanced Settings.",
+                       f"Reachable but slow — raise the timeout or use a smaller model.",
+            "dns":     f"Could not resolve the host in '{base}'. Check the "
+                       f"Local Ollama Endpoint in Advanced Settings.",
+            "auth":    f"{base} did not accept the request.\n"
+                       f"Sent headers: {hdr_names}\n{e.detail}",
+            "model":   f"{e.detail}",
             "network": f"Network error reaching {base}:\n{e.detail}",
             "http":    f"{base} answered with an error:\n{e.detail}",
             "invalid": f"{base} answered, but not with a usable chat completion:\n{e.detail}",
@@ -1213,8 +1548,9 @@ def test_local_llm_connection(host: str = "", port=11434, model: str = "",
 
     took = time.time() - t0
     return (True,
-            f"Connected to {base}\n"
+            f"Connected to {base}  ({kind} endpoint)\n"
             f"Model : {model}\n"
+            f"Auth headers sent: {hdr_names}\n"
             f"Reply : {reply[:60]}\n"
             f"Round-trip: {took:.2f}s")
 
@@ -1317,13 +1653,14 @@ def _watcher_clients_for_provider(provider: str):
         # "Local LLM" chosen in the Watcher Provider dropdown. Honoured only when
         # the master toggle is on and the client built; otherwise we log once and
         # fall through to the Groq default so the watcher still works.
-        if _local_llm_available():
+        _wc = _local_client_for("watcher")
+        if _local_llm_available() and _wc is not None:
             if LOCAL_LLM_ON_FAILURE == "fallback":
                 _fb, _fm = ((groq_client, "llama-3.1-8b-instant") if groq_client
                             else (cerebras_client, "llama3.1-8b"))
             else:
                 _fb, _fm = (None, "")
-            return (local_llm_client, LOCAL_LLM_MODEL, _fb, _fm)
+            return (_wc, _wc.model, _fb, _fm)
         logger.warning(
             "🔭 Watcher provider is 'Local LLM' but the local LLM is disabled or "
             "unconfigured — using Groq for the watcher instead."
@@ -1586,9 +1923,10 @@ async def live_points_loop():
                 # Local LLM. Runs inside run_in_executor (below), so a slow local
                 # model delays only this 90s background loop.
                 if _local_llm_active_for("outline"):
+                    _oc = _local_client_for("outline")
                     try:
-                        response = local_llm_client.chat.completions.create(
-                            model=LOCAL_LLM_MODEL,
+                        response = _oc.chat.completions.create(
+                            model=_oc.model,
                             messages=[{"role": "user", "content": prompt}],
                         )
                         return response.choices[0].message.content.strip()
@@ -1714,10 +2052,11 @@ def generate_sermon_summary():
             # 0. Local LLM — ONLY when the "Sermon Summary" role is set to Local
             #    LLM. Summaries are long; the configured timeout applies.
             if _local_llm_active_for("summary"):
+                _sc = _local_client_for("summary")
                 try:
-                    logger.info(f"⏳ Generating Summary via Local LLM {LOCAL_LLM_MODEL}...")
-                    r = local_llm_client.chat.completions.create(
-                        model=LOCAL_LLM_MODEL,
+                    logger.info(f"⏳ Generating Summary via Local LLM {_sc.model}...")
+                    r = _sc.chat.completions.create(
+                        model=_sc.model,
                         messages=[{"role": "user", "content": prompt}],
                     )
                     return r.choices[0].message.content.strip()
@@ -2029,14 +2368,20 @@ def configure(
     watcher_cooldown=60,
     # ── Local LLM (Ollama) — all optional, all default to today's behaviour ──
     local_llm_enabled=False,
-    local_llm_host="127.0.0.1",
-    local_llm_port=11434,
+    local_llm_endpoint="",          # blank → derived from host/port below
+    local_llm_host="127.0.0.1",     # legacy; only used when endpoint is blank
+    local_llm_port=11434,           # legacy; only used when endpoint is blank
+    local_llm_auth_token="",        # optional; remote endpoints only
+    local_llm_extra_headers="",     # optional; JSON object, remote endpoints only
     local_llm_model="",
     local_llm_timeout=45.0,
     local_llm_on_failure="fallback",
     local_llm_role_verse="cloud",
     local_llm_role_outline="cloud",
     local_llm_role_summary="cloud",
+    local_llm_model_verse="",
+    local_llm_model_outline="",
+    local_llm_model_summary="",
 ):
     global DEEPGRAM_API_KEY, GROQ_API_KEY, GEMINI_API_KEY, CEREBRAS_API_KEY, MISTRAL_API_KEY, SARVAM_API_KEY
     global SARVAM_API_KEY_BACKUP, _sarvam_using_backup
@@ -2047,8 +2392,10 @@ def configure(
     global show_malayalam_raw, MALAYALAM_TRANSLITERATION
     global DEDUP_WINDOW, COOLDOWN, LLM_ENABLED, BIBLE_TRANSLATION, USE_XPATH
     global groq_client, cerebras_client, mistral_client
-    global local_llm_client, LOCAL_LLM_ENABLED, LOCAL_LLM_HOST, LOCAL_LLM_PORT
+    global local_llm_client, local_llm_clients, LOCAL_LLM_ENABLED, LOCAL_LLM_ENDPOINT
+    global LOCAL_LLM_HOST, LOCAL_LLM_PORT
     global LOCAL_LLM_MODEL, LOCAL_LLM_TIMEOUT, LOCAL_LLM_ON_FAILURE, LOCAL_LLM_ROLES
+    global LOCAL_LLM_MODELS
     global CONFIDENCE_THRESHOLD, REQUIRE_MANUAL_CONFIRM, CONFIRM_CALLBACK, REQUIRE_VERIFY, PANIC_KEY, SMART_AMEN_ENABLED
     global full_sermon_transcript, verses_cited
     global LIVE_POINTS_PROMPT, LIVE_POINTS_CALLBACK, LIVE_POINTS_GET_CURRENT_CB
@@ -2184,14 +2531,25 @@ def configure(
     # byte what they were before this feature existed.
     LOCAL_LLM_ENABLED    = bool(local_llm_enabled)
     local_llm_client     = None
+    local_llm_clients    = {}
     LOCAL_LLM_ROLES      = {}
+    LOCAL_LLM_MODELS     = {}
     LOCAL_LLM_ON_FAILURE = "skip" if str(local_llm_on_failure).lower().strip() == "skip" else "fallback"
     if LOCAL_LLM_ENABLED:
-        LOCAL_LLM_HOST  = (local_llm_host or "127.0.0.1").strip() or "127.0.0.1"
+        # ONE endpoint for every role. A blank endpoint field means this settings
+        # file predates it, so fall back to the legacy host/port pair.
+        _raw_endpoint = str(local_llm_endpoint or "").strip()
+        if not _raw_endpoint:
+            _raw_endpoint = _legacy_host_port_endpoint(local_llm_host, local_llm_port)
+        LOCAL_LLM_ENDPOINT = normalize_ollama_endpoint(_raw_endpoint)
+        _endpoint_kind     = local_llm_endpoint_kind(LOCAL_LLM_ENDPOINT)
+        # Legacy mirrors, kept accurate for anything still reading them.
+        LOCAL_LLM_HOST = (local_llm_host or "127.0.0.1").strip() or "127.0.0.1"
         try:
             LOCAL_LLM_PORT = int(local_llm_port or 11434)
         except (TypeError, ValueError):
             LOCAL_LLM_PORT = 11434
+
         LOCAL_LLM_MODEL = (local_llm_model or "").strip()
         try:
             # Clamp: below ~3s even a small local model can't answer; above 600s
@@ -2199,6 +2557,15 @@ def configure(
             LOCAL_LLM_TIMEOUT = max(3.0, min(600.0, float(local_llm_timeout or 45.0)))
         except (TypeError, ValueError):
             LOCAL_LLM_TIMEOUT = 45.0
+
+        # Optional auth — blank for a loopback endpoint, required for a remote
+        # one behind an access proxy. Values are never logged; only names are.
+        _headers, _hdr_err = build_local_llm_headers(
+            local_llm_auth_token, local_llm_extra_headers)
+        if _hdr_err:
+            logger.warning(
+                f"⚠️  Local LLM extra request headers ignored — {_hdr_err}"
+            )
 
         _roles = {
             "verse":   str(local_llm_role_verse   or "cloud").lower().strip(),
@@ -2209,41 +2576,98 @@ def configure(
         _local_roles = [k for k, v in LOCAL_LLM_ROLES.items() if v == "local"]
         _watcher_local = str(watcher_provider or "").lower().strip() == "local"
 
-        if not LOCAL_LLM_MODEL:
-            LOCAL_LLM_ENABLED = False
-            LOCAL_LLM_ROLES   = {}
-            logger.warning(
-                "⚠️  Local LLM enabled but no model name set — feature disabled for "
-                "this session (all roles stay on their cloud providers)."
+        # Effective model per role, in the order the Advanced Settings UI promises:
+        #   1. that role's own saved model (already the custom-override-or-dropdown
+        #      resolution done by settings.get_effective_local_model)
+        #   2. the shared "Model Name" box
+        #   3. the recommended default for that role
+        # A role never inherits another role's model, and a saved custom name is
+        # never overwritten by a recommended default.
+        _role_models = {}
+        for _rid, _rmodel in (("verse",   local_llm_model_verse),
+                              ("outline", local_llm_model_outline),
+                              ("summary", local_llm_model_summary)):
+            _role_models[_rid] = (
+                str(_rmodel or "").strip()
+                or LOCAL_LLM_MODEL
+                or LOCAL_LLM_RECOMMENDED_MODELS.get(_rid, "")
             )
-        elif not _local_roles and not _watcher_local:
+        # The watcher is a short classification task on the live path, so it gets
+        # the small/fast verse model unless a shared model was explicitly set.
+        _role_models["watcher"] = LOCAL_LLM_MODEL or _role_models["verse"]
+        LOCAL_LLM_MODELS = dict(_role_models)
+
+        _needed = set(_local_roles) | ({"watcher"} if _watcher_local else set())
+        _usable = [r for r in _needed if _role_models.get(r)]
+
+        if not _needed:
             # Toggle on but nothing routed to it: build nothing, touch nothing.
             LOCAL_LLM_ENABLED = False
             LOCAL_LLM_ROLES   = {}
+            LOCAL_LLM_MODELS  = {}
             logger.info(
                 "🖥️ Local LLM          : ON but no role routed to it — "
                 "cloud providers used as normal."
             )
+        elif not _usable:
+            LOCAL_LLM_ENABLED = False
+            LOCAL_LLM_ROLES   = {}
+            LOCAL_LLM_MODELS  = {}
+            logger.warning(
+                "⚠️  Local LLM enabled but no model name resolved for any routed "
+                "role — feature disabled for this session (all roles stay on their "
+                "cloud providers)."
+            )
         else:
             try:
-                local_llm_client = _LocalLLMClient(
-                    host=LOCAL_LLM_HOST, port=LOCAL_LLM_PORT,
-                    model=LOCAL_LLM_MODEL, timeout=LOCAL_LLM_TIMEOUT,
-                )
+                # One client per routed role: shared endpoint and headers, but the
+                # role's own model and its own timeout budget (short for verse
+                # detection, longest for the sermon summary).
+                for _rid in sorted(_usable):
+                    local_llm_clients[_rid] = _LocalLLMClient(
+                        endpoint=LOCAL_LLM_ENDPOINT,
+                        model=_role_models[_rid],
+                        timeout=local_llm_role_timeout(LOCAL_LLM_TIMEOUT, _rid),
+                        headers=_headers,
+                        role=_rid,
+                    )
+                # Legacy alias for anything still reading the old single-client
+                # global. The dialect probe is cached per endpoint, not per
+                # client, so several clients on one host cost nothing extra.
+                local_llm_client = (local_llm_clients.get("verse")
+                                    or next(iter(local_llm_clients.values())))
+                # Any routed role we could not build a model for stays on cloud.
+                for _rid in sorted(_needed - set(local_llm_clients)):
+                    if _rid in LOCAL_LLM_ROLES:
+                        LOCAL_LLM_ROLES[_rid] = "cloud"
+                    logger.warning(
+                        f"⚠️  Local LLM [{_rid}] has no model name — that role stays "
+                        f"on its cloud provider."
+                    )
                 logger.info(
-                    f"🖥️ Local LLM          : {local_llm_client.base_url}  "
-                    f"model={LOCAL_LLM_MODEL}  timeout={LOCAL_LLM_TIMEOUT:g}s  "
-                    f"on-failure={LOCAL_LLM_ON_FAILURE}"
+                    f"🖥️ Local LLM          : {LOCAL_LLM_ENDPOINT}  "
+                    f"({_endpoint_kind} endpoint)  base-timeout={LOCAL_LLM_TIMEOUT:g}s  "
+                    f"on-failure={LOCAL_LLM_ON_FAILURE}  "
+                    f"auth-headers=[{describe_local_llm_headers(_headers)}]"
                 )
                 logger.info(
                     "🖥️ Local LLM roles    : "
-                    + ", ".join(f"{k}={v}" for k, v in LOCAL_LLM_ROLES.items())
-                    + (", watcher=local" if _watcher_local else "")
+                    + ", ".join(
+                        f"{k}={v}"
+                        + (f" ({local_llm_clients[k].model}, "
+                           f"{local_llm_clients[k].timeout:g}s)"
+                           if k in local_llm_clients else "")
+                        for k, v in LOCAL_LLM_ROLES.items()
+                    )
+                    + (f", watcher=local ({local_llm_clients['watcher'].model})"
+                       if "watcher" in local_llm_clients else "")
                 )
             except Exception as e:
                 local_llm_client  = None
+                local_llm_clients = {}
                 LOCAL_LLM_ENABLED = False
                 LOCAL_LLM_ROLES   = {}
+                LOCAL_LLM_MODELS  = {}
                 logger.error(
                     f"❌ Local LLM init failed — feature disabled, cloud providers "
                     f"used as normal: {e}"
