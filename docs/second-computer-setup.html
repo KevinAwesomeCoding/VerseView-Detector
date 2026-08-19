@@ -1,0 +1,610 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ollama Bridge</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+<style>
+  :root{
+    --bg:#F6F5F1;
+    --surface:#FFFFFF;
+    --surface-sunken:#EFEDE6;
+    --ink:#1C2230;
+    --ink-muted:#5B6472;
+    --ink-faint:#8A90A0;
+    --line:#DDD9D0;
+    --line-strong:#C7C2B6;
+    --accent:#C9702A;
+    --accent-deep:#7A3F14;
+    --accent-soft:#F3E1CE;
+    --signal-done:#3B8368;
+    --signal-done-soft:#DCEBE4;
+    --win-badge:#2C5FA8;
+    --win-badge-soft:#E1EBF7;
+    --mac-badge:#5B4B8A;
+    --mac-badge-soft:#EAE5F5;
+    --font-display:'Sora',system-ui,sans-serif;
+    --font-body:'IBM Plex Sans',system-ui,sans-serif;
+    --font-mono:'IBM Plex Mono',ui-monospace,'SFMono-Regular',Menlo,monospace;
+  }
+
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --bg:#14171C;
+      --surface:#1B1F26;
+      --surface-sunken:#12151A;
+      --ink:#E8E6DF;
+      --ink-muted:#9CA3AF;
+      --ink-faint:#6B7280;
+      --line:#2A2F38;
+      --line-strong:#39404C;
+      --accent:#E08A4B;
+      --accent-deep:#FBC896;
+      --accent-soft:#3A2A1B;
+      --signal-done:#5FAE8D;
+      --signal-done-soft:#1D332B;
+      --win-badge:#7FAEEA;
+      --win-badge-soft:#1E2A3D;
+      --mac-badge:#B7A6E8;
+      --mac-badge-soft:#291F3D;
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#14171C;
+    --surface:#1B1F26;
+    --surface-sunken:#12151A;
+    --ink:#E8E6DF;
+    --ink-muted:#9CA3AF;
+    --ink-faint:#6B7280;
+    --line:#2A2F38;
+    --line-strong:#39404C;
+    --accent:#E08A4B;
+    --accent-deep:#FBC896;
+    --accent-soft:#3A2A1B;
+    --signal-done:#5FAE8D;
+    --signal-done-soft:#1D332B;
+    --win-badge:#7FAEEA;
+    --win-badge-soft:#1E2A3D;
+    --mac-badge:#B7A6E8;
+    --mac-badge-soft:#291F3D;
+  }
+
+  *{ box-sizing:border-box; }
+  html,body{ background:var(--bg); }
+  body{
+    margin:0;
+    color:var(--ink);
+    font-family:var(--font-body);
+    font-size:16px;
+    line-height:1.6;
+    -webkit-font-smoothing:antialiased;
+  }
+  ::selection{ background:var(--accent-soft); color:var(--accent-deep); }
+
+  a{ color:var(--accent-deep); text-decoration-color:var(--line-strong); }
+
+  .page{
+    max-width:820px;
+    margin:0 auto;
+    padding:56px 24px 96px;
+  }
+
+  /* ---------- Header ---------- */
+  .eyebrow{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    font-family:var(--font-mono);
+    font-size:12.5px;
+    letter-spacing:.08em;
+    text-transform:uppercase;
+    color:var(--ink-faint);
+    margin-bottom:14px;
+  }
+  .eyebrow .dot{
+    width:6px; height:6px; border-radius:50%;
+    background:var(--signal-done);
+    box-shadow:0 0 0 3px var(--signal-done-soft);
+  }
+  h1{
+    font-family:var(--font-display);
+    font-weight:700;
+    font-size:clamp(30px,4.6vw,42px);
+    line-height:1.12;
+    letter-spacing:-.01em;
+    margin:0 0 12px;
+    text-wrap:balance;
+  }
+  .lede{
+    font-size:17px;
+    color:var(--ink-muted);
+    max-width:60ch;
+    margin:0 0 40px;
+  }
+  .lede code{ font-size:15px; }
+
+  /* ---------- Topology strip ---------- */
+  .topology{
+    display:grid;
+    grid-template-columns:1fr auto 1fr auto 1fr;
+    align-items:center;
+    gap:10px;
+    background:var(--surface);
+    border:1px solid var(--line);
+    border-radius:14px;
+    padding:22px 20px;
+    margin-bottom:44px;
+  }
+  .node{
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    text-align:center;
+    gap:6px;
+    padding:6px 4px;
+  }
+  .node .glyph{
+    width:40px; height:40px;
+    border-radius:10px;
+    display:flex; align-items:center; justify-content:center;
+    background:var(--surface-sunken);
+    border:1px solid var(--line);
+    font-size:18px;
+  }
+  .node.host .glyph{ border-color:var(--accent); background:var(--accent-soft); }
+  .node .label{ font-family:var(--font-display); font-weight:600; font-size:13.5px; }
+  .node .sub{ font-family:var(--font-mono); font-size:11px; color:var(--ink-faint); }
+  .wire{
+    position:relative;
+    height:2px;
+    background:linear-gradient(90deg,var(--line-strong),var(--line-strong));
+    align-self:flex-start;
+    margin-top:20px;
+    min-width:28px;
+  }
+  .wire::after{
+    content:'';
+    position:absolute; top:50%; left:50%;
+    width:5px; height:5px; border-radius:50%;
+    background:var(--accent);
+    transform:translate(-50%,-50%);
+  }
+
+  /* ---------- Sections ---------- */
+  section{ margin-bottom:52px; }
+  h2{
+    font-family:var(--font-display);
+    font-weight:700;
+    font-size:22px;
+    letter-spacing:-.005em;
+    margin:0 0 6px;
+    text-wrap:balance;
+  }
+  .section-note{
+    color:var(--ink-muted);
+    font-size:15px;
+    max-width:64ch;
+    margin:0 0 22px;
+  }
+
+  /* ---------- Checklist ---------- */
+  .checklist{
+    list-style:none;
+    margin:0; padding:0;
+    display:grid;
+    gap:10px;
+  }
+  .checklist li{
+    display:grid;
+    grid-template-columns:20px 1fr;
+    gap:12px;
+    align-items:start;
+    background:var(--surface);
+    border:1px solid var(--line);
+    border-radius:10px;
+    padding:14px 16px;
+  }
+  .checklist li::before{
+    content:'';
+    width:18px; height:18px;
+    border-radius:5px;
+    border:1.5px solid var(--line-strong);
+    margin-top:1px;
+  }
+  .checklist .t{ font-weight:600; font-size:14.5px; }
+  .checklist .d{ color:var(--ink-muted); font-size:13.5px; margin-top:2px; }
+  .checklist code{ font-size:12.8px; }
+
+  /* ---------- Callout ---------- */
+  .callout{
+    border-left:3px solid var(--accent);
+    background:var(--accent-soft);
+    border-radius:0 10px 10px 0;
+    padding:16px 20px;
+    font-size:14.5px;
+    color:var(--ink);
+  }
+  .callout strong{ color:var(--accent-deep); }
+
+  /* ---------- Platform tracks ---------- */
+  .tracks{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:22px;
+  }
+  @media (max-width:720px){
+    .tracks{ grid-template-columns:1fr; }
+    .topology{ grid-template-columns:1fr; }
+    .wire{ display:none; }
+  }
+  .track{
+    background:var(--surface);
+    border:1px solid var(--line);
+    border-radius:16px;
+    overflow:hidden;
+  }
+  .track-head{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    padding:16px 20px;
+    border-bottom:1px solid var(--line);
+  }
+  .badge{
+    font-family:var(--font-mono);
+    font-size:11.5px;
+    font-weight:500;
+    letter-spacing:.03em;
+    padding:4px 9px;
+    border-radius:6px;
+  }
+  .badge.win{ background:var(--win-badge-soft); color:var(--win-badge); }
+  .badge.mac{ background:var(--mac-badge-soft); color:var(--mac-badge); }
+  .track-head h3{
+    font-family:var(--font-display);
+    font-size:16px;
+    margin:0;
+  }
+  .steps{
+    list-style:none;
+    margin:0; padding:18px 20px 22px;
+    counter-reset:step;
+    display:grid;
+    gap:18px;
+  }
+  .steps li{
+    counter-increment:step;
+    display:grid;
+    grid-template-columns:26px 1fr;
+    gap:12px;
+  }
+  .steps li::before{
+    content:counter(step);
+    font-family:var(--font-mono);
+    font-size:12.5px;
+    font-weight:500;
+    width:26px; height:26px;
+    border-radius:50%;
+    background:var(--surface-sunken);
+    border:1px solid var(--line-strong);
+    display:flex; align-items:center; justify-content:center;
+    color:var(--ink-muted);
+  }
+  .steps .body{ min-width:0; }
+  .steps .h{ font-weight:600; font-size:14.5px; margin-bottom:3px; }
+  .steps .p{ color:var(--ink-muted); font-size:13.8px; line-height:1.55; }
+  .steps .p code{ font-size:12.6px; }
+
+  /* ---------- Code blocks ---------- */
+  .code-block{
+    position:relative;
+    background:var(--surface-sunken);
+    border:1px solid var(--line);
+    border-radius:9px;
+    padding:11px 44px 11px 13px;
+    margin-top:9px;
+    font-family:var(--font-mono);
+    font-size:12.6px;
+    line-height:1.55;
+    color:var(--ink);
+    overflow-x:auto;
+    white-space:pre;
+  }
+  code{
+    font-family:var(--font-mono);
+    background:var(--surface-sunken);
+    border:1px solid var(--line);
+    border-radius:4px;
+    padding:1px 5px;
+  }
+  .code-block code{ background:none; border:none; padding:0; }
+  .copy-btn{
+    position:absolute;
+    top:7px; right:7px;
+    font-family:var(--font-body);
+    font-size:11px;
+    font-weight:600;
+    color:var(--ink-muted);
+    background:var(--surface);
+    border:1px solid var(--line-strong);
+    border-radius:6px;
+    padding:4px 8px;
+    cursor:pointer;
+  }
+  .copy-btn:hover{ color:var(--ink); border-color:var(--ink-faint); }
+  .copy-btn:focus-visible{ outline:2px solid var(--accent); outline-offset:1px; }
+  .copy-btn.copied{ color:var(--signal-done); border-color:var(--signal-done); }
+
+  .placeholder{ color:var(--accent-deep); font-weight:500; }
+
+  /* ---------- Confirm row ---------- */
+  .confirm{
+    margin-top:16px;
+    display:flex;
+    align-items:center;
+    gap:9px;
+    font-size:13px;
+    background:var(--signal-done-soft);
+    border:1px solid var(--signal-done);
+    color:var(--signal-done);
+    border-radius:8px;
+    padding:9px 12px;
+    font-family:var(--font-mono);
+  }
+  .confirm .dot{ width:7px; height:7px; border-radius:50%; background:var(--signal-done); flex-shrink:0; }
+
+  /* ---------- Troubleshooting ---------- */
+  .tstable{
+    width:100%;
+    border-collapse:collapse;
+    font-size:13.8px;
+  }
+  .tstable-wrap{
+    background:var(--surface);
+    border:1px solid var(--line);
+    border-radius:12px;
+    overflow:auto;
+  }
+  .tstable th{
+    text-align:left;
+    font-family:var(--font-display);
+    font-weight:600;
+    font-size:12px;
+    letter-spacing:.04em;
+    text-transform:uppercase;
+    color:var(--ink-faint);
+    padding:12px 16px;
+    border-bottom:1px solid var(--line);
+    white-space:nowrap;
+  }
+  .tstable td{
+    padding:13px 16px;
+    border-bottom:1px solid var(--line);
+    vertical-align:top;
+    color:var(--ink-muted);
+  }
+  .tstable tr:last-child td{ border-bottom:none; }
+  .tstable td.symptom{ color:var(--ink); font-weight:500; white-space:nowrap; }
+  .tstable code{ font-size:12.4px; }
+
+  footer{
+    margin-top:60px;
+    padding-top:20px;
+    border-top:1px solid var(--line);
+    font-size:12.5px;
+    color:var(--ink-faint);
+    font-family:var(--font-mono);
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <div class="eyebrow"><span class="dot"></span> verseviewllm.dpdns.org &middot; access-gated</div>
+  <h1>Bringing a second computer onto the Ollama bridge</h1>
+  <p class="lede">Your models stay on this machine. Every other computer reaches them through one gate — <code>ollama.verseviewllm.dpdns.org</code> — that only opens for a matching key. This page walks that key onto a Windows machine and an Intel Mac.</p>
+
+  <div class="topology">
+    <div class="node host">
+      <div class="glyph">&#128421;&#65039;</div>
+      <div class="label">This computer</div>
+      <div class="sub">runs Ollama</div>
+    </div>
+    <div class="wire"></div>
+    <div class="node">
+      <div class="glyph">&#9729;&#65039;</div>
+      <div class="label">Cloudflare Access</div>
+      <div class="sub">checks the key</div>
+    </div>
+    <div class="wire"></div>
+    <div class="node">
+      <div class="glyph">&#128241;</div>
+      <div class="label">Remote computer</div>
+      <div class="sub">Windows or Mac</div>
+    </div>
+  </div>
+
+  <section>
+    <h2>Before you start</h2>
+    <p class="section-note">Get these from whoever set up the tunnel — the service token is a shared secret and is deliberately not written down on this page.</p>
+    <ul class="checklist">
+      <li>
+        <div></div>
+        <div>
+          <div class="t">The endpoint address</div>
+          <div class="d"><code>https://ollama.verseviewllm.dpdns.org</code> — the same on every computer, never changes.</div>
+        </div>
+      </li>
+      <li>
+        <div></div>
+        <div>
+          <div class="t">The service token pair</div>
+          <div class="d">A <code>CF-Access-Client-Id</code> and <code>CF-Access-Client-Secret</code> — the key itself, as one JSON object.</div>
+        </div>
+      </li>
+      <li>
+        <div></div>
+        <div>
+          <div class="t">VerseView on that computer</div>
+          <div class="d">Installed and able to open Settings.</div>
+        </div>
+      </li>
+    </ul>
+  </section>
+
+  <div class="callout">
+    <strong>Treat the token like a password.</strong> Anyone holding both header values can call the home Ollama through the tunnel. Send it over something private — never paste it somewhere public.
+  </div>
+
+  <section style="margin-top:44px;">
+    <h2>Same five steps, two platforms</h2>
+    <p class="section-note">Open VerseView on the remote computer, then follow the column that matches it.</p>
+
+    <div class="tracks">
+
+      <div class="track">
+        <div class="track-head">
+          <span class="badge win">WINDOWS</span>
+          <h3>Any other Windows PC</h3>
+        </div>
+        <ol class="steps">
+          <li>
+            <div class="body">
+              <div class="h">Open Advanced Settings</div>
+              <div class="p">In the Settings panel on the right, scroll to <strong>Options</strong> &rarr; expand it &rarr; scroll to <strong>Advanced Settings</strong> &rarr; expand it &rarr; scroll to <strong>Local&nbsp;LLM&nbsp;(Ollama)</strong>.</div>
+            </div>
+          </li>
+          <li>
+            <div class="body">
+              <div class="h">Turn it on</div>
+              <div class="p">Check <strong>Use Local LLM</strong> if it isn't already.</div>
+            </div>
+          </li>
+          <li>
+            <div class="body">
+              <div class="h">Set the endpoint</div>
+              <div class="p">Paste into <strong>Local Ollama Endpoint</strong>:</div>
+              <div class="code-block" data-copy><code>https://ollama.verseviewllm.dpdns.org</code><button class="copy-btn" type="button">Copy</button></div>
+            </div>
+          </li>
+          <li>
+            <div class="body">
+              <div class="h">Set the key</div>
+              <div class="p">Paste your saved token JSON into <strong>Extra Headers</strong>, shaped like:</div>
+              <div class="code-block"><code>{"CF-Access-Client-Id": "&hellip;", "CF-Access-Client-Secret": "&hellip;"}</code></div>
+              <div class="p" style="margin-top:8px;">Leave <strong>Auth Token</strong> blank.</div>
+            </div>
+          </li>
+          <li>
+            <div class="body">
+              <div class="h">Test it</div>
+              <div class="p">Click <strong>Test Connection</strong>.</div>
+              <div class="confirm"><span class="dot"></span>Local LLM test OK &mdash; Connected to https://ollama.verseviewllm.dpdns.org</div>
+            </div>
+          </li>
+        </ol>
+      </div>
+
+      <div class="track">
+        <div class="track-head">
+          <span class="badge mac">MAC &middot; INTEL</span>
+          <h3>Intel-based Mac</h3>
+        </div>
+        <ol class="steps">
+          <li>
+            <div class="body">
+              <div class="h">Skip the .app — launch the raw executable</div>
+              <div class="p">The <code>.app</code> is ad-hoc signed but not notarized, so Gatekeeper quarantines and translocates it — that's the crash. The <strong>Raw Executable</strong> folder in the same release zip is the identical program without that layer. Open Terminal and <code>cd</code> into it, then run it directly:</div>
+              <div class="code-block" data-copy><code>cd ~/Downloads/"VerseView-Mac-Intel-Release"/"VerseView Detector (Raw Executable)"
+./"VerseView Detector"</code><button class="copy-btn" type="button">Copy</button></div>
+              <div class="p" style="margin-top:8px;">Adjust the first path if you unzipped somewhere other than Downloads. Leave this Terminal window open — closing it quits the app.</div>
+            </div>
+          </li>
+          <li>
+            <div class="body">
+              <div class="h">Open Advanced Settings</div>
+              <div class="p">Same path as Windows — <strong>Options</strong> &rarr; <strong>Advanced Settings</strong> &rarr; <strong>Local&nbsp;LLM&nbsp;(Ollama)</strong> — the panel is identical on both platforms.</div>
+            </div>
+          </li>
+          <li>
+            <div class="body">
+              <div class="h">Turn it on and set the endpoint</div>
+              <div class="p">Check <strong>Use Local LLM</strong>, then paste into <strong>Local Ollama Endpoint</strong>:</div>
+              <div class="code-block" data-copy><code>https://ollama.verseviewllm.dpdns.org</code><button class="copy-btn" type="button">Copy</button></div>
+            </div>
+          </li>
+          <li>
+            <div class="body">
+              <div class="h">Set the key</div>
+              <div class="p">Paste the same token JSON into <strong>Extra Headers</strong> as on Windows — it's the one key, shared by every remote computer. Leave <strong>Auth Token</strong> blank.</div>
+            </div>
+          </li>
+          <li>
+            <div class="body">
+              <div class="h">Test it</div>
+              <div class="p">Click <strong>Test Connection</strong>. First reply can take longer while Ollama loads the model into memory on the host.</div>
+              <div class="confirm"><span class="dot"></span>Local LLM test OK &mdash; Connected to https://ollama.verseviewllm.dpdns.org</div>
+            </div>
+          </li>
+        </ol>
+      </div>
+
+    </div>
+  </section>
+
+  <section>
+    <h2>If Test Connection doesn't say OK</h2>
+    <p class="section-note">The gate is doing exactly what it's designed to — these are the two ways it says no.</p>
+    <div class="tstable-wrap">
+      <table class="tstable">
+        <thead>
+          <tr><th>Message</th><th>What it means</th><th>Fix</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="symptom">HTTP 403 &mdash; did not authenticate</td>
+            <td>The two header values didn't match what Access expects.</td>
+            <td>Re-copy the JSON exactly — no missing quote, no trailing space, both keys present.</td>
+          </tr>
+          <tr>
+            <td class="symptom">Timed out after 20s</td>
+            <td>Access let it through, but Ollama took a while to answer.</td>
+            <td>Usually just a cold model load on the host. Try <strong>Test Connection</strong> again — it should be quick the second time.</td>
+          </tr>
+          <tr>
+            <td class="symptom">Mac: .app quits instantly / "damaged"</td>
+            <td>Gatekeeper quarantine on an ad-hoc-signed, unnotarized build.</td>
+            <td>Use the <strong>Raw Executable</strong> from the same zip (step&nbsp;1, left), or run <code>xattr -cr</code> on the .app after moving it to <code>/Applications</code>.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <footer>host stays on 127.0.0.1:11434 &middot; remote computers go through the tunnel &middot; one token, shared carefully</footer>
+
+</div>
+
+<script>
+  document.querySelectorAll('[data-copy]').forEach(function(block){
+    var btn = block.querySelector('.copy-btn');
+    var code = block.querySelector('code');
+    btn.addEventListener('click', function(){
+      var text = code.innerText;
+      navigator.clipboard.writeText(text).then(function(){
+        btn.textContent = 'Copied';
+        btn.classList.add('copied');
+        setTimeout(function(){
+          btn.textContent = 'Copy';
+          btn.classList.remove('copied');
+        }, 1500);
+      });
+    });
+  });
+</script>
+</body>
+</html>
