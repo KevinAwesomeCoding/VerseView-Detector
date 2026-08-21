@@ -88,10 +88,14 @@ jobs:
         run: codesign --force --deep --sign - "dist/VerseView Detector.app"
 
       - name: Zip the Final App
-        run: zip -r "dist/VerseView-Detector-Mac-Silicon-App.zip" "dist/VerseView Detector.app"
+        run: |
+          cd dist
+          zip -ry "VerseView-Detector-Mac-Silicon-App.zip" "VerseView Detector.app"
 
       - name: Zip the Raw Crash/Debug Folder
-        run: zip -r "dist/VerseView-Detector-Mac-Silicon-CrashDebug.zip" "dist/VerseView_Detector/"
+        run: |
+          cd dist
+          zip -ry "VerseView-Detector-Mac-Silicon-CrashDebug.zip" "VerseView_Detector/"
 
       - name: Upload Mac Silicon App
         uses: actions/upload-artifact@v4
