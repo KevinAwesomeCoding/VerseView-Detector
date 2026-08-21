@@ -105,6 +105,7 @@ class _BridgeHandler(BaseHTTPRequestHandler):
             "/prev":    self._handle_prev,
             "/close":   self._handle_close,
             "/status":  self._handle_status,
+            "/version": self._handle_version,
         }
 
         handler = routes.get(path)
@@ -207,7 +208,14 @@ class _BridgeHandler(BaseHTTPRequestHandler):
             return
         try:
             from selenium.webdriver.common.by import By
-            btn = driver.find_element(By.ID, "remote_bible_present")
+            # Primary: correct V10/V11 ID; fallback: legacy underscored ID
+            btn = self._find_any(driver, [
+                (By.ID, "remotebiblepresent"),
+                (By.ID, "remote_bible_present"),
+            ])
+            if not btn:
+                self._send(500, "PRESENT button not found on control.html")
+                return
             driver.execute_script("arguments[0].click();", btn)
             logger.info("[bridge] /present clicked")
             self._send(200, "Re-presented current verse")
@@ -222,7 +230,9 @@ class _BridgeHandler(BaseHTTPRequestHandler):
             return
         try:
             from selenium.webdriver.common.by import By
+            # Primary: correct V10/V11 ID (#iconNext → getNextBibleRef)
             btn = self._find_any(driver, [
+                (By.ID,    "iconNext"),
                 (By.ID,    "iconForward"),
                 (By.ID,    "remote_bible_forward"),
                 (By.ID,    "remote_bible_next"),
@@ -248,7 +258,9 @@ class _BridgeHandler(BaseHTTPRequestHandler):
             return
         try:
             from selenium.webdriver.common.by import By
+            # Primary: correct V10/V11 ID (#iconPrev → getPrevBibleRef)
             btn = self._find_any(driver, [
+                (By.ID,    "iconPrev"),
                 (By.ID,    "iconBack"),
                 (By.ID,    "iconBackward"),
                 (By.ID,    "remote_bible_back"),
@@ -292,10 +304,12 @@ class _BridgeHandler(BaseHTTPRequestHandler):
         running   = _engine_running()
         connected = False
         context   = ""
+        vv_ver    = ""
         try:
             import vv_streaming_master as _engine
             snap = _engine.remote_status()
             connected = bool(snap.get("connected"))
+            vv_ver = snap.get("vv_version", "")
             book, chap, vs = snap.get("book"), snap.get("chapter"), snap.get("verse")
             if book and chap:
                 context = f"{book} {chap}" + (f":{vs}" if vs else "")
@@ -308,9 +322,22 @@ class _BridgeHandler(BaseHTTPRequestHandler):
             state = "🟡 Engine running — connecting to VerseView…"
         else:
             state = "🔴 Engine stopped (use /start to power it on)"
+        if vv_ver and vv_ver != "unknown":
+            state += f"  ·  version: {vv_ver}"
         if context:
             state += f"  ·  last verse: {context}"
         self._send(200, state)
+
+    def _handle_version(self, params):
+        """Report the detected VerseVIEW version (verseview10 / verseview11 / unknown)."""
+        vv_ver = "unknown"
+        try:
+            import vv_streaming_master as _engine
+            snap = _engine.remote_status()
+            vv_ver = snap.get("vv_version", "unknown")
+        except Exception as exc:
+            logger.warning(f"[bridge] /version snapshot failed: {exc}")
+        self._send(200, vv_ver)
 
     # ── Helpers ────────────────────────────────────────────────────────────────
 

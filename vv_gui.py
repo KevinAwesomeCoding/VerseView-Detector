@@ -982,6 +982,18 @@ class VerseViewApp(ctk.CTk):
         """
         def _update():
             self._bot_log("✅ Engine connected — bridge controller refreshed.")
+            # Log detected VerseVIEW version so the operator knows which remote
+            # page variant is active (V10 schedule vs V11 events, etc.).
+            try:
+                ctrl = getattr(engine, "_controller", None)
+                _ver = getattr(ctrl, "vv_version", "unknown") if ctrl else "unknown"
+                if _ver and _ver != "unknown":
+                    self._bot_log(f"📋 VerseVIEW version detected: {_ver}")
+                    self._append_log(f"📋 VerseVIEW version: {_ver}")
+                else:
+                    self._bot_log("⚠️ VerseVIEW version could not be determined.")
+            except Exception:
+                pass
             bot_online = bool(self._bot_process and self._bot_process.poll() is None)
             if not bot_online:
                 self.bot_status_lbl.configure(text="● Ready", text_color=COL_WARN)

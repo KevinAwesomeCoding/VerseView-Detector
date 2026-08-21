@@ -3501,11 +3501,18 @@ def remote_status() -> dict:
             connected = True
     except Exception:
         connected = False
+    vv_version = "unknown"
+    try:
+        if _controller is not None:
+            vv_version = getattr(_controller, "vv_version", "unknown")
+    except Exception:
+        pass
     return {
-        "connected": connected,
-        "book":      current_book or "",
-        "chapter":   current_chapter or "",
-        "verse":     current_verse or "",
+        "connected":  connected,
+        "book":       current_book or "",
+        "chapter":    current_chapter or "",
+        "verse":      current_verse or "",
+        "vv_version": vv_version,
     }
 
 
@@ -4202,6 +4209,8 @@ class VerseController:
         self.pending_verse = None
         self.match_count   = 0
         self._send_lock    = threading.Lock()  # protects send_verse against timer-thread races
+        self.vv_version    = "unknown"         # detected VerseVIEW version (verseview10 / verseview11 / unknown)
+        self.remote        = None              # VVRemoteControl facade (set during connect)
 
     def connect(self):
         try:
@@ -4248,10 +4257,40 @@ class VerseController:
             )
             self.driver.get(REMOTE_URL)
             wait     = WebDriverWait(self.driver, 15)
-            self.box = wait.until(EC.presence_of_element_located((By.ID, "remote_bibleRefID")))
 
+            # ── Version detection ──
+            # Instantiate the version-aware remote-control facade and detect
+            # V10 vs V11 from the page title.  This must run AFTER the page
+            # loads but BEFORE we look up elements (IDs differ by version).
+            try:
+                from vv_remote_control import VVRemoteControl
+                self.remote = VVRemoteControl(self.driver)
+                self.vv_version = self.remote.detect_version()
+            except Exception as _vd_exc:
+                logger.warning(f"Version detection failed ({_vd_exc}) — proceeding with fallback IDs")
+                self.vv_version = "unknown"
+
+            # ── Locate Bible reference input ──
+            # Primary: correct V10/V11 ID from the actual VerseVIEW DOM.
+            # Fallback: legacy underscored ID used by older builds / test pages.
+            box = None
+            for _box_id in ("remotebibleRefID", "remote_bibleRefID"):
+                try:
+                    box = wait.until(EC.presence_of_element_located((By.ID, _box_id)))
+                    logger.info(f"Found Bible ref input: #{_box_id}")
+                    break
+                except Exception:
+                    continue
+            if not box:
+                logger.error("Could not find Bible reference input (tried remotebibleRefID, remote_bibleRefID)")
+                return False
+            self.box = box
+
+            # ── Locate PRESENT button ──
+            # Primary: correct V10/V11 ID, then legacy ID, then text/onclick fallbacks.
             btn = None
             selectors = [
+                (By.ID,    "remotebiblepresent"),
                 (By.ID,    "remote_bible_present"),
                 (By.XPATH, "//button[contains(normalize-space(text()),'PRESENT')]"),
                 (By.XPATH, "//button[contains(normalize-space(text()),'Present')]"),
@@ -4274,7 +4313,7 @@ class VerseController:
                 return False
 
             self.btn = btn
-            logger.info("Connected to VerseView (headless mode)")
+            logger.info(f"Connected to VerseView (headless mode) — version: {self.vv_version}")
             return True
         except Exception as e:
             logger.error(f"VerseView connection failed: {e}")
