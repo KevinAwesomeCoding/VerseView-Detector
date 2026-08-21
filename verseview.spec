@@ -214,7 +214,7 @@ if sys.platform == 'darwin':
         strip=False,
         upx=False,
         upx_exclude=[],
-        name='VerseView Detector',
+        name='VerseView_Detector',
     )
 
     app = BUNDLE(
@@ -223,6 +223,9 @@ if sys.platform == 'darwin':
         icon=None,
         bundle_identifier='com.verseview.detector',
         info_plist={
+            'CFBundleExecutable': 'VerseView_Detector',
+            'CFBundleName': 'VerseView Detector',
+            'CFBundleDisplayName': 'VerseView Detector',
             # Required so macOS shows the mic-permission prompt (TCC). Without a
             # usage description the app is killed the moment it touches the mic.
             'NSMicrophoneUsageDescription':

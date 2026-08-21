@@ -50,55 +50,6 @@ jobs:
           name: VerseView-Detector-Windows
           path: dist/VerseView_Detector.exe
 
-  build-mac-intel:
-    runs-on: macos-15-intel
-    env:
-      MACOSX_DEPLOYMENT_TARGET: "10.15"
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Python 3.11
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Install PortAudio
-        run: brew install portaudio
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          # PyAudio builds from source on macOS and must find Homebrew's PortAudio.
-          # `brew --prefix` resolves to /usr/local on Intel and /opt/homebrew on
-          # Apple Silicon, so this is correct on both runners.
-          export LDFLAGS="-L$(brew --prefix portaudio)/lib"
-          export CFLAGS="-I$(brew --prefix portaudio)/include"
-          pip install --no-cache-dir pyaudio
-          pip install pyinstaller customtkinter selenium webdriver-manager certifi requests websockets charset-normalizer sarvamai pynput deepgram-sdk PyATEMMax zeroconf discord.py aiohttp "assemblyai>=0.41.0" "google-cloud-speech>=2.21.0"
-
-      - name: Write version
-        run: echo "build-${GITHUB_SHA::7}-${{ github.run_number }}" > version.txt
-
-      - name: Build App
-        run: pyinstaller --clean verseview.spec
-
-      - name: Ad-hoc sign App
-        run: codesign --force --deep --sign - "dist/VerseView Detector.app"
-
-      - name: Zip the Intel App and Raw UNIX Folder
-        run: |
-          cd dist
-          mkdir "VerseView-Mac-Intel-Release"
-          mv "VerseView Detector.app" "VerseView-Mac-Intel-Release/"
-          mv "VerseView Detector" "VerseView-Mac-Intel-Release/VerseView Detector (Raw Executable)"
-          zip -r "VerseView-Detector-Mac-Intel.zip" "VerseView-Mac-Intel-Release"
-
-      - name: Upload Mac Intel Zip
-        uses: actions/upload-artifact@v4
-        with:
-          name: VerseView-Detector-Mac-Intel
-          path: dist/VerseView-Detector-Mac-Intel.zip
 
   build-mac-silicon:
     runs-on: macos-latest
@@ -137,7 +88,7 @@ jobs:
         run: zip -r "dist/VerseView-Detector-Mac-Silicon-App.zip" "dist/VerseView Detector.app"
 
       - name: Zip the Raw Crash/Debug Folder
-        run: zip -r "dist/VerseView-Detector-Mac-Silicon-CrashDebug.zip" "dist/VerseView Detector/"
+        run: zip -r "dist/VerseView-Detector-Mac-Silicon-CrashDebug.zip" "dist/VerseView_Detector/"
 
       - name: Upload Mac Silicon App
         uses: actions/upload-artifact@v4
@@ -152,7 +103,7 @@ jobs:
           path: dist/VerseView-Detector-Mac-Silicon-CrashDebug.zip
 
   release:
-    needs: [build-windows, build-mac-intel, build-mac-silicon]
+    needs: [build-windows, build-mac-silicon]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -192,8 +143,7 @@ jobs:
 
             **Standard Downloads:**
             - `VerseView_Detector.exe` → Windows
-            - `VerseView-Detector-Mac-Intel.zip` → Older Macs (Intel chips) — *Includes the .app AND the raw UNIX executable folder.*
-            - `VerseView-Detector-Mac-Silicon-App.zip` → Newer Macs (M1/M2/M3/M4 chips)
+            - `VerseView-Detector-Mac-Silicon-App.zip` → Macs (M1/M2/M3/M4/M5/Apple Silicon chips)
 
             **Crash/Debug Versions (Only use if the app crashes!):**
             - `VerseView-Detector-Mac-Silicon-CrashDebug.zip`
@@ -214,7 +164,6 @@ jobs:
             under System Settings → Privacy & Security → Microphone).
           files: |
             ./artifacts/VerseView-Detector-Windows/VerseView_Detector.exe
-            ./artifacts/VerseView-Detector-Mac-Intel/VerseView-Detector-Mac-Intel.zip
             ./artifacts/VerseView-Detector-Mac-Silicon-App/VerseView-Detector-Mac-Silicon-App.zip
             ./artifacts/VerseView-Detector-Mac-Silicon-CrashDebug/VerseView-Detector-Mac-Silicon-CrashDebug.zip
           draft: false
