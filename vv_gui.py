@@ -11,6 +11,12 @@ import datetime
 import re
 import os
 import sys
+import certifi
+
+# macOS SSL Certificate Fix — ensure all SDK-managed connections (AssemblyAI,
+# Sarvam, Google Cloud, etc.) use the bundled certifi CA bundle.
+os.environ["SSL_CERT_FILE"] = certifi.where()
+os.environ["REQUESTS_CA_BUNDLE"] = certifi.where()
 
 import json
 import subprocess

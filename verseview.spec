@@ -8,6 +8,7 @@ block_cipher = None
 # collect_data_files() returns proper 2-tuples (src, dest) that Analysis() expects.
 # Tree() returns 3-tuple TOC objects which cause "too many values to unpack".
 datas = collect_data_files('customtkinter')
+datas += collect_data_files('certifi')
 
 datas += [
     ('settings.py', '.'),

@@ -2,6 +2,8 @@ import asyncio
 import base64
 import json
 import logging
+import ssl
+import certifi
 
 from .base import STTProvider
 from .utils import open_microphone, teardown_microphone
@@ -92,6 +94,11 @@ class GladiaProvider(STTProvider):
         loop    = asyncio.get_event_loop()
         headers = {"x-gladia-key": api_key}
 
+        # Build an SSL context that explicitly trusts certifi's CA bundle.
+        # On a PyInstaller-packaged macOS app there is no OS-level trust store,
+        # so without this the TLS handshake fails with CERTIFICATE_VERIFY_FAILED.
+        ssl_context = ssl.create_default_context(cafile=certifi.where())
+
         def _read_audio():
             return stream.read(chunk, exception_on_overflow=False)
 
@@ -104,6 +111,7 @@ class GladiaProvider(STTProvider):
                     async with websockets.connect(
                         _GLADIA_WS_URL,
                         additional_headers=headers,
+                        ssl=ssl_context,
                     ) as ws:
                         logger.info(
                             f"🎤 {tag} Gladia connected — language: {language.upper()}"

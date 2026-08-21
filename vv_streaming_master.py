@@ -1,5 +1,12 @@
 # -*- coding: utf-8 -*-
 import sys, os
+import certifi
+
+# macOS SSL Certificate Fix — ensure all SDK-managed connections (AssemblyAI,
+# Sarvam, Google Cloud, etc.) use the bundled certifi CA bundle.
+os.environ["SSL_CERT_FILE"] = certifi.where()
+os.environ["REQUESTS_CA_BUNDLE"] = certifi.where()
+
 import contextvars
 
 IS_WINDOWS = sys.platform.startswith("win")
@@ -13,6 +20,9 @@ import certifi
 import threading
 import datetime as _dt
 import json
+import subprocess
+import shutil
+import glob as _glob
 from urllib.parse import urlsplit as _urlsplit
 
 # ── Bot Bridge (Discord → Selenium) ──────────────────────────────────────────
@@ -710,6 +720,7 @@ logging.basicConfig(
     handlers=_log_handlers,
 )
 logger = logging.getLogger(__name__)
+logger.info(f"🔒 SSL CA bundle: {certifi.where()}")
 
 
 # ── DISCORD LIVE LOG ──────────────────────────────────────────────────────────
@@ -4197,6 +4208,109 @@ def _llm_semantic_match(verse_text: str, transcript_excerpt: str, label: str = "
         return False
 
 
+def get_chrome_major_version() -> str | None:
+    """Detect the major version of Google Chrome installed on the system."""
+    if IS_WINDOWS:
+        # 1. Try registry (fastest)
+        try:
+            import winreg
+            # Check both HKLM and HKCU
+            for root in (winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER):
+                try:
+                    key = winreg.OpenKey(root, r"Software\Google\Chrome\BLBeacon")
+                    version, _ = winreg.QueryValueEx(key, "version")
+                    winreg.CloseKey(key)
+                    if version:
+                        return str(version).split('.')[0]
+                except Exception:
+                    continue
+        except Exception:
+            pass
+        # 2. Try default install paths
+        paths = [
+            os.path.join(os.environ.get("PROGRAMFILES", "C:\\Program Files"), "Google\\Chrome\\Application\\chrome.exe"),
+            os.path.join(os.environ.get("PROGRAMFILES(X86)", "C:\\Program Files (x86)"), "Google\\Chrome\\Application\\chrome.exe"),
+            os.path.join(os.environ.get("LOCALAPPDATA", ""), "Google\\Chrome\\Application\\chrome.exe"),
+        ]
+        for path in paths:
+            if os.path.exists(path):
+                try:
+                    # Use powershell to get file version
+                    cmd = f'(Get-Item "{path}").VersionInfo.FileVersion'
+                    output = subprocess.check_output(['powershell', '-command', cmd], stderr=subprocess.DEVNULL).decode().strip()
+                    if output:
+                        return output.split('.')[0]
+                except Exception:
+                    continue
+    else: # macOS
+        paths = [
+            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+            os.path.expanduser("~/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
+        ]
+        for path in paths:
+            if os.path.exists(path):
+                try:
+                    output = subprocess.check_output([path, "--version"], stderr=subprocess.DEVNULL).decode().strip()
+                    # Output: "Google Chrome 120.0.6099.129"
+                    parts = output.split()
+                    if len(parts) >= 3:
+                        return parts[2].split('.')[0]
+                except Exception:
+                    continue
+    return None
+
+def get_chromedriver_major_version(path: str) -> str | None:
+    """Detect the major version of a ChromeDriver binary."""
+    try:
+        # wdm structure often includes the version in the path: .../120.0.6099.109/chromedriver
+        # But we verify by running the binary to be sure.
+        output = subprocess.check_output([path, "--version"], stderr=subprocess.DEVNULL).decode().strip()
+        # Output: "ChromeDriver 120.0.6099.109 (hash)"
+        parts = output.split()
+        if len(parts) >= 2:
+            return parts[1].split('.')[0]
+    except Exception:
+        pass
+    return None
+
+def reconcile_chromedriver_cache():
+    """
+    Ensure the cached ChromeDriver matches the installed Chrome major version.
+    Deletes mismatched folders to force webdriver_manager to re-download.
+    """
+    try:
+        chrome_major = get_chrome_major_version()
+        if not chrome_major:
+            logger.warning("🔍 Google Chrome not found — skipping ChromeDriver version reconciliation.")
+            return
+
+        _wdm_root = os.path.join(os.path.expanduser("~"), ".wdm", "drivers", "chromedriver")
+        if not os.path.exists(_wdm_root):
+            return
+
+        _exe_name = "chromedriver.exe" if IS_WINDOWS else "chromedriver"
+        _cached_hits = _glob.glob(os.path.join(_wdm_root, "**", _exe_name), recursive=True)
+        
+        if not _cached_hits:
+            return
+
+        for hit in _cached_hits:
+            driver_major = get_chromedriver_major_version(hit)
+            if driver_major:
+                if driver_major != chrome_major:
+                    # wdm structure: .../chromedriver/<platform>/<version>/chromedriver
+                    # We delete the versioned folder to force a re-download of that specific version.
+                    version_folder = os.path.dirname(hit)
+                    try:
+                        logger.info(f"🧹 ChromeDriver {driver_major} does not match installed Chrome {chrome_major} — clearing cache and re-fetching")
+                        shutil.rmtree(version_folder)
+                    except Exception as e:
+                        logger.debug(f"Could not clear cache folder {version_folder}: {e}")
+                else:
+                    logger.info(f"✅ ChromeDriver {driver_major} matches installed Chrome {chrome_major} — using cached driver")
+    except Exception as e:
+        logger.warning(f"⚠️ ChromeDriver reconciliation failed: {e}")
+
 # ── VERSE CONTROLLER ──────────────────────────────────────────────────────────
 class VerseController:
     def __init__(self):
@@ -6857,6 +6971,10 @@ async def main():
 
     _controller = VerseController()
     connected   = False
+
+    # Perform ChromeDriver version reconciliation once before the connection loop.
+    # This prevents "session not created" errors when Chrome auto-updates.
+    reconcile_chromedriver_cache()
 
     for attempt in range(1, 6):
         logger.info(f"Connection attempt {attempt}/5...")
