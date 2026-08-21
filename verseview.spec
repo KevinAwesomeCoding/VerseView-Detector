@@ -219,7 +219,7 @@ if sys.platform == 'darwin':
 
     app = BUNDLE(
         coll,
-        name='VerseView Detector.app',
+        name='VerseView_Detector.app',
         icon=None,
         bundle_identifier='com.verseview.detector',
         info_plist={

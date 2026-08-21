@@ -81,6 +81,9 @@ jobs:
       - name: Build App
         run: pyinstaller --clean verseview.spec
 
+      - name: Rename App
+        run: mv "dist/VerseView_Detector.app" "dist/VerseView Detector.app"
+
       - name: Ad-hoc sign App
         run: codesign --force --deep --sign - "dist/VerseView Detector.app"
 
