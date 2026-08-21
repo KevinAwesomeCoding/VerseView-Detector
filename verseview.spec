@@ -176,12 +176,15 @@ a = Analysis(
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
+is_mac = (sys.platform == 'darwin')
+
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
+    [] if is_mac else a.binaries,
+    [] if is_mac else a.zipfiles,
+    [] if is_mac else a.datas,
+    exclude_binaries=is_mac,
     name='VerseView_Detector',
     debug=False,
     bootloader_ignore_signals=False,
@@ -205,7 +208,7 @@ exe = EXE(
     entitlements_file=None,
 )
 
-if sys.platform == 'darwin':
+if is_mac:
     coll = COLLECT(
         exe,
         a.binaries,
