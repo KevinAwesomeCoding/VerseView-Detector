@@ -11,6 +11,7 @@ import datetime
 import re
 import os
 import sys
+import time
 import certifi
 
 # macOS SSL Certificate Fix — ensure all SDK-managed connections (AssemblyAI,
@@ -1704,15 +1705,20 @@ class VerseViewApp(ctk.CTk):
             cfg.get_effective_local_model("outline", getattr(self, "local_llm_model_outline_dropdown_var", ctk.StringVar()).get(), getattr(self, "local_llm_model_outline_entry", ctk.StringVar()).get()) or
             cfg.get_effective_local_model("summary", getattr(self, "local_llm_model_summary_dropdown_var", ctk.StringVar()).get(), getattr(self, "local_llm_model_summary_entry", ctk.StringVar()).get())
         )
-        # Cap the probe timeout so a wedged endpoint can't disable the button for
-        # minutes — the session timeout can still be much larger.
-        timeout = min(self._safe_float(self.local_llm_timeout_entry, 45.0), 20.0)
+        # Use the user's configured timeout for the model test — a large/cold
+        # model can legitimately need well over 20s to answer, and silently
+        # capping this to a fixed ceiling made the test lie about what it was
+        # actually waiting for. Still clamp to a sane range so a typo or a
+        # blank field can't hang the button for an unreasonable time.
+        timeout = max(5.0, min(180.0, self._safe_float(self.local_llm_timeout_entry, 45.0)))
 
         self.btn_local_llm_test.configure(state="disabled", text="Testing…")
         self.local_llm_test_lbl.configure(
-            text=f"Contacting {endpoint} …", text_color=COL_TEXT_MUTED)
+            text=f"Testing remote Ollama model {model!r} at {endpoint} "
+                 f"(timeout {timeout:g}s) …",
+            text_color=COL_TEXT_MUTED)
 
-        def _done(ok: bool, msg: str):
+        def _done(ok: bool, msg: str, elapsed: float):
             if getattr(self, "_closing", False):
                 return
             self.btn_local_llm_test.configure(state="normal", text="🔌  Test Connection")
@@ -1720,17 +1726,22 @@ class VerseViewApp(ctk.CTk):
                 text=("✅  " if ok else "❌  ") + msg,
                 text_color=(COL_OK if ok else COL_DANGER),
             )
-            self._append_log(("✅ Local LLM test OK — " if ok else "❌ Local LLM test failed — ")
-                             + msg.replace("\n", " | "))
+            self._append_log(
+                ("✅ Local LLM test OK — " if ok else "❌ Local LLM test failed — ")
+                + msg.replace("\n", " | ")
+                + f" [total {elapsed:.1f}s, configured timeout {timeout:g}s]"
+            )
 
         def _task():
+            t0 = time.time()
             try:
                 ok, msg = engine.test_local_llm_connection(
                     endpoint=endpoint, model=model, timeout=timeout,
                     auth_token=token, extra_headers=headers)
             except Exception as e:
                 ok, msg = False, f"{type(e).__name__}: {e}"
-            self.after(0, lambda: _done(ok, msg))
+            elapsed = time.time() - t0
+            self.after(0, lambda: _done(ok, msg, elapsed))
 
         threading.Thread(target=_task, daemon=True).start()
 

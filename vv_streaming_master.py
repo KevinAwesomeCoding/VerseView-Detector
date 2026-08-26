@@ -1482,9 +1482,9 @@ def test_local_llm_connection(endpoint: str = "", model: str = "",
     kind  = local_llm_endpoint_kind(base)
     model = (model or "").strip()
     try:
-        timeout = max(1.0, min(120.0, float(timeout or 10.0)))
+        timeout = max(5.0, min(180.0, float(timeout or 45.0)))
     except (TypeError, ValueError):
-        timeout = 10.0
+        timeout = 45.0
 
     if not model:
         return (False, "No model name set. Enter e.g. llama3.1:8b (see `ollama list`).")
@@ -1496,16 +1496,25 @@ def test_local_llm_connection(endpoint: str = "", model: str = "",
 
     # Best-effort informational probe: Ollama lists installed models here. A
     # server that is not Ollama simply 404s and we fall through to the chat test.
+    # Lightweight and short-timeout by design — this is the "is the endpoint/
+    # auth even reachable" check, separate from the (possibly slow) model test
+    # below, so a cold-loading model never gets blamed for an auth failure.
     available = []
+    _probe_t0 = time.time()
     try:
         vkw = {"timeout": min(timeout, 8.0)}
         if base.lower().startswith("https://"):
             vkw["verify"] = certifi.where()
         tr = requests.get(f"{base}/api/tags", headers=headers,
                           allow_redirects=False, **vkw)
+        _probe_elapsed = time.time() - _probe_t0
         if tr.status_code == 200:
             available = [m.get("name", "") for m in (tr.json().get("models") or [])]
+            logger.info(f"Local LLM endpoint/auth probe: {_probe_elapsed:.2f}s — "
+                        f"{base} reachable, auth headers accepted [{hdr_names}]")
         elif tr.status_code in (301, 302, 303, 307, 308, 401, 403):
+            logger.warning(f"Local LLM endpoint/auth probe: {_probe_elapsed:.2f}s — "
+                           f"{base} rejected the request (HTTP {tr.status_code})")
             return (False,
                     f"{base} did not authenticate the request (HTTP {tr.status_code}).\n"
                     f"Sent headers: {hdr_names}\n"
@@ -1522,6 +1531,8 @@ def test_local_llm_connection(endpoint: str = "", model: str = "",
                     f"Available: {', '.join(available[:8]) or '(none)'}\n"
                     f"On the model host run:  ollama pull {model}")
 
+    logger.info(f"Local LLM model test: model={model!r}, timeout={timeout:g}s, "
+                f"endpoint={base}")
     t0 = time.time()
     try:
         client = _LocalLLMClient(endpoint=base, model=model, timeout=timeout,
@@ -1536,14 +1547,25 @@ def test_local_llm_connection(endpoint: str = "", model: str = "",
         )
         reply = (resp.choices[0].message.content or "").strip()
     except LocalLLMError as e:
+        elapsed = time.time() - t0
+        if e.kind == "timeout":
+            logger.warning(f"Local LLM model test: model={model!r} cold-load/inference "
+                           f"timeout — no answer within {timeout:g}s configured timeout "
+                           f"({elapsed:.2f}s elapsed)")
+        else:
+            logger.warning(f"Local LLM model test: model={model!r} failed "
+                           f"({e.kind}) after {elapsed:.2f}s")
         pretty = {
             "refused": f"Connection refused — nothing is listening on {base}.\n"
                        f"On the model host, Ollama should already be running "
                        f"(it starts with Windows).\n"
                        f"From another computer, point this at your protected HTTPS "
                        f"endpoint, not at port 11434.",
-            "timeout": f"Timed out after {timeout:g}s waiting for {base}.\n"
-                       f"Reachable but slow — raise the timeout or use a smaller model.",
+            "timeout": f"Model test timed out after {timeout:g}s (your configured "
+                       f"Timeout (s)), endpoint may still be reachable.\n"
+                       f"{base} was reachable — {model} likely needs more time to "
+                       f"cold-load or finish answering.\n"
+                       f"Raise Timeout (s) for large/cold models, or try a smaller one.",
             "dns":     f"Could not resolve the host in '{base}'. Check the "
                        f"Local Ollama Endpoint in Advanced Settings.",
             "auth":    f"{base} did not accept the request.\n"
@@ -1558,6 +1580,8 @@ def test_local_llm_connection(endpoint: str = "", model: str = "",
         return (False, f"Unexpected error contacting {base}:\n{type(e).__name__}: {e}")
 
     took = time.time() - t0
+    logger.info(f"Local LLM model test: model={model!r} succeeded in {took:.2f}s "
+               f"(timeout budget {timeout:g}s)")
     return (True,
             f"Connected to {base}  ({kind} endpoint)\n"
             f"Model : {model}\n"
