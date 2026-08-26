@@ -413,6 +413,64 @@ def local_llm_role_timeout(base_timeout: float, role: str) -> float:
     return base                                  # medium — live outline
 
 
+# Ollama `keep_alive` per role — how long a model stays resident in memory
+# after a reply before Ollama evicts it. Configurable via settings (see
+# settings.DEFAULTS); these are the fallback when a setting is missing/blank,
+# e.g. an older settings file written before this feature existed.
+LOCAL_LLM_KEEP_ALIVE_DEFAULTS = {
+    "verse": "30m", "watcher": "30m", "outline": "15m", "summary": "10m",
+}
+
+
+def local_llm_role_keep_alive(role: str, overrides: dict = None) -> str:
+    """Resolve the `keep_alive` string Ollama should use for `role`.
+
+    `overrides` is the role→value map built from settings in configure();
+    None/blank falls back to LOCAL_LLM_KEEP_ALIVE_DEFAULTS so an old settings
+    file (or a role not in the map, e.g. "watcher") always gets a sane value.
+    """
+    val = (overrides or {}).get(role)
+    val = str(val or "").strip()
+    return val or LOCAL_LLM_KEEP_ALIVE_DEFAULTS.get(role, "5m")
+
+
+# ── Per-role production request parameters ──────────────────────────────────
+# The SINGLE source of truth for what a REAL request for this role sends, so
+# warmup can reproduce it exactly. This matters because Ollama reloads a model
+# into memory whenever `num_ctx` (or another loading-time option) differs from
+# the last request — so a warmup that used a different num_ctx than the real
+# request would leave the model reloading anyway on the first real call,
+# defeating the entire point of warming it up first. Both the verse-role call
+# sites (extract_verse_with_llm, _llm_semantic_match) and the warmup functions
+# below read this table rather than hardcoding their own values.
+LOCAL_LLM_ROLE_REQUEST_PARAMS = {
+    "verse":   {"temperature": 0.0, "max_tokens": 48,   "num_ctx": 2048},
+    "outline": {"temperature": 0.2, "max_tokens": None, "num_ctx": None},
+    "summary": {"temperature": 0.2, "max_tokens": None, "num_ctx": None},
+}
+LOCAL_LLM_ROLE_REQUEST_PARAMS["watcher"] = LOCAL_LLM_ROLE_REQUEST_PARAMS["verse"]
+
+
+def local_llm_role_request_params(role: str) -> dict:
+    """The {temperature, max_tokens, num_ctx} a REAL request for `role` uses.
+    Unknown role → the verse/fast-role params (the safest generic default —
+    low temperature, small cap, restrained context)."""
+    return dict(LOCAL_LLM_ROLE_REQUEST_PARAMS.get(
+        role, LOCAL_LLM_ROLE_REQUEST_PARAMS["verse"]))
+
+
+def _local_completion_kwargs(role: str) -> dict:
+    """Build the temperature/max_tokens/local_only_kwargs trio for
+    `_role_completion` from LOCAL_LLM_ROLE_REQUEST_PARAMS, so a production
+    call site can never drift from what warmup reproduces (or vice versa)."""
+    p = local_llm_role_request_params(role)
+    return {
+        "temperature": p["temperature"],
+        "max_tokens": p["max_tokens"],
+        "local_only_kwargs": {"num_ctx": p["num_ctx"]} if p.get("num_ctx") else None,
+    }
+
+
 class LocalLLMError(RuntimeError):
     """A local-LLM call failed. `kind` classifies it so the GUI Test Connection
     button (and the logs) can say WHY rather than just "it broke":
@@ -460,13 +518,14 @@ def _classify_local_llm_exception(exc: Exception) -> tuple:
 
 class _LocalLLMCompletions:
     def __init__(self, base_url: str, model: str, timeout: float,
-                 headers: dict = None, role: str = ""):
-        self._base    = (base_url or "").rstrip("/")
-        self._model   = model or ""
-        self._timeout = timeout
-        self._headers = dict(headers or {"Content-Type": "application/json"})
-        self._role    = role or ""
-        self._kind    = local_llm_endpoint_kind(self._base)
+                 headers: dict = None, role: str = "", keep_alive: str = ""):
+        self._base       = (base_url or "").rstrip("/")
+        self._model      = model or ""
+        self._timeout    = timeout
+        self._headers    = dict(headers or {"Content-Type": "application/json"})
+        self._role       = role or ""
+        self._kind       = local_llm_endpoint_kind(self._base)
+        self._keep_alive = str(keep_alive or "").strip()
 
     @property
     def _style(self):
@@ -489,15 +548,21 @@ class _LocalLLMCompletions:
     def _role_tag(self) -> str:
         return LOCAL_LLM_ROLE_LOG_NAMES.get(self._role, self._role or "llm")
 
-    def create(self, model=None, messages=None, temperature=0.2, max_tokens=None, **kw):
+    def create(self, model=None, messages=None, temperature=0.2, max_tokens=None,
+               num_ctx=None, **kw):
         """`model` is accepted for interface parity and intentionally ignored —
-        the configured local model name is always used (see class comment)."""
+        the configured local model name is always used (see class comment).
+        `num_ctx` restrains the context window on servers/dialects that support
+        it (native /api/chat only — silently ignored on the openai-compat
+        dialect, which has no standard field for it)."""
         if not self._model:
             raise LocalLLMError("invalid", "no local model name configured")
         role_tag = self._role_tag()
+        t0 = time.time()
         logger.info(
             f"🖥️ Local Ollama request: role={role_tag} model={self._model} "
-            f"endpoint={self._kind}"
+            f"endpoint={self._kind} timeout={self._timeout:g}s "
+            f"keep_alive={self._keep_alive or '(server default)'}"
         )
         style_hint = self._style
         order = ["native", "openai"] if style_hint == "native" else ["openai", "native"]
@@ -509,19 +574,28 @@ class _LocalLLMCompletions:
                             "temperature": temperature, "stream": False}
                     if max_tokens is not None:
                         body["max_tokens"] = max_tokens
+                    if self._keep_alive:
+                        body["keep_alive"] = self._keep_alive
                     r = self._post("/v1/chat/completions", body)
                 else:
                     opts = {"temperature": temperature}
                     if max_tokens is not None:
                         opts["num_predict"] = max_tokens
+                    if num_ctx:
+                        opts["num_ctx"] = num_ctx
                     body = {"model": self._model, "messages": messages,
                             "stream": False, "options": opts}
+                    if self._keep_alive:
+                        body["keep_alive"] = self._keep_alive
                     r = self._post("/api/chat", body)
             except Exception as e:
+                elapsed = time.time() - t0
                 kind, msg = _classify_local_llm_exception(e)
+                _tag = "TIMED OUT" if kind == "timeout" else "failed"
                 logger.warning(
-                    f"🖥️ Local Ollama request failed: role={role_tag} "
-                    f"status={kind} endpoint={self._kind}"
+                    f"🖥️ Local Ollama request {_tag}: role={role_tag} model={self._model} "
+                    f"status={kind} endpoint={self._kind} elapsed={elapsed:.2f}s "
+                    f"timeout_budget={self._timeout:g}s"
                 )
                 raise LocalLLMError(kind, f"{self._base} — {msg}") from e
 
@@ -530,7 +604,8 @@ class _LocalLLMCompletions:
                 body_txt = (r.text or "")[:200].replace("\n", " ")
                 logger.warning(
                     f"🖥️ Local Ollama request failed: role={role_tag} "
-                    f"status={r.status_code} endpoint={self._kind}"
+                    f"status={r.status_code} endpoint={self._kind} "
+                    f"elapsed={time.time() - t0:.2f}s"
                 )
 
             # An access proxy in front of Ollama bounces an unauthenticated call
@@ -601,6 +676,51 @@ class _LocalLLMCompletions:
                     )
                 raise LocalLLMError("invalid", "server returned an empty completion")
             _LOCAL_DIALECT_CACHE[self._base] = style
+
+            elapsed = time.time() - t0
+            if style == "native":
+                # Ollama's native dialect returns real load/inference timing in
+                # nanoseconds — use it to say whether THIS request paid a cold
+                # model-load cost or was already warm, rather than just "it was
+                # slow." Not available on the openai-compat dialect.
+                _ld  = j.get("load_duration")
+                _ped = j.get("prompt_eval_duration")
+                _ed  = j.get("eval_duration")
+                _td  = j.get("total_duration")
+                _pec = j.get("prompt_eval_count")
+                _ec  = j.get("eval_count")
+                if _td is not None:
+                    _ld_s  = (_ld or 0) / 1e9
+                    _ped_s = (_ped or 0) / 1e9
+                    _ed_s  = (_ed or 0) / 1e9
+                    _td_s  = _td / 1e9
+                    # Half a second of load time is well above the noise floor
+                    # for an already-resident model, so treat that as "cold."
+                    _state = "COLD (model loaded)" if _ld_s > 0.5 else "warm (already resident)"
+                    logger.info(
+                        f"🖥️ Local Ollama reply: role={role_tag} model={self._model} "
+                        f"state={_state} elapsed={elapsed:.2f}s — "
+                        f"load={_ld_s:.2f}s prompt_eval={_ped_s:.2f}s(n={_pec or 0}) "
+                        f"generate={_ed_s:.2f}s ollama_total={_td_s:.2f}s "
+                        f"eval_count={_ec or 0} keep_alive={self._keep_alive or '(server default)'}"
+                    )
+                else:
+                    logger.info(
+                        f"🖥️ Local Ollama reply: role={role_tag} model={self._model} "
+                        f"elapsed={elapsed:.2f}s (server returned no timing fields) "
+                        f"keep_alive={self._keep_alive or '(server default)'}"
+                    )
+            else:
+                _usage = j.get("usage") or {}
+                logger.info(
+                    f"🖥️ Local Ollama reply: role={role_tag} model={self._model} "
+                    f"endpoint={self._kind} elapsed={elapsed:.2f}s "
+                    f"prompt_tokens={_usage.get('prompt_tokens', '?')} "
+                    f"completion_tokens={_usage.get('completion_tokens', '?')} "
+                    f"keep_alive={self._keep_alive or '(server default)'} "
+                    f"(openai-compat endpoint — no load/eval timing available; "
+                    f"a slow reply here may still be a cold load)"
+                )
             return _GroqResponse(content)
 
         raise LocalLLMError(
@@ -610,8 +730,9 @@ class _LocalLLMCompletions:
 
 
 class _LocalLLMChat:
-    def __init__(self, base_url, model, timeout, headers=None, role=""):
-        self.completions = _LocalLLMCompletions(base_url, model, timeout, headers, role)
+    def __init__(self, base_url, model, timeout, headers=None, role="", keep_alive=""):
+        self.completions = _LocalLLMCompletions(
+            base_url, model, timeout, headers, role, keep_alive)
 
 
 class _LocalLLMClient:
@@ -626,7 +747,7 @@ class _LocalLLMClient:
     caller keeps working; `endpoint` supersedes them when given.
     """
     def __init__(self, endpoint="", model="", timeout=45.0, headers=None, role="",
-                 host="", port=11434):
+                 host="", port=11434, keep_alive=""):
         raw = str(endpoint or "").strip()
         if not raw and str(host or "").strip():
             raw = _legacy_host_port_endpoint(host, port)
@@ -637,15 +758,16 @@ class _LocalLLMClient:
             self.timeout = float(timeout or 45.0)
         except (TypeError, ValueError):
             self.timeout = 45.0
-        self.headers       = dict(headers or {"Content-Type": "application/json"})
-        self.endpoint_kind = local_llm_endpoint_kind(self.base_url)
+        self.keep_alive     = str(keep_alive or "").strip() or local_llm_role_keep_alive(self.role)
+        self.headers        = dict(headers or {"Content-Type": "application/json"})
+        self.endpoint_kind  = local_llm_endpoint_kind(self.base_url)
         self.chat = _LocalLLMChat(self.base_url, self.model, self.timeout,
-                                  self.headers, self.role)
+                                  self.headers, self.role, self.keep_alive)
 
     def __repr__(self):
         # Header NAMES only — a token value must never reach a repr or a log.
         return (f"<LocalLLM {self.base_url} ({self.endpoint_kind}) role={self.role!r} "
-                f"model={self.model!r} timeout={self.timeout}s "
+                f"model={self.model!r} timeout={self.timeout}s keep_alive={self.keep_alive!r} "
                 f"headers=[{describe_local_llm_headers(self.headers)}]>")
 
 
@@ -1363,6 +1485,7 @@ LOCAL_LLM_TIMEOUT    = 45.0          # base timeout; per-role budgets derive fro
 LOCAL_LLM_ON_FAILURE = "fallback"    # "fallback" (use the cloud tier) | "skip"
 LOCAL_LLM_ROLES: dict = {}           # role → "cloud" | "local"; empty when disabled
 LOCAL_LLM_MODELS: dict = {}          # role → effective model name; empty when disabled
+LOCAL_LLM_KEEP_ALIVE: dict = {}      # role → keep_alive string; empty when disabled
 local_llm_clients: dict = {}         # role → _LocalLLMClient; empty when disabled
 local_llm_client     = None          # legacy alias → the verse-role client
 
@@ -1416,7 +1539,8 @@ def _log_local_llm_failure(role: str, exc: Exception) -> None:
 
 
 def _role_completion(role: str, messages: list, cloud_client, cloud_model: str,
-                     *, temperature: float = 0.2, max_tokens=None):
+                     *, temperature: float = 0.2, max_tokens=None,
+                     local_only_kwargs: dict = None):
     """The ONE routing point for a per-role LLM call.
 
     • Role left on "Cloud (default)" → identical to the pre-existing call:
@@ -1428,6 +1552,10 @@ def _role_completion(role: str, messages: list, cloud_client, cloud_model: str,
                        except-branch treats it as "no result this cycle"
       (never a crash, never a retry storm — one local attempt per cycle).
 
+    `local_only_kwargs` (e.g. {"num_ctx": 2048}) is forwarded ONLY to the local
+    client — cloud providers don't accept Ollama-specific options and would
+    error on an unknown kwarg.
+
     Callers are already on daemon threads / executors, so a slow local model
     delays only that background task, never the STT pipeline.
     """
@@ -1437,6 +1565,7 @@ def _role_completion(role: str, messages: list, cloud_client, cloud_model: str,
             return _client.chat.completions.create(
                 model=_client.model, messages=messages,
                 temperature=temperature, max_tokens=max_tokens,
+                **(local_only_kwargs or {}),
             )
         except Exception as e:
             _log_local_llm_failure(role, e)
@@ -1588,6 +1717,151 @@ def test_local_llm_connection(endpoint: str = "", model: str = "",
             f"Auth headers sent: {hdr_names}\n"
             f"Reply : {reply[:60]}\n"
             f"Round-trip: {took:.2f}s")
+
+
+def warm_local_llm_model(endpoint: str = "", model: str = "", timeout: float = 45.0,
+                         auth_token: str = "", extra_headers: str = "",
+                         role: str = "", keep_alive: str = "",
+                         host: str = "", port=11434) -> tuple:
+    """GUI-callable one-shot warmup of a local OR remote Ollama endpoint.
+
+    Sends ONE minimal request so the model loads into memory and Ollama begins
+    honouring `keep_alive` for it — meant to be clicked before a service starts
+    so the FIRST real request during the service is already warm.
+
+    When `role` is given ("verse"/"outline"/"summary"/"watcher"), the warmup
+    request reproduces that role's REAL production temperature/max_tokens/
+    num_ctx (LOCAL_LLM_ROLE_REQUEST_PARAMS) and keep_alive
+    (local_llm_role_keep_alive) — Ollama reloads a model whenever num_ctx
+    differs from the last request, so warming with different options than
+    production would leave the model reloading anyway on the first real call,
+    defeating the point of warming it up first. `role` left blank ("") keeps
+    the old generic probe behaviour: a small fixed token cap and no num_ctx —
+    use this for an arbitrary model/endpoint check that isn't standing in for
+    a specific role's live traffic. An explicit `keep_alive` always wins over
+    the role's default.
+
+    Mirrors test_local_llm_connection()'s endpoint/header/timeout handling,
+    but never surfaces the model's reply text — only success/failure + timing.
+    Returns (ok: bool, message: str). Never raises. Safe to call from a daemon
+    thread with the engine stopped — same contract as test_local_llm_connection.
+    """
+    raw = str(endpoint or "").strip()
+    if not raw:
+        raw = _legacy_host_port_endpoint(host, port)
+    base  = normalize_ollama_endpoint(raw)
+    kind  = local_llm_endpoint_kind(base)
+    model = (model or "").strip()
+    try:
+        timeout = max(5.0, min(180.0, float(timeout or 45.0)))
+    except (TypeError, ValueError):
+        timeout = 45.0
+
+    role = str(role or "").strip().lower()
+    if role:
+        _p = local_llm_role_request_params(role)
+        _temperature = _p["temperature"]
+        # A generation cap of None (outline/summary's real production value)
+        # is fine for a real prompt but risky for a synthetic warmup ping —
+        # bound it modestly here. This does NOT affect whether the model
+        # reloads: only num_ctx (matched below) does.
+        _max_tokens = _p["max_tokens"] if _p["max_tokens"] is not None else 16
+        _num_ctx    = _p.get("num_ctx")
+        _keep_alive = str(keep_alive or "").strip() or local_llm_role_keep_alive(role)
+    else:
+        _temperature, _max_tokens, _num_ctx = 0.0, 8, None
+        _keep_alive = str(keep_alive or "").strip() or "30m"
+
+    if not model:
+        return (False, "No model name set. Enter e.g. llama3.1:8b (see `ollama list`).")
+
+    headers, hdr_err = build_local_llm_headers(auth_token, extra_headers)
+    if hdr_err:
+        return (False, f"Extra request headers: {hdr_err}")
+
+    logger.info(
+        f"Local LLM warmup role={role or 'generic'} model={model} "
+        f"num_ctx={_num_ctx or '(server default)'} keep_alive={_keep_alive}"
+    )
+    t0 = time.time()
+    try:
+        client = _LocalLLMClient(endpoint=base, model=model, timeout=timeout,
+                                 headers=headers, role=role, keep_alive=_keep_alive)
+        _create_kwargs = {"temperature": _temperature, "max_tokens": _max_tokens}
+        if _num_ctx:
+            _create_kwargs["num_ctx"] = _num_ctx
+        client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": "Reply with the single word: OK"}],
+            **_create_kwargs,
+        )
+    except LocalLLMError as e:
+        elapsed = time.time() - t0
+        logger.warning(f"🔥 Local LLM warmup failed: role={role or 'generic'} model={model!r} "
+                       f"endpoint={kind} elapsed={elapsed:.2f}s status={e.kind} — {e.detail}")
+        return (False, f"{base}: {e.detail}")
+    except Exception as e:
+        elapsed = time.time() - t0
+        logger.warning(f"🔥 Local LLM warmup failed: role={role or 'generic'} model={model!r} "
+                       f"endpoint={kind} elapsed={elapsed:.2f}s — {type(e).__name__}: {e}")
+        return (False, f"Unexpected error: {type(e).__name__}: {e}")
+
+    elapsed = time.time() - t0
+    logger.info(f"🔥 Local LLM warmup succeeded: role={role or 'generic'} model={model!r} "
+               f"endpoint={kind} elapsed={elapsed:.2f}s keep_alive={_keep_alive}")
+    return (True, f"{model} warmed in {elapsed:.2f}s at {base} ({kind} endpoint) — "
+                  f"role={role or 'generic'}, keep_alive={_keep_alive}")
+
+
+def warm_all_local_llm_roles() -> list:
+    """Warm every role currently routed to the local LLM, using the SAME
+    already-built clients the live pipeline uses AND that role's REAL
+    production temperature/max_tokens/num_ctx (LOCAL_LLM_ROLE_REQUEST_PARAMS).
+    Reproducing the exact request shape matters because Ollama reloads a model
+    whenever num_ctx changes — warming with different options than production
+    would leave the model reloading anyway on the first real request.
+
+    Meant for the opt-in "Warm Local Model at Service Start" setting: called
+    once, right after Start, on a background thread — never on the asyncio
+    event loop or the CustomTkinter main thread. A slow/cold model here delays
+    nothing but this one warmup pass.
+
+    Returns a list of (role, ok, message, elapsed_seconds) — never raises.
+    """
+    results = []
+    if not _local_llm_available():
+        return results
+    for role, client in sorted(local_llm_clients.items()):
+        _p = local_llm_role_request_params(role)
+        _max_tokens = _p["max_tokens"] if _p["max_tokens"] is not None else 16
+        _num_ctx    = _p.get("num_ctx")
+        t0 = time.time()
+        logger.info(
+            f"Local LLM warmup role={role} model={client.model} "
+            f"num_ctx={_num_ctx or '(server default)'} keep_alive={client.keep_alive}"
+        )
+        try:
+            _create_kwargs = {"temperature": _p["temperature"], "max_tokens": _max_tokens}
+            if _num_ctx:
+                _create_kwargs["num_ctx"] = _num_ctx
+            client.chat.completions.create(
+                model=client.model,
+                messages=[{"role": "user", "content": "Reply with the single word: OK"}],
+                **_create_kwargs,
+            )
+            elapsed = time.time() - t0
+            logger.info(f"🔥 Local LLM warmup succeeded: role={role} model={client.model!r} "
+                       f"elapsed={elapsed:.2f}s keep_alive={client.keep_alive}")
+            results.append((role, True,
+                            f"{client.model} warmed in {elapsed:.2f}s", elapsed))
+        except Exception as e:
+            elapsed = time.time() - t0
+            kind = getattr(e, "kind", "error")
+            logger.warning(f"🔥 Local LLM warmup failed: role={role} model={client.model!r} "
+                           f"elapsed={elapsed:.2f}s status={kind} — {e}")
+            results.append((role, False, f"{client.model}: {e}", elapsed))
+    return results
+
 
 # Bug 4: track highest verse presented per chapter this session so returning to
 # a chapter resumes from the last known verse instead of re-presenting bare chapter.
@@ -2417,6 +2691,9 @@ def configure(
     local_llm_model_verse="",
     local_llm_model_outline="",
     local_llm_model_summary="",
+    local_llm_keep_alive_verse="",   # blank → LOCAL_LLM_KEEP_ALIVE_DEFAULTS["verse"]   ("30m")
+    local_llm_keep_alive_outline="", # blank → LOCAL_LLM_KEEP_ALIVE_DEFAULTS["outline"] ("15m")
+    local_llm_keep_alive_summary="", # blank → LOCAL_LLM_KEEP_ALIVE_DEFAULTS["summary"] ("10m")
 ):
     global DEEPGRAM_API_KEY, GROQ_API_KEY, GEMINI_API_KEY, CEREBRAS_API_KEY, MISTRAL_API_KEY, SARVAM_API_KEY
     global SARVAM_API_KEY_BACKUP, _sarvam_using_backup
@@ -2430,7 +2707,7 @@ def configure(
     global local_llm_client, local_llm_clients, LOCAL_LLM_ENABLED, LOCAL_LLM_ENDPOINT
     global LOCAL_LLM_HOST, LOCAL_LLM_PORT
     global LOCAL_LLM_MODEL, LOCAL_LLM_TIMEOUT, LOCAL_LLM_ON_FAILURE, LOCAL_LLM_ROLES
-    global LOCAL_LLM_MODELS
+    global LOCAL_LLM_MODELS, LOCAL_LLM_KEEP_ALIVE
     global CONFIDENCE_THRESHOLD, REQUIRE_MANUAL_CONFIRM, CONFIRM_CALLBACK, REQUIRE_VERIFY, PANIC_KEY, SMART_AMEN_ENABLED
     global full_sermon_transcript, verses_cited
     global LIVE_POINTS_PROMPT, LIVE_POINTS_CALLBACK, LIVE_POINTS_GET_CURRENT_CB
@@ -2569,6 +2846,7 @@ def configure(
     local_llm_clients    = {}
     LOCAL_LLM_ROLES      = {}
     LOCAL_LLM_MODELS     = {}
+    LOCAL_LLM_KEEP_ALIVE = {}
     LOCAL_LLM_ON_FAILURE = "skip" if str(local_llm_on_failure).lower().strip() == "skip" else "fallback"
     if LOCAL_LLM_ENABLED:
         # ONE endpoint for every role. A blank endpoint field means this settings
@@ -2632,22 +2910,40 @@ def configure(
         _role_models["watcher"] = LOCAL_LLM_MODEL or _role_models["verse"]
         LOCAL_LLM_MODELS = dict(_role_models)
 
+        # keep_alive per role — how long Ollama keeps the model resident after a
+        # reply so the NEXT call skips the cold-load cost. Settings values fall
+        # back to LOCAL_LLM_KEEP_ALIVE_DEFAULTS when blank/missing (older
+        # settings file). Watcher shares verse's — same fast/live-path bucket.
+        _keep_alive_overrides = {
+            "verse":   local_llm_keep_alive_verse,
+            "outline": local_llm_keep_alive_outline,
+            "summary": local_llm_keep_alive_summary,
+        }
+        _keep_alive_cfg = {
+            _rid: local_llm_role_keep_alive(_rid, _keep_alive_overrides)
+            for _rid in ("verse", "outline", "summary")
+        }
+        _keep_alive_cfg["watcher"] = _keep_alive_cfg["verse"]
+        LOCAL_LLM_KEEP_ALIVE = dict(_keep_alive_cfg)
+
         _needed = set(_local_roles) | ({"watcher"} if _watcher_local else set())
         _usable = [r for r in _needed if _role_models.get(r)]
 
         if not _needed:
             # Toggle on but nothing routed to it: build nothing, touch nothing.
-            LOCAL_LLM_ENABLED = False
-            LOCAL_LLM_ROLES   = {}
-            LOCAL_LLM_MODELS  = {}
+            LOCAL_LLM_ENABLED    = False
+            LOCAL_LLM_ROLES      = {}
+            LOCAL_LLM_MODELS     = {}
+            LOCAL_LLM_KEEP_ALIVE = {}
             logger.info(
                 "🖥️ Local LLM          : ON but no role routed to it — "
                 "cloud providers used as normal."
             )
         elif not _usable:
-            LOCAL_LLM_ENABLED = False
-            LOCAL_LLM_ROLES   = {}
-            LOCAL_LLM_MODELS  = {}
+            LOCAL_LLM_ENABLED    = False
+            LOCAL_LLM_ROLES      = {}
+            LOCAL_LLM_MODELS     = {}
+            LOCAL_LLM_KEEP_ALIVE = {}
             logger.warning(
                 "⚠️  Local LLM enabled but no model name resolved for any routed "
                 "role — feature disabled for this session (all roles stay on their "
@@ -2665,6 +2961,7 @@ def configure(
                         timeout=local_llm_role_timeout(LOCAL_LLM_TIMEOUT, _rid),
                         headers=_headers,
                         role=_rid,
+                        keep_alive=_keep_alive_cfg.get(_rid, ""),
                     )
                 # Legacy alias for anything still reading the old single-client
                 # global. The dialect probe is cached per endpoint, not per
@@ -2690,11 +2987,13 @@ def configure(
                     + ", ".join(
                         f"{k}={v}"
                         + (f" ({local_llm_clients[k].model}, "
-                           f"{local_llm_clients[k].timeout:g}s)"
+                           f"timeout={local_llm_clients[k].timeout:g}s, "
+                           f"keep_alive={local_llm_clients[k].keep_alive})"
                            if k in local_llm_clients else "")
                         for k, v in LOCAL_LLM_ROLES.items()
                     )
-                    + (f", watcher=local ({local_llm_clients['watcher'].model})"
+                    + (f", watcher=local ({local_llm_clients['watcher'].model}, "
+                       f"keep_alive={local_llm_clients['watcher'].keep_alive})"
                        if "watcher" in local_llm_clients else "")
                 )
             except Exception as e:
@@ -4125,10 +4424,21 @@ def extract_verse_with_llm(text):
                     f"   that happens to match verse content (e.g. 'you will be my witnesses' "
                     f"   or 'to the ends of the earth'), return NONE — this is NOT a citation.\n"
                     f"3. Return ONLY in format 'Book Chapter:Verse' (e.g., John 3:16).\n"
-                    f"4. If no explicit reference is found, return exactly NONE.{context_hint}\n\n"
+                    f"4. If no explicit reference is found, return exactly NONE.\n"
+                    f"5. Respond with ONLY the reference or the word NONE — no explanation, "
+                    f"   no punctuation, no extra words.{context_hint}\n\n"
                     f"Text: {text}"
                 ),
             }],
+            # Fast/local role: this is a short structured lookup, not a
+            # conversation — low temperature for a deterministic answer, a
+            # tight token cap since the only valid replies are "Book C:V" or
+            # "NONE", and a restrained context window on the local dialect
+            # (the prompt + transcript excerpt is short; no need for the
+            # model's full trained context). Sourced from
+            # LOCAL_LLM_ROLE_REQUEST_PARAMS so warmup can reproduce these
+            # exact values and never trigger a reload on the first real call.
+            **_local_completion_kwargs("verse"),
         )
         verse = response.choices[0].message.content.strip()
         if verse == "NONE":
@@ -4217,6 +4527,12 @@ def _llm_semantic_match(verse_text: str, transcript_excerpt: str, label: str = "
             "verse",
             messages=[{"role": "user", "content": prompt}],
             cloud_client=_client, cloud_model=_model,
+            # Same verse-role params as extract_verse_with_llm (see
+            # LOCAL_LLM_ROLE_REQUEST_PARAMS) — a binary YES/NO answer needs far
+            # fewer than 48 tokens, but using the ROLE's one canonical config
+            # (rather than a call-specific max_tokens) is what lets warmup
+            # reproduce production exactly and avoid a mid-service reload.
+            **_local_completion_kwargs("verse"),
         )
         answer = response.choices[0].message.content.strip().upper()
         result = answer.startswith("YES")

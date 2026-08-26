@@ -122,6 +122,18 @@ DEFAULTS = {
     "local_llm_model_verse":      "",            # blank = use local_llm_model
     "local_llm_model_outline":    "",            # blank = use local_llm_model
     "local_llm_model_summary":    "",            # blank = use local_llm_model
+    # Ollama `keep_alive` per role — how long the model stays resident in
+    # memory after a request so the NEXT request skips the cold-load cost.
+    # Shorter for summary (runs once, at the end) so it doesn't hog VRAM for
+    # the rest of the service after its one call.
+    "local_llm_keep_alive_verse":   "30m",
+    "local_llm_keep_alive_outline": "15m",
+    "local_llm_keep_alive_summary": "10m",
+    # Opt-in: warm the routed local model(s) right after Start, on a background
+    # thread, so the first real request during the service is already warm.
+    # Off by default — most users start the service immediately and would
+    # rather the first call pay the cold-load cost than wait at Start.
+    "local_llm_warm_at_start":    False,
     # ── ATEM Chroma Key Overlay ──
     "atem_enabled":               False,
     "atem_ip":                    "",

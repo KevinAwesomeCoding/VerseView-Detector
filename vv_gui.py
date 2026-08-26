@@ -1524,6 +1524,30 @@ class VerseViewApp(ctk.CTk):
         self.local_llm_test_lbl.grid(row=_r + 1, column=0, columnspan=2, sticky="ew",
                                      padx=PAD_M, pady=(0, PAD_S))
 
+        # Warm Selected Local Model — loads the model into memory (and applies
+        # its keep_alive) ahead of a service, without running a full session.
+        # Same model/endpoint/header resolution as Test Connection above.
+        self.btn_local_llm_warm = self._neutral_button(
+            sub, "🔥  Warm Selected Local Model", self._warm_local_llm, height=32,
+        )
+        self.btn_local_llm_warm.grid(row=_r + 2, column=0, columnspan=2, sticky="ew",
+                                     padx=PAD_M, pady=(0, PAD_XS))
+        self.local_llm_warm_lbl = ctk.CTkLabel(
+            sub, text="", anchor="w", justify="left", wraplength=380,
+            font=self._f(FS_SMALL), text_color=COL_TEXT_MUTED,
+        )
+        self.local_llm_warm_lbl.grid(row=_r + 3, column=0, columnspan=2, sticky="ew",
+                                     padx=PAD_M, pady=(0, PAD_S))
+        self.local_llm_warm_at_start_var = ctk.BooleanVar(value=False)
+        ctk.CTkCheckBox(
+            sub,
+            text="Warm Local Model at Service Start (off by default)",
+            variable=self.local_llm_warm_at_start_var,
+            font=self._f(FS_SMALL), text_color=COL_TEXT,
+            checkbox_width=18, checkbox_height=18,
+        ).grid(row=_r + 4, column=0, columnspan=2, sticky="w", padx=PAD_M, pady=(0, PAD_S))
+        _r += 3   # reserve the 3 rows just added above
+
         # ── Per-role routing + model names ──
         ctk.CTkLabel(
             sub, text="Route to Local LLM (per role — not all-or-nothing)",
@@ -1688,34 +1712,63 @@ class VerseViewApp(ctk.CTk):
         self._set_local_llm_state(
             "normal" if self.local_llm_enabled_var.get() else "disabled")
 
-    def _test_local_llm(self):
-        """Send one trivial request to the configured endpoint/model and report
-        success or the SPECIFIC failure (refused / timeout / DNS / not
-        authenticated / model not installed / bad reply).
+    def _local_llm_conn_fields(self):
+        """Resolve the endpoint/auth/model/timeout/role Test Connection and
+        Warm Selected Local Model both act on — the exact same "currently
+        selected model" in both cases, so warming never loads a different
+        model than the one you'd actually test or route traffic to.
 
-        Runs on a daemon thread and marshals the result back with after(), so the
-        UI never freezes even when the endpoint hangs for the full timeout. No
-        credential VALUE is ever shown or logged — only header names."""
+        `role` is WHICH per-role slot the resolved model actually came from —
+        checked in the same priority order as `model` itself. The shared
+        "Model Name" override has no role of its own, so it's attributed to
+        "verse": the fast/live-path role, whose runtime config (low
+        temperature, small token cap, restrained context) is the safest
+        generic default for an ad-hoc warmup. Test Connection ignores this —
+        it stays a generic probe (see _test_local_llm) — Warm Selected Local
+        Model uses it to reproduce that role's real production request shape.
+
+        Returns (endpoint, token, headers, model, timeout, role)."""
         endpoint = engine.normalize_ollama_endpoint(
             self.local_llm_endpoint_entry.get())
         token    = self.local_llm_auth_token_entry.get().strip()
         headers  = self.local_llm_extra_headers_entry.get().strip()
-        model    = self.local_llm_model_entry.get().strip() or (
-            cfg.get_effective_local_model("verse", getattr(self, "local_llm_model_verse_dropdown_var", ctk.StringVar()).get(), getattr(self, "local_llm_model_verse_entry", ctk.StringVar()).get()) or
-            cfg.get_effective_local_model("outline", getattr(self, "local_llm_model_outline_dropdown_var", ctk.StringVar()).get(), getattr(self, "local_llm_model_outline_entry", ctk.StringVar()).get()) or
-            cfg.get_effective_local_model("summary", getattr(self, "local_llm_model_summary_dropdown_var", ctk.StringVar()).get(), getattr(self, "local_llm_model_summary_entry", ctk.StringVar()).get())
-        )
-        # Use the user's configured timeout for the model test — a large/cold
-        # model can legitimately need well over 20s to answer, and silently
-        # capping this to a fixed ceiling made the test lie about what it was
-        # actually waiting for. Still clamp to a sane range so a typo or a
-        # blank field can't hang the button for an unreasonable time.
+        _shared_model  = self.local_llm_model_entry.get().strip()
+        _verse_model   = cfg.get_effective_local_model("verse", getattr(self, "local_llm_model_verse_dropdown_var", ctk.StringVar()).get(), getattr(self, "local_llm_model_verse_entry", ctk.StringVar()).get())
+        _outline_model = cfg.get_effective_local_model("outline", getattr(self, "local_llm_model_outline_dropdown_var", ctk.StringVar()).get(), getattr(self, "local_llm_model_outline_entry", ctk.StringVar()).get())
+        _summary_model = cfg.get_effective_local_model("summary", getattr(self, "local_llm_model_summary_dropdown_var", ctk.StringVar()).get(), getattr(self, "local_llm_model_summary_entry", ctk.StringVar()).get())
+        if _shared_model:
+            model, role = _shared_model, "verse"
+        elif _verse_model:
+            model, role = _verse_model, "verse"
+        elif _outline_model:
+            model, role = _outline_model, "outline"
+        elif _summary_model:
+            model, role = _summary_model, "summary"
+        else:
+            model, role = "", "verse"
+        # Clamp to a sane range so a typo or a blank field can't hang either
+        # button for an unreasonable time.
         timeout = max(5.0, min(180.0, self._safe_float(self.local_llm_timeout_entry, 45.0)))
+        return endpoint, token, headers, model, timeout, role
+
+    def _test_local_llm(self):
+        """Generic model/endpoint probe: send one trivial request to the
+        configured endpoint/model and report success or the SPECIFIC failure
+        (refused / timeout / DNS / not authenticated / model not installed /
+        bad reply). NOT role-tuned — it does not reproduce any role's real
+        temperature/max_tokens/num_ctx, so a warm result here does not by
+        itself guarantee a specific role's first request stays warm too (use
+        "Warm Selected Local Model" for that).
+
+        Runs on a daemon thread and marshals the result back with after(), so the
+        UI never freezes even when the endpoint hangs for the full timeout. No
+        credential VALUE is ever shown or logged — only header names."""
+        endpoint, token, headers, model, timeout, _role = self._local_llm_conn_fields()
 
         self.btn_local_llm_test.configure(state="disabled", text="Testing…")
         self.local_llm_test_lbl.configure(
             text=f"Testing remote Ollama model {model!r} at {endpoint} "
-                 f"(timeout {timeout:g}s) …",
+                 f"(timeout {timeout:g}s) — generic connection/model probe …",
             text_color=COL_TEXT_MUTED)
 
         def _done(ok: bool, msg: str, elapsed: float):
@@ -1744,6 +1797,72 @@ class VerseViewApp(ctk.CTk):
             self.after(0, lambda: _done(ok, msg, elapsed))
 
         threading.Thread(target=_task, daemon=True).start()
+
+    def _warm_local_llm(self):
+        """Load the currently-selected local model into memory (and start its
+        keep_alive clock) without running a session — meant to be clicked
+        before a church service so the FIRST real request during the service
+        doesn't pay a cold-load cost. Warms ONLY the one model currently
+        resolved by _local_llm_conn_fields()'s field logic, never every model
+        in every role dropdown, and uses THAT role's real production
+        temperature/max_tokens/num_ctx/keep_alive (see
+        LOCAL_LLM_ROLE_REQUEST_PARAMS in the engine) so the warmup reproduces
+        exactly what the first real request for that role will send — Ollama
+        reloads a model whenever num_ctx differs between requests, so warming
+        with mismatched options would still leave that first request cold.
+
+        Runs on a daemon thread and marshals the result back with after(), so
+        the UI never freezes waiting for a large/cold model to load. The
+        model's reply is never shown — only success/failure and elapsed time."""
+        endpoint, token, headers, model, timeout, role = self._local_llm_conn_fields()
+
+        self.btn_local_llm_warm.configure(state="disabled", text="Warming…")
+        self.local_llm_warm_lbl.configure(
+            text=f"Warming {model!r} ({role} role) at {endpoint} (timeout {timeout:g}s) …",
+            text_color=COL_TEXT_MUTED)
+
+        def _done(ok: bool, msg: str, elapsed: float):
+            if getattr(self, "_closing", False):
+                return
+            self.btn_local_llm_warm.configure(state="normal", text="🔥  Warm Selected Local Model")
+            self.local_llm_warm_lbl.configure(
+                text=("✅  " if ok else "❌  ") + msg,
+                text_color=(COL_OK if ok else COL_DANGER),
+            )
+            self._append_log(
+                ("🔥 Local LLM warmup OK — " if ok else "❌ Local LLM warmup failed — ")
+                + msg.replace("\n", " | ")
+                + f" [total {elapsed:.1f}s]"
+            )
+
+        def _task():
+            t0 = time.time()
+            try:
+                ok, msg = engine.warm_local_llm_model(
+                    endpoint=endpoint, model=model, timeout=timeout,
+                    auth_token=token, extra_headers=headers, role=role)
+            except Exception as e:
+                ok, msg = False, f"{type(e).__name__}: {e}"
+            elapsed = time.time() - t0
+            self.after(0, lambda: _done(ok, msg, elapsed))
+
+        threading.Thread(target=_task, daemon=True).start()
+
+    def _auto_warm_local_llm(self):
+        """Opt-in "Warm Local Model at Service Start": warm every role
+        currently routed to the local LLM, using the SAME clients the live
+        pipeline uses. Called on its own daemon thread right after Start —
+        never on the engine's asyncio loop or the CustomTkinter main thread,
+        so a slow/cold model here delays nothing but this one warmup pass."""
+        try:
+            results = engine.warm_all_local_llm_roles()
+        except Exception as e:
+            self.after(0, lambda: self._append_log(f"❌ Local LLM auto-warm error: {e}"))
+            return
+        for role, ok, msg, elapsed in results:
+            tag = "🔥 Local LLM auto-warm OK" if ok else "❌ Local LLM auto-warm failed"
+            line = f"{tag} [{role}] — {msg} ({elapsed:.1f}s)"
+            self.after(0, lambda line=line: self._append_log(line))
 
     def _toggle_advanced(self):
         self._adv_open = not self._adv_open
@@ -1996,6 +2115,7 @@ class VerseViewApp(ctk.CTk):
         # CTkEntry silently ignores insert(), so enable it while populating and
         # re-apply the real toggle state at the end.
         self.local_llm_enabled_var.set(s.get("local_llm_enabled", False))
+        self.local_llm_warm_at_start_var.set(s.get("local_llm_warm_at_start", False))
         self._set_local_llm_state("normal")
         # Endpoint: resolve_local_llm_endpoint() migrates a settings file that
         # still carries the older host/port pair, so an upgrade keeps working
@@ -2132,6 +2252,7 @@ class VerseViewApp(ctk.CTk):
             "local_llm_extra_headers":    self.local_llm_extra_headers_entry.get().strip(),
             "local_llm_model":            self.local_llm_model_entry.get().strip(),
             "local_llm_timeout":          self._safe_float(self.local_llm_timeout_entry, 45.0),
+            "local_llm_warm_at_start":    self.local_llm_warm_at_start_var.get(),
             "local_llm_on_failure":       ("skip" if self.local_llm_failure_var.get().startswith("Skip")
                                            else "fallback"),
             "local_llm_role_verse":       self._role_code(self.local_llm_role_verse_var),
@@ -2951,6 +3072,9 @@ class VerseViewApp(ctk.CTk):
                 local_llm_model_verse      = s.get("local_llm_model_verse", ""),
                 local_llm_model_outline    = s.get("local_llm_model_outline", ""),
                 local_llm_model_summary    = s.get("local_llm_model_summary", ""),
+                local_llm_keep_alive_verse   = s.get("local_llm_keep_alive_verse", ""),
+                local_llm_keep_alive_outline = s.get("local_llm_keep_alive_outline", ""),
+                local_llm_keep_alive_summary = s.get("local_llm_keep_alive_summary", ""),
             )
 
             # Fresh session → start with an empty Suggestions panel.
@@ -2970,6 +3094,12 @@ class VerseViewApp(ctk.CTk):
             self._engine_thread.start()
             self.after(2000, self._refresh_context)
 
+            # Opt-in warmup: engine.configure() above already built local_llm_clients
+            # (if any roles are routed to Local LLM), so this can run on its own
+            # daemon thread right now without waiting on or blocking the engine
+            # thread, live transcription, or this Start call.
+            if s.get("local_llm_warm_at_start", False):
+                threading.Thread(target=self._auto_warm_local_llm, daemon=True).start()
 
         except Exception as e:
             mb.showerror("Start Error", f"Failed to start:\n\n{e}")
