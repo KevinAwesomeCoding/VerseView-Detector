@@ -148,7 +148,19 @@ class VerseViewApp(ctk.CTk):
         self.title(f"VerseView Detector  v{APP_VERSION}  [{BUILD_VERSION}]")
         self.geometry("1060x700")
         self.minsize(800, 500)
-
+        
+        try:
+            base_path = sys._MEIPASS if hasattr(sys, "_MEIPASS") else os.path.dirname(os.path.abspath(__file__))
+            if sys.platform == "win32":
+                icon_path = os.path.join(base_path, "app_icon.ico")
+                self.iconbitmap(icon_path)
+            else:
+                import tkinter as tk
+                icon_path = os.path.join(base_path, "app_icon.png")
+                icon_img = tk.PhotoImage(file=icon_path)
+                self.iconphoto(True, icon_img)
+        except Exception as e:
+            logging.warning(f"Could not load app icon: {e}")
 
         self._s                   = cfg.load()
         self._running             = False

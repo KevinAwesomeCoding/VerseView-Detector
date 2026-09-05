@@ -21,6 +21,8 @@ datas += [
     ('verseview_bot.py', '.'),
     ('vv_discord_bot.py', '.'),
     ('whisper_server_manager.py', '.'),
+    ('app_icon.png', '.'),
+    ('app_icon.ico', '.'),
 ]
 
 # Bundle the STT provider package source. PyInstaller already compiles these into
@@ -206,6 +208,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon='app_icon.icns' if is_mac else 'app_icon.ico',
 )
 
 if is_mac:
@@ -223,7 +226,7 @@ if is_mac:
     app = BUNDLE(
         coll,
         name='VerseView_Detector.app',
-        icon=None,
+        icon='app_icon.icns',
         bundle_identifier='com.verseview.detector',
         info_plist={
             'CFBundleExecutable': 'VerseView_Detector',
