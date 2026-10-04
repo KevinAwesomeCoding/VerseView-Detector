@@ -1,0 +1,49 @@
+2026-10-04 00:15:13,202 INFO  🔒 SSL CA bundle: /Users/kevinanil/Library/Python/3.13/lib/python/site-packages/certifi/cacert.pem
+test_accepted_candidate_reaches_browser_with_one_id (test_delivery.DeliveryTests.test_accepted_candidate_reaches_browser_with_one_id) ... ok
+test_changed_verse_in_same_chapter_passes (test_delivery.DeliveryTests.test_changed_verse_in_same_chapter_passes) ... ok
+test_chapter_only_does_not_report_delivery (test_delivery.DeliveryTests.test_chapter_only_does_not_report_delivery) ... ok
+test_compact_layout_keeps_transcript_and_history_room (test_delivery.DeliveryTests.test_compact_layout_keeps_transcript_and_history_room) ... ok
+test_concurrent_candidates_produce_one_command (test_delivery.DeliveryTests.test_concurrent_candidates_produce_one_command) ... ok
+test_delivery_diagnostics_are_bounded_and_copied (test_delivery.DeliveryTests.test_delivery_diagnostics_are_bounded_and_copied) ... ok
+test_failed_connection_does_not_poison_retry (test_delivery.DeliveryTests.test_failed_connection_does_not_poison_retry) ... ok
+test_failed_input_update_does_not_poison_retry (test_delivery.DeliveryTests.test_failed_input_update_does_not_poison_retry) ... ok
+test_false_positive_and_translation_guards_remain_explainable (test_delivery.DeliveryTests.test_false_positive_and_translation_guards_remain_explainable) ... ok
+test_global_cooldown_kept (test_delivery.DeliveryTests.test_global_cooldown_kept) ... ok
+test_gui_diagnostics_refresh_is_bounded_and_read_only (test_delivery.DeliveryTests.test_gui_diagnostics_refresh_is_bounded_and_read_only) ... ok
+test_hear_twice_verification_kept (test_delivery.DeliveryTests.test_hear_twice_verification_kept) ... ok
+test_hybrid_parser_acceptance_and_guard_have_correlated_events (test_delivery.DeliveryTests.test_hybrid_parser_acceptance_and_guard_have_correlated_events) ... ok
+test_invalid_candidate (test_delivery.DeliveryTests.test_invalid_candidate) ... ok
+test_local_only_queue_and_vtc_can_match (test_delivery.DeliveryTests.test_local_only_queue_and_vtc_can_match) ... ok
+test_manual_confirmation_holds_and_reuses_id (test_delivery.DeliveryTests.test_manual_confirmation_holds_and_reuses_id) ... ok
+test_manual_pending_is_cancelled_when_controller_closes (test_delivery.DeliveryTests.test_manual_pending_is_cancelled_when_controller_closes) ... ok
+test_manual_rejection_and_callback_exception (test_delivery.DeliveryTests.test_manual_rejection_and_callback_exception) ... ok
+test_missing_controller_and_controls (test_delivery.DeliveryTests.test_missing_controller_and_controls) ... ok
+test_multilingual_parser_outputs_still_deliver (test_delivery.DeliveryTests.test_multilingual_parser_outputs_still_deliver) ... ok
+test_normalized_references_share_dedup_state (test_delivery.DeliveryTests.test_normalized_references_share_dedup_state) ... ok
+test_onwards_failure_does_not_advance (test_delivery.DeliveryTests.test_onwards_failure_does_not_advance) ... ok
+test_post_command_error_preserves_accepted_state (test_delivery.DeliveryTests.test_post_command_error_preserves_accepted_state) ... ok
+test_queue_book_change_cancels (test_delivery.DeliveryTests.test_queue_book_change_cancels) ... ok
+test_queue_fetch_and_send_failures_are_recorded (test_delivery.DeliveryTests.test_queue_fetch_and_send_failures_are_recorded) ... ok
+test_queue_replacement_and_expiry_are_explained (test_delivery.DeliveryTests.test_queue_replacement_and_expiry_are_explained) ... ok
+test_queue_semantic_exception_remains_visible (test_delivery.DeliveryTests.test_queue_semantic_exception_remains_visible) ... ok
+test_queued_verse_releases_with_original_id_and_stream (test_delivery.DeliveryTests.test_queued_verse_releases_with_original_id_and_stream) ... ok
+test_replaced_range_fetch_cannot_repopulate_queue (test_delivery.DeliveryTests.test_replaced_range_fetch_cannot_repopulate_queue) ... ok
+test_scripture_and_quarantine_guards_are_reported (test_delivery.DeliveryTests.test_scripture_and_quarantine_guards_are_reported) ... ok
+test_scripture_progression_only_after_command_acceptance (test_delivery.DeliveryTests.test_scripture_progression_only_after_command_acceptance) ... ok
+test_sdk_callback_stream_and_exception_boundary (test_delivery.DeliveryTests.test_sdk_callback_stream_and_exception_boundary) ... ok
+test_suppression_does_not_extend_cooldown (test_delivery.DeliveryTests.test_suppression_does_not_extend_cooldown) ... ok
+test_transcript_to_browser_preserves_candidate_identity (test_delivery.DeliveryTests.test_transcript_to_browser_preserves_candidate_identity) ... ok
+test_uncertain_click_does_not_blindly_retry (test_delivery.DeliveryTests.test_uncertain_click_does_not_blindly_retry) ... ok
+test_version_and_legacy_selector_paths_with_fake_selenium (test_delivery.DeliveryTests.test_version_and_legacy_selector_paths_with_fake_selenium) ... 2026-10-04 00:15:13,532 INFO  ✅ [VersionDetector] Detected VerseVIEW version: verseview10 (title: "VerseVIEW Remote 10.0.0")
+2026-10-04 00:15:13,533 INFO  ✅ [VersionDetector] Detected VerseVIEW version: verseview11 (title: "VerseVIEW Remote 11.0.0")
+2026-10-04 00:15:13,533 INFO  ✅ [VersionDetector] Detected VerseVIEW version: verseview11 (title: "VerseVIEW Remote 11.0.0")
+ok
+test_vtc_fetch_failure_preserves_existing_fallback (test_delivery.DeliveryTests.test_vtc_fetch_failure_preserves_existing_fallback) ... ok
+test_vtc_replaced_fetch_and_old_expiry_cannot_affect_new_candidate (test_delivery.DeliveryTests.test_vtc_replaced_fetch_and_old_expiry_cannot_affect_new_candidate) ... ok
+test_vtc_replacement_expiry_and_release (test_delivery.DeliveryTests.test_vtc_replacement_expiry_and_release) ... ok
+test_worship_mode_kept (test_delivery.DeliveryTests.test_worship_mode_kept) ... ok
+
+----------------------------------------------------------------------
+Ran 40 tests in 0.330s
+
+OK

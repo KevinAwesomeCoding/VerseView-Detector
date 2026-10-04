@@ -1,0 +1,122 @@
+2026-10-03 23:45:37,921 INFO  🔒 SSL CA bundle: /private/tmp/verseview-delivery-verify-20261003/lib/python3.13/site-packages/certifi/cacert.pem
+2026-10-03 23:45:38,447 INFO  📌 Context reset for new session
+2026-10-03 23:45:38,447 WARNING ⚠️  No Groq key — LLM verse extraction disabled
+2026-10-03 23:45:38,447 WARNING ⚠️  No LLM keys at all — all LLM features disabled
+2026-10-03 23:45:38,447 INFO  🖥️ Local LLM          : OFF
+2026-10-03 23:45:38,447 INFO  🎸 Worship Mode       : OFF
+2026-10-03 23:45:38,447 INFO  📖 Scripture-Read Mode: STANDBY (auto-triggered by speech)
+2026-10-03 23:45:38,447 INFO  🔣 Spoken Numeral Mode: OFF
+2026-10-03 23:45:38,447 INFO  📋 Live Points: OFF
+2026-10-03 23:45:38,447 INFO  🔭 Contextual Verse Watcher : OFF (disabled in settings)
+2026-10-03 23:45:44,053 INFO  Connecting to VerseView at http://127.0.0.1:50010/control.html...
+2026-10-03 23:45:44,060 INFO  ChromeDriver loaded from cache (no CDN check): /Users/kevinanil/.wdm/drivers/chromedriver/mac-arm64/153.0.8010.52/chromedriver-mac-arm64/chromedriver
+2026-10-03 23:45:45,893 INFO  ✅ [VersionDetector] Detected VerseVIEW version: verseview11 (title: "VerseVIEW Remote 11.0.0")
+2026-10-03 23:46:01,189 INFO  Found Bible ref input: #remote_bibleRefID
+2026-10-03 23:46:01,222 INFO  Found PRESENT button: remote_bible_present
+2026-10-03 23:46:01,230 INFO  Connected to VerseView (headless mode) — version: verseview11
+2026-10-03 23:46:27,504 INFO  📝 [TEST-REPLAY] John chapter three verse sixteen
+2026-10-03 23:46:27,508 INFO  VERSE_DELIVERY {"candidate_id": "1e3e8d4883f7", "reference": "John 3:16", "source": "FAST-PATH", "stream": "primary", "language": "en", "timestamp": "2026-10-04T04:46:27.507576+00:00", "stage": "candidate", "outcome": "DETECTED", "reason": "Reference candidate produced for delivery"}
+2026-10-03 23:46:27,508 INFO  ⚡ FAST-PATH explicit ref: John 3:16
+2026-10-03 23:46:27,516 INFO  VERSE_DELIVERY {"candidate_id": "1e3e8d4883f7", "reference": "John 3:16", "source": "FAST-PATH", "stream": "primary", "language": "en", "timestamp": "2026-10-04T04:46:27.516036+00:00", "stage": "browser_command", "outcome": "DELIVERY_REQUESTED", "reason": "Setting reference and clicking PRESENT", "adapter": "verseview11"}
+2026-10-03 23:46:27,531 INFO  VERSE_DELIVERY {"candidate_id": "1e3e8d4883f7", "reference": "John 3:16", "source": "FAST-PATH", "stream": "primary", "language": "en", "timestamp": "2026-10-04T04:46:27.531535+00:00", "stage": "browser_command", "outcome": "COMMAND_ACCEPTED", "reason": "Browser executed PRESENT click; visible presentation is unverified", "adapter": "verseview11"}
+2026-10-03 23:46:27,531 INFO  ✅ COMMAND ACCEPTED: John 3:16
+2026-10-03 23:46:27,548 INFO  📌 SERMON ANCHOR updated: John 3:16
+2026-10-03 23:46:27,559 ERROR Discord failed: Invalid URL '': No scheme supplied. Perhaps you meant https://?
+2026-10-03 23:46:35,568 INFO  📝 [TEST-REPLAY] John chapter three verse seventeen
+2026-10-03 23:46:35,601 INFO  VERSE_DELIVERY {"candidate_id": "625d03a3fa99", "reference": "John 3:17", "source": "FAST-PATH", "stream": "primary", "language": "en", "timestamp": "2026-10-04T04:46:35.601257+00:00", "stage": "candidate", "outcome": "DETECTED", "reason": "Reference candidate produced for delivery"}
+2026-10-03 23:46:35,602 INFO  ⚡ FAST-PATH explicit ref: John 3:17
+2026-10-03 23:46:35,609 INFO  VERSE_DELIVERY {"candidate_id": "625d03a3fa99", "reference": "John 3:17", "source": "FAST-PATH", "stream": "primary", "language": "en", "timestamp": "2026-10-04T04:46:35.609123+00:00", "stage": "browser_command", "outcome": "DELIVERY_REQUESTED", "reason": "Setting reference and clicking PRESENT", "adapter": "verseview11"}
+2026-10-03 23:46:35,618 INFO  VERSE_DELIVERY {"candidate_id": "625d03a3fa99", "reference": "John 3:17", "source": "FAST-PATH", "stream": "primary", "language": "en", "timestamp": "2026-10-04T04:46:35.618144+00:00", "stage": "browser_command", "outcome": "COMMAND_ACCEPTED", "reason": "Browser executed PRESENT click; visible presentation is unverified", "adapter": "verseview11"}
+2026-10-03 23:46:35,618 INFO  ✅ COMMAND ACCEPTED: John 3:17
+2026-10-03 23:46:35,624 INFO  📌 SERMON ANCHOR updated: John 3:17
+2026-10-03 23:46:35,625 ERROR Discord failed: Invalid URL '': No scheme supplied. Perhaps you meant https://?
+2026-10-03 23:46:50,925 INFO  📝 [TEST-REPLAY] John chapter three verse seventeen
+2026-10-03 23:46:50,925 INFO  VERSE_DELIVERY {"candidate_id": "a443c38b94e7", "reference": "John 3:17", "source": "FAST-PATH", "stream": "primary", "language": "en", "timestamp": "2026-10-04T04:46:50.925815+00:00", "stage": "candidate", "outcome": "DETECTED", "reason": "Reference candidate produced for delivery"}
+2026-10-03 23:46:50,926 INFO  ⚡ FAST-PATH explicit ref: John 3:17
+2026-10-03 23:46:50,927 INFO  🔁 Suppressed duplicate: John 3:17 (within 20s window, 15.3s elapsed)
+2026-10-03 23:46:50,927 INFO  VERSE_DELIVERY {"candidate_id": "a443c38b94e7", "reference": "John 3:17", "source": "FAST-PATH", "stream": "primary", "language": "en", "timestamp": "2026-10-04T04:46:50.927556+00:00", "stage": "dedup", "outcome": "SUPPRESSED", "reason": "Previously accepted reference is within exact-reference cooldown", "adapter": "verseview11", "guard": "exact_reference_dedup", "cooldown_remaining_s": 4.6778388023376465}
+2026-10-03 23:46:58,761 INFO  📝 [TEST-REPLAY] verse eighteen
+2026-10-03 23:46:58,788 INFO  🔍 CONTEXTUAL: John 3:18 (75% Acc) [anchor=John 3, floor rule: bypassed: explicit verse keyword + active sermon anchor (John 3) — same-chapter backreference allowed]
+2026-10-03 23:46:58,791 INFO  VERSE_DELIVERY {"candidate_id": "ab28b741c172", "reference": "John 3:18", "source": "CONTEXTUAL", "stream": "primary", "language": "en", "timestamp": "2026-10-04T04:46:58.791455+00:00", "stage": "candidate", "outcome": "DETECTED", "reason": "Reference candidate produced for delivery"}
+2026-10-03 23:46:58,792 INFO  VERSE_DELIVERY {"candidate_id": "ab28b741c172", "reference": "John 3:18", "source": "CONTEXTUAL", "stream": "primary", "language": "en", "timestamp": "2026-10-04T04:46:58.792030+00:00", "stage": "manual_confirm", "outcome": "MANUAL_CONFIRM_REQUIRED", "reason": "Confidence below threshold", "adapter": "verseview11", "guard": "CONFIDENCE_THRESHOLD", "confidence": 0.75, "threshold": 0.9}
+2026-10-03 23:46:58,792 INFO  🤔 Holding for manual confirmation: John 3:18 (Confidence: 75%)
+2026-10-03 23:47:25,694 INFO  VERSE_DELIVERY {"candidate_id": "ab28b741c172", "reference": "John 3:18", "source": "CONTEXTUAL", "stream": "primary", "language": "en", "timestamp": "2026-10-04T04:47:25.693659+00:00", "stage": "browser_command", "outcome": "DELIVERY_REQUESTED", "reason": "Setting reference and clicking PRESENT", "adapter": "verseview11"}
+2026-10-03 23:47:25,715 INFO  VERSE_DELIVERY {"candidate_id": "ab28b741c172", "reference": "John 3:18", "source": "CONTEXTUAL", "stream": "primary", "language": "en", "timestamp": "2026-10-04T04:47:25.715847+00:00", "stage": "browser_command", "outcome": "COMMAND_ACCEPTED", "reason": "Browser executed PRESENT click; visible presentation is unverified", "adapter": "verseview11"}
+2026-10-03 23:47:25,716 INFO  ✅ COMMAND ACCEPTED: John 3:18
+2026-10-03 23:47:25,737 INFO  📌 SERMON ANCHOR updated: John 3:18
+2026-10-03 23:47:25,738 ERROR Discord failed: Invalid URL '': No scheme supplied. Perhaps you meant https://?
+2026-10-03 23:47:43,635 INFO  📝 [TEST-REPLAY] verses nineteen through twenty
+2026-10-03 23:47:43,638 INFO  📋 RANGE_DETECTED (suppressed): verses 19 through 20
+2026-10-03 23:47:43,640 INFO  🔍 CONTEXTUAL: John 3:19 (100% Acc) [anchor=John 3, floor rule: passed normally]
+2026-10-03 23:47:43,654 INFO  VERSE_DELIVERY {"candidate_id": "9aa405b7bbc7", "reference": "John 3:19", "source": "CONTEXTUAL", "stream": "primary", "language": "en", "timestamp": "2026-10-04T04:47:43.654075+00:00", "stage": "candidate", "outcome": "DETECTED", "reason": "Reference candidate produced for delivery"}
+2026-10-03 23:47:43,654 INFO  ⏳ Verification pending for: John 3:19 (Heard once...)
+2026-10-03 23:47:43,655 INFO  VERSE_DELIVERY {"candidate_id": "9aa405b7bbc7", "reference": "John 3:19", "source": "CONTEXTUAL", "stream": "primary", "language": "en", "timestamp": "2026-10-04T04:47:43.655750+00:00", "stage": "verification", "outcome": "SUPPRESSED", "reason": "Awaiting second detection", "adapter": "verseview11", "guard": "REQUIRE_VERIFY", "match_count": 1}
+2026-10-03 23:47:43,656 INFO  VERSE_DELIVERY {"candidate_id": "37b82ec608e7", "reference": "John 3:20", "source": "QUEUE", "stream": "primary", "language": "en", "timestamp": "2026-10-04T04:47:43.656124+00:00", "stage": "candidate", "outcome": "DETECTED", "reason": "Reference candidate produced for delivery"}
+2026-10-03 23:47:43,656 INFO  VERSE_DELIVERY {"candidate_id": "37b82ec608e7", "reference": "John 3:20", "source": "QUEUE", "stream": "primary", "language": "en", "timestamp": "2026-10-04T04:47:43.656214+00:00", "stage": "fetch", "outcome": "QUEUED", "reason": "Range continuation awaiting verse text", "queue_length": 1}
+2026-10-03 23:47:43,838 INFO  VERSE_DELIVERY {"candidate_id": "37b82ec608e7", "reference": "John 3:20", "source": "QUEUE", "stream": "primary", "language": "en", "timestamp": "2026-10-04T04:47:43.838172+00:00", "stage": "range_queue", "outcome": "QUEUED", "reason": "Releases when spoken excerpt semantically matches verse", "queue_length": 1, "expires_after_s": 180, "semantic_client_available": false}
+2026-10-03 23:47:51,316 INFO  📝 [TEST-REPLAY] verses twenty one through twenty two
+2026-10-03 23:47:51,317 INFO  🔍 CONTEXTUAL: John 3:21 (100% Acc) [anchor=John 3, floor rule: passed normally]
+2026-10-03 23:47:51,318 INFO  VERSE_DELIVERY {"candidate_id": "1552f6d9dfcb", "reference": "John 3:21", "source": "CONTEXTUAL", "stream": "primary", "language": "en", "timestamp": "2026-10-04T04:47:51.317990+00:00", "stage": "candidate", "outcome": "DETECTED", "reason": "Reference candidate produced for delivery"}
+2026-10-03 23:47:51,318 INFO  ⏳ Verification pending for: John 3:21 (Heard once...)
+2026-10-03 23:47:51,328 INFO  VERSE_DELIVERY {"candidate_id": "1552f6d9dfcb", "reference": "John 3:21", "source": "CONTEXTUAL", "stream": "primary", "language": "en", "timestamp": "2026-10-04T04:47:51.328533+00:00", "stage": "verification", "outcome": "SUPPRESSED", "reason": "Awaiting second detection", "adapter": "verseview11", "guard": "REQUIRE_VERIFY", "match_count": 1}
+2026-10-03 23:47:51,328 INFO  VERSE_DELIVERY {"candidate_id": "37b82ec608e7", "reference": "John 3:20", "source": "QUEUE", "stream": "primary", "language": "en", "timestamp": "2026-10-04T04:47:51.328751+00:00", "stage": "range_queue", "outcome": "CANCELLED", "reason": "Replaced by new verse range"}
+2026-10-03 23:47:51,328 INFO  VERSE_DELIVERY {"candidate_id": "0e9ff666a541", "reference": "John 3:22", "source": "QUEUE", "stream": "primary", "language": "en", "timestamp": "2026-10-04T04:47:51.328957+00:00", "stage": "candidate", "outcome": "DETECTED", "reason": "Reference candidate produced for delivery"}
+2026-10-03 23:47:51,329 INFO  VERSE_DELIVERY {"candidate_id": "0e9ff666a541", "reference": "John 3:22", "source": "QUEUE", "stream": "primary", "language": "en", "timestamp": "2026-10-04T04:47:51.329018+00:00", "stage": "fetch", "outcome": "QUEUED", "reason": "Range continuation awaiting verse text", "queue_length": 1}
+2026-10-03 23:47:51,458 INFO  VERSE_DELIVERY {"candidate_id": "0e9ff666a541", "reference": "John 3:22", "source": "QUEUE", "stream": "primary", "language": "en", "timestamp": "2026-10-04T04:47:51.458533+00:00", "stage": "range_queue", "outcome": "QUEUED", "reason": "Releases when spoken excerpt semantically matches verse", "queue_length": 1, "expires_after_s": 180, "semantic_client_available": false}
+2026-10-03 23:49:02,282 INFO  📝 [TEST-REPLAY] Romans chapter eight verse one
+2026-10-03 23:49:02,283 INFO  VERSE_DELIVERY {"candidate_id": "7a5cb712fa34", "reference": "Romans 8:1", "source": "FAST-PATH", "stream": "primary", "language": "en", "timestamp": "2026-10-04T04:49:02.283020+00:00", "stage": "candidate", "outcome": "DETECTED", "reason": "Reference candidate produced for delivery"}
+2026-10-03 23:49:02,283 INFO  ⚡ FAST-PATH explicit ref: Romans 8:1
+2026-10-03 23:49:02,284 INFO  Connecting to VerseView at http://127.0.0.1:59999/control.html...
+2026-10-03 23:49:02,298 INFO  ChromeDriver loaded from cache (no CDN check): /Users/kevinanil/.wdm/drivers/chromedriver/mac-arm64/153.0.8010.52/chromedriver-mac-arm64/chromedriver
+2026-10-03 23:49:03,296 ERROR VerseView connection failed: Message: unknown error: net::ERR_CONNECTION_REFUSED
+  (Session info: chrome=154.0.8037.93)
+Stacktrace:
+0   chromedriver                        0x00000001047972c4 chromedriver + 3519172
+1   chromedriver                        0x0000000104480b90 chromedriver + 281488
+2   chromedriver                        0x000000010447e1b0 chromedriver + 270768
+3   chromedriver                        0x000000010447126c chromedriver + 217708
+4   chromedriver                        0x0000000104472c18 chromedriver + 224280
+5   chromedriver                        0x00000001044716e4 chromedriver + 218852
+6   chromedriver                        0x0000000104470ed0 chromedriver + 216784
+7   chromedriver                        0x0000000104470bc0 chromedriver + 216000
+8   chromedriver                        0x000000010446e9c0 chromedriver + 207296
+9   chromedriver                        0x000000010446f460 chromedriver + 210016
+10  chromedriver                        0x000000010448406c chromedriver + 295020
+11  chromedriver                        0x000000010450a0c0 chromedriver + 843968
+12  chromedriver                        0x00000001045095f0 chromedriver + 841200
+13  chromedriver                        0x00000001044bef2c chromedriver + 536364
+14  chromedriver                        0x00000001047661b8 chromedriver + 3318200
+15  chromedriver                        0x0000000104769454 chromedriver + 3331156
+16  chromedriver                        0x000000010474fd08 chromedriver + 3226888
+17  chromedriver                        0x0000000104769d14 chromedriver + 3333396
+18  chromedriver                        0x0000000104743858 chromedriver + 3176536
+19  chromedriver                        0x00000001047857e0 chromedriver + 3446752
+20  chromedriver                        0x0000000104785940 chromedriver + 3447104
+21  chromedriver                        0x0000000104796f68 chromedriver + 3518312
+22  libsystem_pthread.dylib             0x000000018081dc54 _pthread_start + 132
+23  libsystem_pthread.dylib             0x0000000180818c18 thread_start + 4
+
+2026-10-03 23:49:03,371 INFO  VERSE_DELIVERY {"candidate_id": "7a5cb712fa34", "reference": "Romans 8:1", "source": "FAST-PATH", "stream": "primary", "language": "en", "timestamp": "2026-10-04T04:49:03.371199+00:00", "stage": "controller", "outcome": "DELIVERY_FAILED", "reason": "Controller connection failed", "adapter": "verseview11", "controller_state": "unavailable"}
+2026-10-03 23:49:11,608 INFO  📝 [TEST-REPLAY] Romans chapter eight verse one
+2026-10-03 23:49:11,609 INFO  VERSE_DELIVERY {"candidate_id": "a523faba058d", "reference": "Romans 8:1", "source": "FAST-PATH", "stream": "primary", "language": "en", "timestamp": "2026-10-04T04:49:11.609504+00:00", "stage": "candidate", "outcome": "DETECTED", "reason": "Reference candidate produced for delivery"}
+2026-10-03 23:49:11,609 INFO  ⚡ FAST-PATH explicit ref: Romans 8:1
+2026-10-03 23:49:11,610 INFO  Connecting to VerseView at http://127.0.0.1:50010/control.html...
+2026-10-03 23:49:11,627 INFO  ChromeDriver loaded from cache (no CDN check): /Users/kevinanil/.wdm/drivers/chromedriver/mac-arm64/153.0.8010.52/chromedriver-mac-arm64/chromedriver
+2026-10-03 23:49:12,258 INFO  ✅ [VersionDetector] Detected VerseVIEW version: verseview11 (title: "VerseVIEW Remote 11.0.0")
+2026-10-03 23:49:27,563 INFO  Found Bible ref input: #remote_bibleRefID
+2026-10-03 23:49:27,590 INFO  Found PRESENT button: remote_bible_present
+2026-10-03 23:49:27,601 INFO  Connected to VerseView (headless mode) — version: verseview11
+2026-10-03 23:49:27,603 INFO  VERSE_DELIVERY {"candidate_id": "a523faba058d", "reference": "Romans 8:1", "source": "FAST-PATH", "stream": "primary", "language": "en", "timestamp": "2026-10-04T04:49:27.603019+00:00", "stage": "browser_command", "outcome": "DELIVERY_REQUESTED", "reason": "Setting reference and clicking PRESENT", "adapter": "verseview11"}
+2026-10-03 23:49:27,616 INFO  VERSE_DELIVERY {"candidate_id": "a523faba058d", "reference": "Romans 8:1", "source": "FAST-PATH", "stream": "primary", "language": "en", "timestamp": "2026-10-04T04:49:27.616208+00:00", "stage": "browser_command", "outcome": "COMMAND_ACCEPTED", "reason": "Browser executed PRESENT click; visible presentation is unverified", "adapter": "verseview11"}
+2026-10-03 23:49:27,616 INFO  ✅ COMMAND ACCEPTED: Romans 8:1
+2026-10-03 23:49:27,621 INFO  📎 XREF ANCHOR set: Romans 8:1  — sermon anchor stays: John 3:18  — contextual 'verse N' will resolve against sermon anchor
+2026-10-03 23:49:27,621 ERROR Discord failed: Invalid URL '': No scheme supplied. Perhaps you meant https://?
+2026-10-03 23:51:31,358 INFO  VERSE_DELIVERY {"candidate_id": "0e9ff666a541", "reference": "John 3:22", "source": "QUEUE", "stream": "primary", "language": "en", "timestamp": "2026-10-04T04:51:31.358608+00:00", "stage": "range_queue", "outcome": "EXPIRED", "reason": "Exceeded 3 minute wait"}
+2026-10-03 23:51:31,359 INFO  📝 [TEST-REPLAY] Romans chapter eight verse one
+2026-10-03 23:51:31,360 INFO  VERSE_DELIVERY {"candidate_id": "ad939211c79b", "reference": "Romans 8:1", "source": "FAST-PATH", "stream": "primary", "language": "en", "timestamp": "2026-10-04T04:51:31.360608+00:00", "stage": "candidate", "outcome": "DETECTED", "reason": "Reference candidate produced for delivery"}
+2026-10-03 23:51:31,361 INFO  ⚡ FAST-PATH explicit ref: Romans 8:1
+2026-10-03 23:51:31,369 INFO  VERSE_DELIVERY {"candidate_id": "ad939211c79b", "reference": "Romans 8:1", "source": "FAST-PATH", "stream": "primary", "language": "en", "timestamp": "2026-10-04T04:51:31.369111+00:00", "stage": "browser_command", "outcome": "DELIVERY_REQUESTED", "reason": "Setting reference and clicking PRESENT", "adapter": "verseview11"}
+2026-10-03 23:51:31,380 INFO  VERSE_DELIVERY {"candidate_id": "ad939211c79b", "reference": "Romans 8:1", "source": "FAST-PATH", "stream": "primary", "language": "en", "timestamp": "2026-10-04T04:51:31.380140+00:00", "stage": "browser_command", "outcome": "COMMAND_ACCEPTED", "reason": "Browser executed PRESENT click; visible presentation is unverified", "adapter": "verseview11"}
+2026-10-03 23:51:31,380 INFO  ✅ COMMAND ACCEPTED: Romans 8:1
+2026-10-03 23:51:31,388 INFO  📎 XREF ANCHOR set: Romans 8:1  — sermon anchor stays: John 3:18  — contextual 'verse N' will resolve against sermon anchor
+2026-10-03 23:51:31,388 ERROR Discord failed: Invalid URL '': No scheme supplied. Perhaps you meant https://?

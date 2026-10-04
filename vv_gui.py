@@ -102,6 +102,8 @@ class GUILogHandler(logging.Handler):
 
 
     def emit(self, record):
+        if getattr(record, "vv_delivery_event", False):
+            return  # polled by the bounded diagnostics panel on the Tk thread
         # Decide pane routing from an EXPLICIT, immutable per-stream identifier —
         # never by parsing the visible "[PRI-…]/[SEC-…]" text, and never by an
         # implicit thread/task context:
@@ -380,7 +382,9 @@ class VerseViewApp(ctk.CTk):
         mid = ctk.CTkFrame(left, fg_color="transparent")
         mid.grid(row=1, column=0, padx=PAD_M, pady=(0, PAD_M), sticky="nsew")
         mid.grid_columnconfigure(0, weight=1)
-        mid.grid_rowconfigure(0, weight=self._sugg_top_weight)      # transcript/history — grows
+        # Keep both history headers and several transcript lines visible when
+        # the default window shrinks the weighted rows around diagnostics.
+        mid.grid_rowconfigure(0, weight=self._sugg_top_weight, minsize=200)
         mid.grid_rowconfigure(1, weight=0)                           # divider — fixed
         mid.grid_rowconfigure(2, weight=self._sugg_bottom_weight)    # Suggestions — grows
         self._sugg_split_container = mid
@@ -574,6 +578,16 @@ class VerseViewApp(ctk.CTk):
         # divider above. It is entirely separate from the primary/secondary
         # transcript panes in split_frame — it never touches log_box / _sec_log_box.
         self._build_suggestions_panel(mid)
+
+        diagnostics = ctk.CTkFrame(mid, fg_color=COL_INSET)
+        diagnostics.grid(row=3, column=0, sticky="ew", pady=(PAD_S, 0))
+        ctk.CTkLabel(diagnostics, text="Verse Delivery Diagnostics",
+                     font=self._f(FS_SMALL, "bold")).pack(anchor="w", padx=PAD_S)
+        self._delivery_diag_box = ctk.CTkTextbox(diagnostics, height=90, state="disabled",
+                                                font=ctk.CTkFont(size=10))
+        self._delivery_diag_box.pack(fill="x", padx=PAD_S, pady=(0, PAD_S))
+        self._delivery_diag_snapshot = []
+        self.after(500, self._update_delivery_diagnostics)
 
         # ── ACTION BUTTONS ROW ──
         action_frame = ctk.CTkFrame(left, fg_color="transparent")
@@ -2646,6 +2660,23 @@ class VerseViewApp(ctk.CTk):
             self._sec_log_box.delete("1.0", "end")
             self._sec_log_box.configure(state="disabled")
 
+    def _update_delivery_diagnostics(self):
+        events = engine.get_delivery_events()[-80:]
+        if events != self._delivery_diag_snapshot:
+            self._delivery_diag_snapshot = events
+            box = self._delivery_diag_box
+            at_bottom = box.yview()[1] >= 0.99
+            box.configure(state="normal")
+            box.delete("1.0", "end")
+            for event in events:
+                box.insert("end", f"{event['candidate_id']} {event['reference'] or '—'} "
+                           f"[{event['source']}/{event['stream']}] "
+                           f"{event['stage']} {event['outcome']}: {event['reason']}\n")
+            if at_bottom:
+                box.see("end")
+            box.configure(state="disabled")
+        self.after(500, self._update_delivery_diagnostics)
+
 
     def _lang_code(self) -> str:
         return {
@@ -4089,9 +4120,12 @@ class VerseViewApp(ctk.CTk):
                          "VerseView is not connected.\nStart the engine first.")
             return
         try:
-            engine.deliver_verse(ref, ctrl, bypass_cooldown=True,
-                                 confidence=1.0, source="WATCHER-MANUAL")
-            self._append_log(f"💡 Suggestion sent: {ref}")
+            accepted = engine.deliver_verse(ref, ctrl, bypass_cooldown=True,
+                                           confidence=1.0, source="WATCHER-MANUAL")
+            if not accepted:
+                self._append_log(f"💡 Suggestion pending or blocked: {ref} — see Verse Delivery Diagnostics")
+                return
+            self._append_log(f"💡 Suggestion command accepted: {ref}")
             # Keep engine context + history in sync, mirroring _send_chapter_verse.
             try:
                 parts = ref.split()

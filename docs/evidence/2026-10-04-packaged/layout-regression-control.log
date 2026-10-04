@@ -1,0 +1,17 @@
+2026-10-04 00:15:24,998 INFO  🔒 SSL CA bundle: /Users/kevinanil/Library/Python/3.13/lib/python/site-packages/certifi/cacert.pem
+test_compact_layout_keeps_transcript_and_history_room (test_delivery.DeliveryTests.test_compact_layout_keeps_transcript_and_history_room) ... FAIL
+
+======================================================================
+FAIL: test_compact_layout_keeps_transcript_and_history_room (test_delivery.DeliveryTests.test_compact_layout_keeps_transcript_and_history_room)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/kevinanil/VerseView-Detector/tests/test_delivery.py", line 641, in test_compact_layout_keeps_transcript_and_history_room
+    self.assertGreaterEqual(top.winfo_height(), 160)
+    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 68 not greater than or equal to 160
+
+----------------------------------------------------------------------
+Ran 1 test in 0.231s
+
+FAILED (failures=1)
+Negative control reproduced: the same geometry check fails without the minimum transcript height.

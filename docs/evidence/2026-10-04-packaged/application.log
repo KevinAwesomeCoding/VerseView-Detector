@@ -1,0 +1,154 @@
+2026-10-04 00:07:46,053 INFO  🔒 SSL CA bundle: /Users/kevinanil/VerseView-Detector/dist/verification-20261004/VerseView Detector Test.app/Contents/Frameworks/certifi/cacert.pem
+2026-10-04 00:09:19,936 INFO  🔒 SSL CA bundle: /Users/kevinanil/VerseView-Detector/dist/verification-20261004/VerseView Detector Test.app/Contents/Frameworks/certifi/cacert.pem
+2026-10-04 00:12:07,473 INFO  🔒 SSL CA bundle: /Users/kevinanil/VerseView-Detector/dist/verification-20261004/VerseView Detector Test.app/Contents/Frameworks/certifi/cacert.pem
+2026-10-04 07:39:38,189 INFO  📌 Context reset for new session
+2026-10-04 07:39:38,192 INFO  🔍 Verse LLM          : Groq  llama-3.1-8b-instant
+2026-10-04 07:39:38,192 INFO  📋 Live Outline LLM   : Cerebras  gpt-oss-120b
+2026-10-04 07:39:38,193 INFO  ✍️  Sermon Summary LLM : Mistral  mistral-large-latest
+2026-10-04 07:39:38,196 INFO  🖥️ Local LLM          : ON but no role routed to it — cloud providers used as normal.
+2026-10-04 07:39:38,196 INFO  🎸 Worship Mode       : OFF
+2026-10-04 07:39:38,197 INFO  📖 Scripture-Read Mode: STANDBY (auto-triggered by speech)
+2026-10-04 07:39:38,197 INFO  🔣 Spoken Numeral Mode: OFF
+2026-10-04 07:39:38,198 INFO  📋 Live Points: OFF
+2026-10-04 07:39:38,198 INFO  🔭 Contextual Verse Watcher : OFF (disabled in settings)
+2026-10-04 07:39:38,238 INFO  🚨 macOS: use Shift+Escape in the app window
+2026-10-04 07:39:38,365 WARNING ⚠️ Cerebras startup ping returned status 402: {"message":"Payment required to access this resource. Visit your billing tab.","type":"payment_required_error","param":"quota","code":"payment_required"}
+2026-10-04 07:39:38,556 INFO  🧹 ChromeDriver 153 does not match installed Chrome 154 — clearing cache and re-fetching
+2026-10-04 07:39:38,556 INFO  Connection attempt 1/5...
+2026-10-04 07:39:38,599 INFO  Connecting to VerseView at http://127.0.0.1:50010/control.html...
+2026-10-04 07:39:38,600 INFO  ====== WebDriver manager ======
+2026-10-04 07:39:38,788 INFO  Get LATEST chromedriver version for google-chrome
+2026-10-04 07:39:38,871 INFO  There is no [mac-arm64] chromedriver "154.0.8037.92" for browser google-chrome "154.0.8037" in cache
+2026-10-04 07:39:38,964 INFO  There is no [mac-arm64] chromedriver "154.0.8037.92" for browser google-chrome "154.0.8037" in cache
+2026-10-04 07:39:38,965 INFO  Get LATEST chromedriver version for google-chrome
+2026-10-04 07:39:39,113 INFO  WebDriver version 154.0.8037.92 selected
+2026-10-04 07:39:39,134 INFO  Modern chrome version https://storage.googleapis.com/chrome-for-testing-public/154.0.8037.92/mac-arm64/chromedriver-mac-arm64.zip
+2026-10-04 07:39:39,136 INFO  About to download new driver from https://storage.googleapis.com/chrome-for-testing-public/154.0.8037.92/mac-arm64/chromedriver-mac-arm64.zip
+2026-10-04 07:39:39,265 INFO  Driver downloading response is 200
+2026-10-04 07:39:39,955 INFO  Driver has been saved in cache [/Users/kevinanil/.wdm/drivers/chromedriver/mac-arm64/154.0.8037.92]
+2026-10-04 07:39:39,955 INFO  ChromeDriver freshly downloaded: /Users/kevinanil/.wdm/drivers/chromedriver/mac-arm64/154.0.8037.92/chromedriver-mac-arm64/chromedriver
+2026-10-04 07:39:41,191 INFO  ✅ [VersionDetector] Detected VerseVIEW version: verseview11 (title: "VerseVIEW Remote 11.0.0")
+2026-10-04 07:39:56,489 INFO  Found Bible ref input: #remote_bibleRefID
+2026-10-04 07:39:56,515 INFO  Found PRESENT button: remote_bible_present
+2026-10-04 07:39:56,533 INFO  Connected to VerseView (headless mode) — version: verseview11
+2026-10-04 07:39:58,422 INFO  [bridge] Bot bridge listening on http://127.0.0.1:50011
+2026-10-04 07:39:58,423 INFO  Bot bridge started — controller injected
+2026-10-04 07:39:58,450 INFO  ============================================================
+2026-10-04 07:39:58,483 INFO  🚀 VerseView Live Started
+2026-10-04 07:39:58,484 INFO     Engine: Deepgram
+2026-10-04 07:39:58,505 INFO  ============================================================
+2026-10-04 07:39:58,506 INFO  🎤 Starting primary STT via deepgram
+2026-10-04 07:39:58,525 INFO  Using: [2] MacBook Air Microphone
+2026-10-04 07:40:01,777 INFO  Microphone opened
+2026-10-04 07:40:02,066 INFO  🎤 [PRI-DG] Language: EN | Model: NOVA-3
+2026-10-04 07:40:02,070 INFO  Connected to Deepgram WebSocket [PRI-DG]
+2026-10-04 07:40:02,073 INFO  Press Stop to end
+2026-10-04 07:40:58,535 INFO  ⏱️ Auto-stopped: 60s audio inactivity detected
+2026-10-04 07:40:58,629 WARNING WebSocket closed [PRI-DG]: sent 1011 (internal error); then received 1011 (internal error)
+2026-10-04 07:40:59,229 WARNING ⚠️ [PRI-DG] websocket send error (ConnectionClosedError) — stopping sender
+2026-10-04 07:40:59,328 INFO  VerseView connection closed
+2026-10-04 07:40:59,328 INFO  📊 LLM calls: 0
+2026-10-04 07:40:59,329 INFO  Shutdown complete
+2026-10-04 07:42:31,109 INFO  🔒 SSL CA bundle: /Users/kevinanil/VerseView-Detector/dist/verification-20261004/VerseView Detector Test.app/Contents/Frameworks/certifi/cacert.pem
+2026-10-04 07:47:44,187 INFO  🔒 SSL CA bundle: /Users/kevinanil/VerseView-Detector/dist/verification-20261004/VerseView Detector Test.app/Contents/Frameworks/certifi/cacert.pem
+2026-10-04 07:47:48,573 INFO  📌 Context reset for new session
+2026-10-04 07:47:48,573 INFO  🔍 Verse LLM          : Groq  llama-3.1-8b-instant
+2026-10-04 07:47:48,573 INFO  📋 Live Outline LLM   : Cerebras  gpt-oss-120b
+2026-10-04 07:47:48,574 INFO  ✍️  Sermon Summary LLM : Mistral  mistral-large-latest
+2026-10-04 07:47:48,575 INFO  🖥️ Local LLM          : ON but no role routed to it — cloud providers used as normal.
+2026-10-04 07:47:48,575 INFO  🎸 Worship Mode       : OFF
+2026-10-04 07:47:48,576 INFO  📖 Scripture-Read Mode: STANDBY (auto-triggered by speech)
+2026-10-04 07:47:48,576 INFO  🔣 Spoken Numeral Mode: OFF
+2026-10-04 07:47:48,576 INFO  📋 Live Points: OFF
+2026-10-04 07:47:48,576 INFO  🔭 Contextual Verse Watcher : OFF (disabled in settings)
+2026-10-04 07:47:48,627 INFO  🚨 macOS: use Shift+Escape in the app window
+2026-10-04 07:47:48,741 WARNING ⚠️ Cerebras startup ping returned status 402: {"message":"Payment required to access this resource. Visit your billing tab.","type":"payment_required_error","param":"quota","code":"payment_required"}
+2026-10-04 07:47:48,848 INFO  ✅ ChromeDriver 154 matches installed Chrome 154 — using cached driver
+2026-10-04 07:47:48,849 INFO  Connection attempt 1/5...
+2026-10-04 07:47:48,893 INFO  Connecting to VerseView at http://127.0.0.1:50010/control.html...
+2026-10-04 07:47:48,894 INFO  ChromeDriver loaded from cache (no CDN check): /Users/kevinanil/.wdm/drivers/chromedriver/mac-arm64/154.0.8037.92/chromedriver-mac-arm64/chromedriver
+2026-10-04 07:47:49,613 INFO  ✅ [VersionDetector] Detected VerseVIEW version: verseview11 (title: "VerseVIEW Remote 11.0.0")
+2026-10-04 07:48:04,910 INFO  Found Bible ref input: #remote_bibleRefID
+2026-10-04 07:48:04,923 INFO  Found PRESENT button: remote_bible_present
+2026-10-04 07:48:04,934 INFO  Connected to VerseView (headless mode) — version: verseview11
+2026-10-04 07:48:04,949 INFO  [bridge] Bot bridge listening on http://127.0.0.1:50011
+2026-10-04 07:48:04,949 INFO  Bot bridge started — controller injected
+2026-10-04 07:48:04,964 INFO  ============================================================
+2026-10-04 07:48:04,977 INFO  🚀 VerseView Live Started
+2026-10-04 07:48:04,979 INFO     Engine: Deepgram
+2026-10-04 07:48:04,986 INFO  ============================================================
+2026-10-04 07:48:04,990 INFO  🎤 Starting primary STT via deepgram
+2026-10-04 07:48:05,002 INFO  Using: [2] MacBook Air Microphone
+2026-10-04 07:48:05,073 INFO  Microphone opened
+2026-10-04 07:48:05,284 INFO  🎤 [PRI-DG] Language: EN | Model: NOVA-3
+2026-10-04 07:48:05,298 INFO  Connected to Deepgram WebSocket [PRI-DG]
+2026-10-04 07:48:05,304 INFO  Press Stop to end
+2026-10-04 07:58:05,153 INFO  ⏱️ Auto-stopped: 600s audio inactivity detected
+2026-10-04 07:58:05,216 WARNING WebSocket closed [PRI-DG]: sent 1011 (internal error); then received 1011 (internal error)
+2026-10-04 07:58:05,831 WARNING ⚠️ [PRI-DG] websocket send error (ConnectionClosedError) — stopping sender
+2026-10-04 07:58:05,948 INFO  VerseView connection closed
+2026-10-04 07:58:05,948 INFO  📊 LLM calls: 0
+2026-10-04 07:58:05,949 INFO  Shutdown complete
+2026-10-04 08:34:02,265 INFO  📌 Context reset for new session
+2026-10-04 08:34:02,269 INFO  🔍 Verse LLM          : Groq  llama-3.1-8b-instant
+2026-10-04 08:34:02,270 INFO  📋 Live Outline LLM   : Cerebras  gpt-oss-120b
+2026-10-04 08:34:02,273 INFO  ✍️  Sermon Summary LLM : Mistral  mistral-large-latest
+2026-10-04 08:34:02,276 INFO  🖥️ Local LLM          : ON but no role routed to it — cloud providers used as normal.
+2026-10-04 08:34:02,277 INFO  🎸 Worship Mode       : OFF
+2026-10-04 08:34:02,278 INFO  📖 Scripture-Read Mode: STANDBY (auto-triggered by speech)
+2026-10-04 08:34:02,279 INFO  🔣 Spoken Numeral Mode: OFF
+2026-10-04 08:34:02,279 INFO  📋 Live Points: OFF
+2026-10-04 08:34:02,279 INFO  🔭 Contextual Verse Watcher : OFF (disabled in settings)
+2026-10-04 08:34:02,316 INFO  🚨 macOS: use Shift+Escape in the app window
+2026-10-04 08:34:02,423 WARNING ⚠️ Cerebras startup ping returned status 402: {"message":"Payment required to access this resource. Visit your billing tab.","type":"payment_required_error","param":"quota","code":"payment_required"}
+2026-10-04 08:34:02,456 INFO  ✅ ChromeDriver 154 matches installed Chrome 154 — using cached driver
+2026-10-04 08:34:02,458 INFO  Connection attempt 1/5...
+2026-10-04 08:34:02,458 INFO  Connecting to VerseView at http://127.0.0.1:50010/control.html...
+2026-10-04 08:34:02,466 INFO  ChromeDriver loaded from cache (no CDN check): /Users/kevinanil/.wdm/drivers/chromedriver/mac-arm64/154.0.8037.92/chromedriver-mac-arm64/chromedriver
+2026-10-04 08:34:03,319 INFO  ✅ [VersionDetector] Detected VerseVIEW version: verseview11 (title: "VerseVIEW Remote 11.0.0")
+2026-10-04 08:34:18,636 INFO  Found Bible ref input: #remote_bibleRefID
+2026-10-04 08:34:18,649 INFO  Found PRESENT button: remote_bible_present
+2026-10-04 08:34:18,659 INFO  Connected to VerseView (headless mode) — version: verseview11
+2026-10-04 08:34:18,660 INFO  [bridge] Bot bridge already running — references refreshed
+2026-10-04 08:34:18,673 INFO  Bot bridge started — controller injected
+2026-10-04 08:34:18,683 INFO  ============================================================
+2026-10-04 08:34:18,683 INFO  🚀 VerseView Live Started
+2026-10-04 08:34:18,692 INFO     Engine: Deepgram
+2026-10-04 08:34:18,692 INFO  ============================================================
+2026-10-04 08:34:18,703 INFO  🎤 Starting primary STT via deepgram
+2026-10-04 08:34:18,718 INFO  Using: [2] MacBook Air Microphone
+2026-10-04 08:34:18,761 INFO  Microphone opened
+2026-10-04 08:34:18,970 INFO  🎤 [PRI-DG] Language: EN | Model: NOVA-3
+2026-10-04 08:34:18,971 INFO  Connected to Deepgram WebSocket [PRI-DG]
+2026-10-04 08:34:18,974 INFO  Press Stop to end
+2026-10-04 08:34:28,852 INFO  📝 [PRI-DG] Let's give our attention to John chapter three verses sixteen.
+2026-10-04 08:34:28,860 INFO  VERSE_DELIVERY {"candidate_id": "f18bae740e3d", "reference": "John 3:16", "source": "FAST-PATH", "stream": "primary", "language": "en", "timestamp": "2026-10-04T13:34:28.860110+00:00", "stage": "candidate", "outcome": "DETECTED", "reason": "Reference candidate produced for delivery"}
+2026-10-04 08:34:28,861 INFO  ⚡ FAST-PATH explicit ref: John 3:16
+2026-10-04 08:34:28,869 INFO  VERSE_DELIVERY {"candidate_id": "f18bae740e3d", "reference": "John 3:16", "source": "FAST-PATH", "stream": "primary", "language": "en", "timestamp": "2026-10-04T13:34:28.869601+00:00", "stage": "browser_command", "outcome": "DELIVERY_REQUESTED", "reason": "Setting reference and clicking PRESENT", "adapter": "verseview11"}
+2026-10-04 08:34:28,888 INFO  VERSE_DELIVERY {"candidate_id": "f18bae740e3d", "reference": "John 3:16", "source": "FAST-PATH", "stream": "primary", "language": "en", "timestamp": "2026-10-04T13:34:28.888018+00:00", "stage": "browser_command", "outcome": "COMMAND_ACCEPTED", "reason": "Browser executed PRESENT click; visible presentation is unverified", "adapter": "verseview11"}
+2026-10-04 08:34:28,888 INFO  ✅ COMMAND ACCEPTED: John 3:16
+2026-10-04 08:34:28,901 INFO  📌 SERMON ANCHOR updated: John 3:16
+2026-10-04 08:34:28,901 ERROR Discord failed: Invalid URL '': No scheme supplied. Perhaps you meant https://?
+2026-10-04 08:34:33,226 INFO  📝 [PRI-DG] It says here that
+2026-10-04 08:34:51,424 INFO  📝 [PRI-DG] Let's give our attention to John chapter three verses seventeen.
+2026-10-04 08:34:51,451 INFO  VERSE_DELIVERY {"candidate_id": "1c71b4d67b84", "reference": "John 3:17", "source": "FAST-PATH", "stream": "primary", "language": "en", "timestamp": "2026-10-04T13:34:51.451802+00:00", "stage": "candidate", "outcome": "DETECTED", "reason": "Reference candidate produced for delivery"}
+2026-10-04 08:34:51,452 INFO  ⚡ FAST-PATH explicit ref: John 3:17
+2026-10-04 08:34:51,459 INFO  VERSE_DELIVERY {"candidate_id": "1c71b4d67b84", "reference": "John 3:17", "source": "FAST-PATH", "stream": "primary", "language": "en", "timestamp": "2026-10-04T13:34:51.459056+00:00", "stage": "browser_command", "outcome": "DELIVERY_REQUESTED", "reason": "Setting reference and clicking PRESENT", "adapter": "verseview11"}
+2026-10-04 08:34:51,466 INFO  VERSE_DELIVERY {"candidate_id": "1c71b4d67b84", "reference": "John 3:17", "source": "FAST-PATH", "stream": "primary", "language": "en", "timestamp": "2026-10-04T13:34:51.466562+00:00", "stage": "browser_command", "outcome": "COMMAND_ACCEPTED", "reason": "Browser executed PRESENT click; visible presentation is unverified", "adapter": "verseview11"}
+2026-10-04 08:34:51,466 INFO  ✅ COMMAND ACCEPTED: John 3:17
+2026-10-04 08:34:51,478 INFO  📌 SERMON ANCHOR updated: John 3:17
+2026-10-04 08:34:51,479 ERROR Discord failed: Invalid URL '': No scheme supplied. Perhaps you meant https://?
+2026-10-04 08:35:01,077 INFO  📝 [PRI-DG] Let's read John chapter three verses seventeen.
+2026-10-04 08:35:01,087 INFO  📖 SCRIPTURE-READ MODE ENTERED — locked to John 3 (next expected v17) lang=auto
+2026-10-04 08:35:01,093 INFO  VERSE_DELIVERY {"candidate_id": "9f037adeb504", "reference": "John 3:17", "source": "FAST-PATH", "stream": "primary", "language": "en", "timestamp": "2026-10-04T13:35:01.093621+00:00", "stage": "candidate", "outcome": "DETECTED", "reason": "Reference candidate produced for delivery"}
+2026-10-04 08:35:01,094 INFO  ⚡ FAST-PATH explicit ref: John 3:17
+2026-10-04 08:35:01,116 INFO  VERSE_DELIVERY {"candidate_id": "9f037adeb504", "reference": "John 3:17", "source": "FAST-PATH", "stream": "primary", "language": "en", "timestamp": "2026-10-04T13:35:01.116702+00:00", "stage": "dedup", "outcome": "SUPPRESSED", "reason": "Previously accepted reference is within chapter cooldown", "adapter": "verseview11", "guard": "chapter_dedup", "cooldown_remaining_s": 0.340374231338501}
+2026-10-04 08:35:11,857 INFO  📝 [PRI-DG] John chapter three verses seventeen.
+2026-10-04 08:35:11,862 INFO  VERSE_DELIVERY {"candidate_id": "b935c4606b99", "reference": "John 3:17", "source": "FAST-PATH", "stream": "primary", "language": "en", "timestamp": "2026-10-04T13:35:11.862020+00:00", "stage": "candidate", "outcome": "DETECTED", "reason": "Reference candidate produced for delivery"}
+2026-10-04 08:35:11,862 INFO  ⚡ FAST-PATH explicit ref: John 3:17
+2026-10-04 08:35:11,865 INFO  VERSE_DELIVERY {"candidate_id": "b935c4606b99", "reference": "John 3:17", "source": "FAST-PATH", "stream": "primary", "language": "en", "timestamp": "2026-10-04T13:35:11.865717+00:00", "stage": "dedup", "outcome": "SUPPRESSED", "reason": "Previously accepted reference is within configured dedup window", "adapter": "verseview11", "guard": "DEDUP_WINDOW", "cooldown_remaining_s": 39.59138798713684}
+2026-10-04 08:35:40,200 WARNING WebSocket closed [PRI-DG]: sent 1011 (internal error); then received 1011 (internal error)
+2026-10-04 08:35:40,853 WARNING ⚠️ [PRI-DG] websocket send error (ConnectionClosedError) — stopping sender
+2026-10-04 08:35:40,955 INFO  VerseView connection closed
+2026-10-04 08:35:40,958 INFO  📊 LLM calls: 0
+2026-10-04 08:35:40,959 INFO  Shutdown complete

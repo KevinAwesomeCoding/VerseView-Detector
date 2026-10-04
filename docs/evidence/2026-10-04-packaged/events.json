@@ -1,0 +1,122 @@
+[
+  {
+    "candidate_id": "f18bae740e3d",
+    "reference": "John 3:16",
+    "source": "FAST-PATH",
+    "stream": "primary",
+    "language": "en",
+    "timestamp": "2026-10-04T13:34:28.860110+00:00",
+    "stage": "candidate",
+    "outcome": "DETECTED",
+    "reason": "Reference candidate produced for delivery"
+  },
+  {
+    "candidate_id": "f18bae740e3d",
+    "reference": "John 3:16",
+    "source": "FAST-PATH",
+    "stream": "primary",
+    "language": "en",
+    "timestamp": "2026-10-04T13:34:28.869601+00:00",
+    "stage": "browser_command",
+    "outcome": "DELIVERY_REQUESTED",
+    "reason": "Setting reference and clicking PRESENT",
+    "adapter": "verseview11"
+  },
+  {
+    "candidate_id": "f18bae740e3d",
+    "reference": "John 3:16",
+    "source": "FAST-PATH",
+    "stream": "primary",
+    "language": "en",
+    "timestamp": "2026-10-04T13:34:28.888018+00:00",
+    "stage": "browser_command",
+    "outcome": "COMMAND_ACCEPTED",
+    "reason": "Browser executed PRESENT click; visible presentation is unverified",
+    "adapter": "verseview11"
+  },
+  {
+    "candidate_id": "1c71b4d67b84",
+    "reference": "John 3:17",
+    "source": "FAST-PATH",
+    "stream": "primary",
+    "language": "en",
+    "timestamp": "2026-10-04T13:34:51.451802+00:00",
+    "stage": "candidate",
+    "outcome": "DETECTED",
+    "reason": "Reference candidate produced for delivery"
+  },
+  {
+    "candidate_id": "1c71b4d67b84",
+    "reference": "John 3:17",
+    "source": "FAST-PATH",
+    "stream": "primary",
+    "language": "en",
+    "timestamp": "2026-10-04T13:34:51.459056+00:00",
+    "stage": "browser_command",
+    "outcome": "DELIVERY_REQUESTED",
+    "reason": "Setting reference and clicking PRESENT",
+    "adapter": "verseview11"
+  },
+  {
+    "candidate_id": "1c71b4d67b84",
+    "reference": "John 3:17",
+    "source": "FAST-PATH",
+    "stream": "primary",
+    "language": "en",
+    "timestamp": "2026-10-04T13:34:51.466562+00:00",
+    "stage": "browser_command",
+    "outcome": "COMMAND_ACCEPTED",
+    "reason": "Browser executed PRESENT click; visible presentation is unverified",
+    "adapter": "verseview11"
+  },
+  {
+    "candidate_id": "9f037adeb504",
+    "reference": "John 3:17",
+    "source": "FAST-PATH",
+    "stream": "primary",
+    "language": "en",
+    "timestamp": "2026-10-04T13:35:01.093621+00:00",
+    "stage": "candidate",
+    "outcome": "DETECTED",
+    "reason": "Reference candidate produced for delivery"
+  },
+  {
+    "candidate_id": "9f037adeb504",
+    "reference": "John 3:17",
+    "source": "FAST-PATH",
+    "stream": "primary",
+    "language": "en",
+    "timestamp": "2026-10-04T13:35:01.116702+00:00",
+    "stage": "dedup",
+    "outcome": "SUPPRESSED",
+    "reason": "Previously accepted reference is within chapter cooldown",
+    "adapter": "verseview11",
+    "guard": "chapter_dedup",
+    "cooldown_remaining_s": 0.340374231338501
+  },
+  {
+    "candidate_id": "b935c4606b99",
+    "reference": "John 3:17",
+    "source": "FAST-PATH",
+    "stream": "primary",
+    "language": "en",
+    "timestamp": "2026-10-04T13:35:11.862020+00:00",
+    "stage": "candidate",
+    "outcome": "DETECTED",
+    "reason": "Reference candidate produced for delivery"
+  },
+  {
+    "candidate_id": "b935c4606b99",
+    "reference": "John 3:17",
+    "source": "FAST-PATH",
+    "stream": "primary",
+    "language": "en",
+    "timestamp": "2026-10-04T13:35:11.865717+00:00",
+    "stage": "dedup",
+    "outcome": "SUPPRESSED",
+    "reason": "Previously accepted reference is within configured dedup window",
+    "adapter": "verseview11",
+    "guard": "DEDUP_WINDOW",
+    "cooldown_remaining_s": 39.59138798713684
+  }
+]

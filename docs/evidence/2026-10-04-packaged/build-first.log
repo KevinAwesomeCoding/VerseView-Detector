@@ -1,0 +1,177 @@
+40 INFO: PyInstaller: 6.22.3, contrib hooks: 2026.8
+40 INFO: Python: 3.13.15
+52 INFO: Platform: macOS-26.5.1-arm64-arm-64bit-Mach-O
+52 INFO: Python environment: /private/tmp/verseview-package-build-20261004
+54 INFO: Removing temporary files and cleaning cache in /Users/kevinanil/Library/Application Support/pyinstaller
+3239 INFO: Module search paths (PYTHONPATH):
+['/Library/Frameworks/Python.framework/Versions/3.13/lib/python313.zip',
+ '/Library/Frameworks/Python.framework/Versions/3.13/lib/python3.13',
+ '/Library/Frameworks/Python.framework/Versions/3.13/lib/python3.13/lib-dynload',
+ '/private/tmp/verseview-package-build-20261004/lib/python3.13/site-packages',
+ '/Users/kevinanil/VerseView-Detector/dist/verification-20261004/source']
+3306 INFO: Appending 'datas' from .spec
+3307 INFO: checking Analysis
+3307 INFO: Building Analysis because Analysis-00.toc is non existent
+3307 INFO: Looking for Python shared library...
+3309 INFO: Using Python shared library: /Library/Frameworks/Python.framework/Versions/3.13/Python
+3309 INFO: Running Analysis Analysis-00.toc
+3309 INFO: Target bytecode optimization level: 0
+3309 INFO: Initializing module dependency graph...
+3310 INFO: Initializing module graph hook caches...
+3314 INFO: Analyzing modules for base_library.zip ...
+3499 INFO: Processing standard module hook 'hook-encodings.py' from '/private/tmp/verseview-package-build-20261004/lib/python3.13/site-packages/PyInstaller/hooks'
+3758 INFO: Processing standard module hook 'hook-math.py' from '/private/tmp/verseview-package-build-20261004/lib/python3.13/site-packages/PyInstaller/hooks'
+3853 INFO: Processing standard module hook 'hook-heapq.py' from '/private/tmp/verseview-package-build-20261004/lib/python3.13/site-packages/PyInstaller/hooks'
+4235 INFO: Processing standard module hook 'hook-pickle.py' from '/private/tmp/verseview-package-build-20261004/lib/python3.13/site-packages/PyInstaller/hooks'
+4692 INFO: Caching module dependency graph...
+4705 INFO: Analyzing /Users/kevinanil/VerseView-Detector/dist/verification-20261004/source/vv_gui.py
+4770 INFO: Processing standard module hook 'hook-customtkinter.py' from '/private/tmp/verseview-package-build-20261004/lib/python3.13/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+4780 INFO: Processing pre-find-module-path hook 'hook-tkinter.py' from '/private/tmp/verseview-package-build-20261004/lib/python3.13/site-packages/PyInstaller/hooks/pre_find_module_path'
+4780 INFO: TclTkInfo: initializing cached Tcl/Tk info...
+4978 INFO: Processing standard module hook 'hook-_tkinter.py' from '/private/tmp/verseview-package-build-20261004/lib/python3.13/site-packages/PyInstaller/hooks'
+5013 INFO: Processing standard module hook 'hook-platform.py' from '/private/tmp/verseview-package-build-20261004/lib/python3.13/site-packages/PyInstaller/hooks'
+5035 INFO: Processing standard module hook 'hook-xml.py' from '/private/tmp/verseview-package-build-20261004/lib/python3.13/site-packages/PyInstaller/hooks'
+5048 INFO: Processing standard module hook 'hook-sysconfig.py' from '/private/tmp/verseview-package-build-20261004/lib/python3.13/site-packages/PyInstaller/hooks'
+5053 INFO: Processing standard module hook 'hook-_osx_support.py' from '/private/tmp/verseview-package-build-20261004/lib/python3.13/site-packages/PyInstaller/hooks'
+5055 INFO: Processing standard module hook 'hook-_ctypes.py' from '/private/tmp/verseview-package-build-20261004/lib/python3.13/site-packages/PyInstaller/hooks'
+5057 INFO: Processing pre-safe-import-module hook 'hook-packaging.py' from '/private/tmp/verseview-package-build-20261004/lib/python3.13/site-packages/PyInstaller/hooks/pre_safe_import_module'
+5057 INFO: SetuptoolsInfo: initializing cached setuptools info...
+5198 INFO: Processing pre-safe-import-module hook 'hook-typing_extensions.py' from '/private/tmp/verseview-package-build-20261004/lib/python3.13/site-packages/PyInstaller/hooks/pre_safe_import_module'
+5293 INFO: Processing standard module hook 'hook-multiprocessing.util.py' from '/private/tmp/verseview-package-build-20261004/lib/python3.13/site-packages/PyInstaller/hooks'
+5756 INFO: Processing standard module hook 'hook-xml.etree.cElementTree.py' from '/private/tmp/verseview-package-build-20261004/lib/python3.13/site-packages/PyInstaller/hooks'
+6271 INFO: Processing standard module hook 'hook-webbrowser.py' from '/private/tmp/verseview-package-build-20261004/lib/python3.13/site-packages/PyInstaller/hooks'
+6399 INFO: Processing standard module hook 'hook-certifi.py' from '/private/tmp/verseview-package-build-20261004/lib/python3.13/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+6410 INFO: Processing standard module hook 'hook-urllib3.py' from '/private/tmp/verseview-package-build-20261004/lib/python3.13/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+6447 INFO: Processing pre-safe-import-module hook 'hook-backports.py' from '/private/tmp/verseview-package-build-20261004/lib/python3.13/site-packages/PyInstaller/hooks/pre_safe_import_module'
+6448 INFO: Setuptools: 'backports' appears to be a full setuptools-vendored copy - creating alias to 'setuptools._vendor.backports'!
+6450 INFO: Processing standard module hook 'hook-setuptools.py' from '/private/tmp/verseview-package-build-20261004/lib/python3.13/site-packages/PyInstaller/hooks'
+6454 INFO: Processing pre-safe-import-module hook 'hook-distutils.py' from '/private/tmp/verseview-package-build-20261004/lib/python3.13/site-packages/PyInstaller/hooks/pre_safe_import_module'
+6465 INFO: Processing pre-safe-import-module hook 'hook-jaraco.py' from '/private/tmp/verseview-package-build-20261004/lib/python3.13/site-packages/PyInstaller/hooks/pre_safe_import_module'
+6465 INFO: Setuptools: 'jaraco' appears to be a full setuptools-vendored copy - creating alias to 'setuptools._vendor.jaraco'!
+6469 INFO: Processing pre-safe-import-module hook 'hook-more_itertools.py' from '/private/tmp/verseview-package-build-20261004/lib/python3.13/site-packages/PyInstaller/hooks/pre_safe_import_module'
+6469 INFO: Setuptools: 'more_itertools' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.more_itertools'!
+6604 INFO: Processing standard module hook 'hook-setuptools._vendor.jaraco.text.py' from '/private/tmp/verseview-package-build-20261004/lib/python3.13/site-packages/PyInstaller/hooks'
+6604 INFO: Processing pre-safe-import-module hook 'hook-importlib_resources.py' from '/private/tmp/verseview-package-build-20261004/lib/python3.13/site-packages/PyInstaller/hooks/pre_safe_import_module'
+6910 INFO: Processing pre-safe-import-module hook 'hook-tomli.py' from '/private/tmp/verseview-package-build-20261004/lib/python3.13/site-packages/PyInstaller/hooks/pre_safe_import_module'
+6911 INFO: Setuptools: 'tomli' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.tomli'!
+7110 INFO: Processing pre-safe-import-module hook 'hook-wheel.py' from '/private/tmp/verseview-package-build-20261004/lib/python3.13/site-packages/PyInstaller/hooks/pre_safe_import_module'
+7110 INFO: Setuptools: 'wheel' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.wheel'!
+7282 INFO: Processing standard module hook 'hook-charset_normalizer.py' from '/private/tmp/verseview-package-build-20261004/lib/python3.13/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+7338 INFO: Processing standard module hook 'hook-cryptography.py' from '/private/tmp/verseview-package-build-20261004/lib/python3.13/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+7701 INFO: hook-cryptography: cryptography does not seem to be using dynamically linked OpenSSL.
+8029 INFO: Processing standard module hook 'hook-selenium.py' from '/private/tmp/verseview-package-build-20261004/lib/python3.13/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+8111 INFO: Processing standard module hook 'hook-difflib.py' from '/private/tmp/verseview-package-build-20261004/lib/python3.13/site-packages/PyInstaller/hooks'
+8139 INFO: Processing standard module hook 'hook-websockets.py' from '/private/tmp/verseview-package-build-20261004/lib/python3.13/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+8745 INFO: Processing standard module hook 'hook-pycparser.py' from '/private/tmp/verseview-package-build-20261004/lib/python3.13/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+9102 INFO: Processing standard module hook 'hook-anyio.py' from '/private/tmp/verseview-package-build-20261004/lib/python3.13/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+9434 INFO: Processing standard module hook 'hook-pydantic.py' from '/private/tmp/verseview-package-build-20261004/lib/python3.13/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+9887 INFO: Processing standard module hook 'hook-zoneinfo.py' from '/private/tmp/verseview-package-build-20261004/lib/python3.13/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+10870 INFO: Processing standard module hook 'hook-google.cloud.speech.py' from '/private/tmp/verseview-package-build-20261004/lib/python3.13/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+10872 INFO: Processing standard module hook 'hook-google.api_core.py' from '/private/tmp/verseview-package-build-20261004/lib/python3.13/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+10887 INFO: Processing standard module hook 'hook-grpc.py' from '/private/tmp/verseview-package-build-20261004/lib/python3.13/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+11514 INFO: Processing standard module hook 'hook-opentelemetry.py' from '/private/tmp/verseview-package-build-20261004/lib/python3.13/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+12709 INFO: Processing standard module hook 'hook-pynput.py' from '/private/tmp/verseview-package-build-20261004/lib/python3.13/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+15374 INFO: Processing pre-safe-import-module hook 'hook-six.moves.py' from '/private/tmp/verseview-package-build-20261004/lib/python3.13/site-packages/PyInstaller/hooks/pre_safe_import_module'
+16208 INFO: Analyzing hidden import 'selenium.webdriver.chrome.options'
+16210 INFO: Analyzing hidden import 'selenium.webdriver.chrome.webdriver'
+16216 INFO: Analyzing hidden import 'pynput.keyboard._darwin'
+16304 INFO: Analyzing hidden import 'pynput.keyboard._win32'
+16314 INFO: Analyzing hidden import 'google.api_core.bidi'
+16320 INFO: Analyzing hidden import 'google.api_core.bidi_async'
+16322 INFO: Analyzing hidden import 'google.api_core.extended_operation'
+16323 INFO: Analyzing hidden import 'google.api_core.iam'
+16325 INFO: Analyzing hidden import 'google.api_core.operations_v1.operations_client_config'
+16326 INFO: Analyzing hidden import 'google.api_core.rest_streaming_async'
+16327 INFO: Analyzing hidden import 'google.api_core.resumable_transfer'
+16351 INFO: Analyzing hidden import 'google.api_core.version_header'
+16352 INFO: Analyzing hidden import 'google.auth._credentials_async'
+16356 INFO: Analyzing hidden import 'google.auth._default_async'
+16362 INFO: Analyzing hidden import 'google.auth._jwt_async'
+16362 INFO: Analyzing hidden import 'google.auth._oauth2client'
+16363 INFO: Analyzing hidden import 'google.auth.crypt._helpers'
+16364 INFO: Analyzing hidden import 'google.auth.downscoped'
+16366 INFO: Analyzing hidden import 'google.auth.transport._aiohttp_requests'
+16370 INFO: Analyzing hidden import 'google.auth.transport._requests_base'
+16370 INFO: Analyzing hidden import 'google.auth.transport.urllib3'
+16373 INFO: Analyzing hidden import 'google.oauth2._id_token_async'
+16377 INFO: Analyzing hidden import 'google.protobuf.any'
+16377 INFO: Analyzing hidden import 'google.protobuf.api_pb2'
+16380 INFO: Analyzing hidden import 'google.protobuf.compiler'
+16380 INFO: Analyzing hidden import 'google.protobuf.compiler.plugin_pb2'
+16380 INFO: Analyzing hidden import 'google.protobuf.duration'
+16381 INFO: Analyzing hidden import 'google.protobuf.internal.json_format_benchmark'
+16429 INFO: Analyzing hidden import 'google.protobuf.internal.message_benchmark'
+16433 INFO: Analyzing hidden import 'google.protobuf.internal.testing_refleaks'
+16434 INFO: Analyzing hidden import 'google.protobuf.json_enumvalue_options_pb2'
+16435 INFO: Analyzing hidden import 'google.protobuf.json_options_pb2'
+16436 INFO: Analyzing hidden import 'google.protobuf.proto'
+16437 INFO: Analyzing hidden import 'google.protobuf.proto_builder'
+16438 INFO: Analyzing hidden import 'google.protobuf.proto_json'
+16438 INFO: Analyzing hidden import 'google.protobuf.proto_text'
+16439 INFO: Analyzing hidden import 'google.protobuf.testdata'
+16439 INFO: Analyzing hidden import 'google.protobuf.timestamp'
+16440 INFO: Analyzing hidden import 'google.protobuf.util'
+16440 INFO: Analyzing hidden import 'grpc._cython._cygrpc'
+16440 INFO: Analyzing hidden import 'grpc.beta'
+16441 INFO: Analyzing hidden import 'grpc.beta._client_adaptations'
+16455 INFO: Analyzing hidden import 'grpc.beta._server_adaptations'
+16460 INFO: Analyzing hidden import 'grpc.beta.implementations'
+16462 INFO: Analyzing hidden import 'grpc.beta.utilities'
+16464 INFO: Analyzing hidden import 'grpc.experimental.gevent'
+16465 INFO: Analyzing hidden import 'grpc.experimental.session_cache'
+16465 INFO: Analyzing hidden import 'grpc.framework.foundation.stream_util'
+16467 INFO: Analyzing hidden import 'grpc.framework.interfaces.base'
+16467 INFO: Analyzing hidden import 'grpc.framework.interfaces.base.base'
+16469 INFO: Analyzing hidden import 'grpc.framework.interfaces.base.utilities'
+16469 INFO: Analyzing hidden import 'grpc.framework.interfaces.face.utilities'
+16470 INFO: Processing module hooks (post-graph stage)...
+16521 WARNING: Hidden import "pycparser.lextab" not found!
+16521 WARNING: Hidden import "pycparser.yacctab" not found!
+16730 INFO: Processing standard module hook 'hook-_tkinter.py' from '/private/tmp/verseview-package-build-20261004/lib/python3.13/site-packages/PyInstaller/hooks'
+16775 INFO: Performing binary vs. data reclassification (313 entries)
+16811 INFO: Looking for ctypes DLLs
+16816 WARNING: Ignoring AppKit.framework/AppKit imported from /private/tmp/verseview-package-build-20261004/lib/python3.13/site-packages/darkdetect/_mac_detect.py - only basenames are supported with ctypes imports!
+16829 WARNING: Library Iphlpapi required via ctypes not found
+16838 INFO: Analyzing run-time hooks ...
+16842 INFO: Including run-time hook 'pyi_rth_inspect.py' from '/private/tmp/verseview-package-build-20261004/lib/python3.13/site-packages/PyInstaller/hooks/rthooks'
+16843 INFO: Including run-time hook 'pyi_rth_pkgutil.py' from '/private/tmp/verseview-package-build-20261004/lib/python3.13/site-packages/PyInstaller/hooks/rthooks'
+16844 INFO: Including run-time hook 'pyi_rth_multiprocessing.py' from '/private/tmp/verseview-package-build-20261004/lib/python3.13/site-packages/PyInstaller/hooks/rthooks'
+16845 INFO: Including run-time hook 'pyi_rth_setuptools.py' from '/private/tmp/verseview-package-build-20261004/lib/python3.13/site-packages/PyInstaller/hooks/rthooks'
+16845 INFO: Including run-time hook 'pyi_rth_cryptography_openssl.py' from '/private/tmp/verseview-package-build-20261004/lib/python3.13/site-packages/_pyinstaller_hooks_contrib/rthooks'
+16846 INFO: Including run-time hook 'pyi_rth__tkinter.py' from '/private/tmp/verseview-package-build-20261004/lib/python3.13/site-packages/PyInstaller/hooks/rthooks'
+16857 INFO: Creating base_library.zip...
+16865 INFO: Looking for dynamic libraries
+17055 INFO: Warnings written to /Users/kevinanil/VerseView-Detector/dist/verification-20261004/source/build/verseview/warn-verseview.txt
+17090 INFO: Graph cross-reference written to /Users/kevinanil/VerseView-Detector/dist/verification-20261004/source/build/verseview/xref-verseview.html
+17165 INFO: checking PYZ
+17165 INFO: Building PYZ because PYZ-00.toc is non existent
+17165 INFO: Building PYZ (ZlibArchive) /Users/kevinanil/VerseView-Detector/dist/verification-20261004/source/build/verseview/PYZ-00.pyz
+17881 INFO: Building PYZ (ZlibArchive) /Users/kevinanil/VerseView-Detector/dist/verification-20261004/source/build/verseview/PYZ-00.pyz completed successfully.
+17895 INFO: EXE target arch: arm64
+17895 INFO: Code signing identity: None
+17896 INFO: checking PKG
+17896 INFO: Building PKG because PKG-00.toc is non existent
+17896 INFO: Building PKG (CArchive) VerseView_Detector.pkg
+17948 INFO: Building PKG (CArchive) VerseView_Detector.pkg completed successfully.
+17948 INFO: Bootloader /private/tmp/verseview-package-build-20261004/lib/python3.13/site-packages/PyInstaller/bootloader/Darwin-64bit/runw
+17948 INFO: checking EXE
+17948 INFO: Building EXE because EXE-00.toc is non existent
+17948 INFO: Building EXE from EXE-00.toc
+17948 INFO: Copying bootloader EXE to /Users/kevinanil/VerseView-Detector/dist/verification-20261004/source/build/verseview/VerseView_Detector
+17949 INFO: Converting EXE to target arch (arm64)
+17959 INFO: Removing signature(s) from EXE
+17971 INFO: Modifying Mach-O image UUID(s) in EXE
+17978 INFO: Appending PKG archive to EXE
+17980 INFO: Fixing EXE headers for code signing
+17983 INFO: Re-signing the EXE
+18003 INFO: Building EXE from EXE-00.toc completed successfully.
+18005 INFO: checking COLLECT
+18005 INFO: Building COLLECT because COLLECT-00.toc is non existent
+18005 INFO: Building COLLECT COLLECT-00.toc
+20768 INFO: Building COLLECT COLLECT-00.toc completed successfully.
+20772 INFO: checking BUNDLE
+20772 INFO: Building BUNDLE because BUNDLE-00.toc is non existent
+20772 INFO: Building BUNDLE BUNDLE-00.toc
+22394 INFO: Signing the BUNDLE...
+22519 INFO: Building BUNDLE BUNDLE-00.toc completed successfully.
+22523 INFO: Build complete! The results are available in: /Users/kevinanil/VerseView-Detector/dist/verification-20261004/source/dist

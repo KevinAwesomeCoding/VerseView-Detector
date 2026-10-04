@@ -1,0 +1,9 @@
+{
+  "observed_at": "2026-10-04T08:44:15.335754-05:00",
+  "comparison": "Regular non-symlink files, matching original manifest collection",
+  "files_checked": 588,
+  "unchanged": true,
+  "added": [],
+  "removed": [],
+  "changed": []
+}

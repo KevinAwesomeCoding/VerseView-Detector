@@ -1,0 +1,82 @@
+"""Disposable source GUI runner; no production files/settings are changed."""
+import sys, json, pathlib, logging, threading, queue, time, hashlib
+ROOT = pathlib.Path('/Users/kevinanil/VerseView-Detector')
+DATA = pathlib.Path('/tmp/verseview-delivery-verify-20261003/evidence')
+DATA.mkdir(exist_ok=True)
+sys.path.insert(0, str(ROOT))
+original_handler = logging.FileHandler
+logging.FileHandler = lambda *a, **kw: original_handler(DATA / 'source.log', encoding='utf-8')
+import settings as cfg
+import session_state as session
+cfg._app_data_dir = lambda: DATA
+session._user_data_dir = lambda: DATA
+safe = dict(cfg.DEFAULTS)
+safe.update(remote_url='http://127.0.0.1:50010/control.html', display_screen='Display 1 (Primary)',
+            llm_enabled=False, local_llm_enabled=False, auto_save_notes=False,
+            manual_confirm=True, verify=True, cooldown=3.0, dedup_window=60, confidence=.75)
+(DATA / 'settings.json').write_text(json.dumps(safe))
+import vv_gui as gui
+import vv_streaming_master as engine
+logging.FileHandler = original_handler
+gui.VerseViewApp._populate_mics = lambda self: (setattr(self,'mic_map',{}), self.mic_menu.configure(values=['Transcript replay — no microphone']), self.mic_var.set('Transcript replay — no microphone'))
+gui.VerseViewApp._check_for_update_bg = lambda self: None
+gui.VerseViewApp._ensure_bridge = lambda self: None
+gui.VerseViewApp._update_chapter_browser_loop = lambda self: None
+app = gui.VerseViewApp()
+app.title('VerseView Detector — SOURCE DELIVERY VERIFICATION')
+engine.configure(remote_url=safe['remote_url'], language='en', cooldown=3., dedup_window=60,
+                 llm_enabled=False, manual_confirm=True, confidence=.75, verify=True,
+                 confirm_callback=app._user_confirm_callback, gui_app=app)
+ctrl = engine.VerseController()
+engine._controller = ctrl
+handler = engine.create_transcript_handler(ctrl,False,'[TEST-REPLAY]',engine.parse_eng)
+commands = queue.Queue()
+def note(kind, **fields):
+    row = dict(time=time.time(),kind=kind,**fields)
+    with (DATA/'actions.jsonl').open('a') as f: f.write(json.dumps(row)+'\n')
+    print('VERIFY '+json.dumps(row), flush=True)
+def run_command(cmd):
+    op=cmd['op']
+    note('command', **cmd)
+    if op=='connect':
+        ctrl.connect()
+        note('connected',connected=ctrl.driver is not None and ctrl.box is not None,version=ctrl.vv_version)
+    elif op=='replay':
+        handler(cmd['text'],True,{})
+        note('replay_complete',text=cmd['text'],last_sent=ctrl.last_sent)
+    elif op=='pair':
+        handler('John chapter three verse sixteen',True,{})
+        note('pair_first_complete',last_sent=ctrl.last_sent)
+        time.sleep(cmd.get('delay',5))
+        handler('John chapter three verse seventeen',True,{})
+        note('pair_second_complete',last_sent=ctrl.last_sent)
+    elif op=='config':
+        if 'confidence' in cmd: engine.CONFIDENCE_THRESHOLD=cmd['confidence']
+        if 'manual' in cmd: engine.REQUIRE_MANUAL_CONFIRM=cmd['manual']
+        note('config',confidence=engine.CONFIDENCE_THRESHOLD,manual=engine.REQUIRE_MANUAL_CONFIRM)
+    elif op=='disconnect':
+        if ctrl.driver: ctrl.driver.quit()
+        ctrl.driver=ctrl.box=ctrl.btn=None
+        engine.REMOTE_URL='http://127.0.0.1:59999/control.html'
+    elif op=='restore_target': engine.REMOTE_URL=safe['remote_url']
+    elif op=='snapshot':
+        (DATA/'events.json').write_text(json.dumps(engine.get_delivery_events(),indent=2))
+        note('snapshot',events=len(engine.get_delivery_events()),last_sent=ctrl.last_sent,
+             queue=len(engine.verse_queue),diag_state=app._delivery_diag_box.cget('state'))
+    elif op=='quit':
+        if ctrl.driver: ctrl.driver.quit()
+        app.after(0,app.destroy)
+    else: note('unknown_command')
+def reader():
+    for line in sys.stdin:
+        try: commands.put(json.loads(line))
+        except Exception as ex: note('input_error',error=type(ex).__name__)
+def pump():
+    while not commands.empty():
+        cmd=commands.get()
+        threading.Thread(target=run_command,args=(cmd,),daemon=True).start()
+    app.after(100,pump)
+threading.Thread(target=reader,daemon=True).start()
+note('source',engine=engine.__file__,gui=gui.__file__,engine_sha256=hashlib.sha256((ROOT/'vv_streaming_master.py').read_bytes()).hexdigest(),gui_sha256=hashlib.sha256((ROOT/'vv_gui.py').read_bytes()).hexdigest())
+app.after(100,pump)
+app.mainloop()

@@ -22,5 +22,8 @@ verseview.spec
 *.spec
 scratch.py
 
+# Keep the focused delivery regression suite; scratch test scripts stay ignored.
+!tests/test_delivery.py
+
 # Aider files
 .aider*

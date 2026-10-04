@@ -1,0 +1,1366 @@
+diff --git a/.gitignore b/.gitignore
+index e6e79fa..a18205e 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -22,5 +22,8 @@ verseview.spec
+ *.spec
+ scratch.py
+ 
++# Keep the focused delivery regression suite; scratch test scripts stay ignored.
++!tests/test_delivery.py
++
+ # Aider files
+ .aider*
+diff --git a/vv_gui.py b/vv_gui.py
+index bb6d94a..7ea4e97 100644
+--- a/vv_gui.py
++++ b/vv_gui.py
+@@ -102,6 +102,8 @@ class GUILogHandler(logging.Handler):
+ 
+ 
+     def emit(self, record):
++        if getattr(record, "vv_delivery_event", False):
++            return  # polled by the bounded diagnostics panel on the Tk thread
+         # Decide pane routing from an EXPLICIT, immutable per-stream identifier —
+         # never by parsing the visible "[PRI-…]/[SEC-…]" text, and never by an
+         # implicit thread/task context:
+@@ -380,7 +382,9 @@ class VerseViewApp(ctk.CTk):
+         mid = ctk.CTkFrame(left, fg_color="transparent")
+         mid.grid(row=1, column=0, padx=PAD_M, pady=(0, PAD_M), sticky="nsew")
+         mid.grid_columnconfigure(0, weight=1)
+-        mid.grid_rowconfigure(0, weight=self._sugg_top_weight)      # transcript/history — grows
++        # Keep both history headers and several transcript lines visible when
++        # the default window shrinks the weighted rows around diagnostics.
++        mid.grid_rowconfigure(0, weight=self._sugg_top_weight, minsize=200)
+         mid.grid_rowconfigure(1, weight=0)                           # divider — fixed
+         mid.grid_rowconfigure(2, weight=self._sugg_bottom_weight)    # Suggestions — grows
+         self._sugg_split_container = mid
+@@ -575,6 +579,16 @@ class VerseViewApp(ctk.CTk):
+         # transcript panes in split_frame — it never touches log_box / _sec_log_box.
+         self._build_suggestions_panel(mid)
+ 
++        diagnostics = ctk.CTkFrame(mid, fg_color=COL_INSET)
++        diagnostics.grid(row=3, column=0, sticky="ew", pady=(PAD_S, 0))
++        ctk.CTkLabel(diagnostics, text="Verse Delivery Diagnostics",
++                     font=self._f(FS_SMALL, "bold")).pack(anchor="w", padx=PAD_S)
++        self._delivery_diag_box = ctk.CTkTextbox(diagnostics, height=90, state="disabled",
++                                                font=ctk.CTkFont(size=10))
++        self._delivery_diag_box.pack(fill="x", padx=PAD_S, pady=(0, PAD_S))
++        self._delivery_diag_snapshot = []
++        self.after(500, self._update_delivery_diagnostics)
++
+         # ── ACTION BUTTONS ROW ──
+         action_frame = ctk.CTkFrame(left, fg_color="transparent")
+         action_frame.grid(row=2, column=0, padx=PAD_M, pady=(0, PAD_M), sticky="ew")
+@@ -2646,6 +2660,23 @@ class VerseViewApp(ctk.CTk):
+             self._sec_log_box.delete("1.0", "end")
+             self._sec_log_box.configure(state="disabled")
+ 
++    def _update_delivery_diagnostics(self):
++        events = engine.get_delivery_events()[-80:]
++        if events != self._delivery_diag_snapshot:
++            self._delivery_diag_snapshot = events
++            box = self._delivery_diag_box
++            at_bottom = box.yview()[1] >= 0.99
++            box.configure(state="normal")
++            box.delete("1.0", "end")
++            for event in events:
++                box.insert("end", f"{event['candidate_id']} {event['reference'] or '—'} "
++                           f"[{event['source']}/{event['stream']}] "
++                           f"{event['stage']} {event['outcome']}: {event['reason']}\n")
++            if at_bottom:
++                box.see("end")
++            box.configure(state="disabled")
++        self.after(500, self._update_delivery_diagnostics)
++
+ 
+     def _lang_code(self) -> str:
+         return {
+@@ -4089,9 +4120,12 @@ class VerseViewApp(ctk.CTk):
+                          "VerseView is not connected.\nStart the engine first.")
+             return
+         try:
+-            engine.deliver_verse(ref, ctrl, bypass_cooldown=True,
+-                                 confidence=1.0, source="WATCHER-MANUAL")
+-            self._append_log(f"💡 Suggestion sent: {ref}")
++            accepted = engine.deliver_verse(ref, ctrl, bypass_cooldown=True,
++                                           confidence=1.0, source="WATCHER-MANUAL")
++            if not accepted:
++                self._append_log(f"💡 Suggestion pending or blocked: {ref} — see Verse Delivery Diagnostics")
++                return
++            self._append_log(f"💡 Suggestion command accepted: {ref}")
+             # Keep engine context + history in sync, mirroring _send_chapter_verse.
+             try:
+                 parts = ref.split()
+diff --git a/vv_streaming_master.py b/vv_streaming_master.py
+index d0a6854..daff38f 100644
+--- a/vv_streaming_master.py
++++ b/vv_streaming_master.py
+@@ -20,6 +20,8 @@ import certifi
+ import threading
+ import datetime as _dt
+ import json
++import uuid
++from collections import deque
+ import subprocess
+ import shutil
+ import glob as _glob
+@@ -844,6 +846,49 @@ logging.basicConfig(
+ logger = logging.getLogger(__name__)
+ logger.info(f"🔒 SSL CA bundle: {certifi.where()}")
+ 
++# Safe delivery metadata only: never include transcript text or exception messages.
++_delivery_events = deque(maxlen=300)
++_delivery_events_lock = threading.Lock()
++
++
++def _delivery_event(candidate_id, ref, source, stream, stage, outcome, reason, **context):
++    event = {
++        "candidate_id": candidate_id, "reference": ref,
++        "source": source, "stream": stream or "unknown",
++        "language": (SECONDARY_LANGUAGE if stream == "secondary" else
++                     PRIMARY_LANGUAGE if stream == "primary" else "unknown"),
++        "timestamp": _dt.datetime.now(_dt.timezone.utc).isoformat(),
++        "stage": stage, "outcome": outcome, "reason": reason, **context,
++    }
++    with _delivery_events_lock:
++        _delivery_events.append(event)
++    logger.info("VERSE_DELIVERY %s", json.dumps(event, ensure_ascii=False),
++                extra={"vv_delivery_event": True})
++
++
++def get_delivery_events() -> list:
++    """Bounded, read-only snapshot for the GUI and support diagnostics."""
++    with _delivery_events_lock:
++        return [dict(event) for event in _delivery_events]
++
++
++def _delivery_candidate(ref, source, stream, candidate_id=None):
++    if candidate_id is None:
++        candidate_id = uuid.uuid4().hex[:12]
++        _delivery_event(candidate_id, ref, source, stream, "candidate", "DETECTED",
++                        "Reference candidate produced for delivery")
++    return candidate_id
++
++
++def _normalize_delivery_reference(ref):
++    match = re.fullmatch(r"(.+?)\s+(\d+)(?::(\d+))?", str(ref or "").strip())
++    if not match:
++        return None
++    book = resolve_book_eng(match[1])
++    if not book or int(match[2]) < 1 or (match[3] and int(match[3]) < 1):
++        return None
++    return f"{book} {int(match[2])}" + (f":{int(match[3])}" if match[3] else "")
++
+ 
+ # ── DISCORD LIVE LOG ──────────────────────────────────────────────────────────
+ class _DiscordLiveLog:
+@@ -1013,6 +1058,8 @@ class _DiscordLogHandler(logging.Handler):
+         return total > 0 and (ml_chars / total) > 0.35
+ 
+     def emit(self, record):
++        if getattr(record, "vv_delivery_event", False):
++            return  # local support metadata does not belong in the Discord feed
+         if not DISCORD_LOG_WEBHOOK_URL:
+             return
+         try:
+@@ -1222,6 +1269,8 @@ _vtc_trigger_words   = []
+ _vtc_timer          = None
+ _vtc_source          = "UNKNOWN"
+ _vtc_stream          = None   # STT stream role that triggered the pending VTC
++_vtc_candidate_id    = None
++_vtc_lock = threading.RLock()
+ PANIC_KEY              = "esc"
+ 
+ LIVE_POINTS_PROMPT         = ""
+@@ -2005,7 +2054,9 @@ def _handle_watcher_suggestion(sug) -> None:
+                 and sug.status == WatcherStatus.AUTO_SUGGEST
+                 and ref):
+             ctrl = _controller
+-            if ctrl is not None:
++            # Present even without a controller so the delivery boundary records
++            # the unavailable-controller outcome rather than silently losing it.
++            if ref:
+                 # Present on a daemon thread, exactly like the LLM fallback path
+                 # (llm_task): deliver_verse → send_verse does a blocking Selenium
+                 # call, so keep it OFF the engine's asyncio loop thread.
+@@ -3409,6 +3460,8 @@ def set_context(book: str, chapter: str, verse: str):
+ # ── VERSE RANGE QUEUE ─────────────────────────────────────────────────────────
+ verse_queue      = []
+ verse_queue_lock = threading.Lock()
++_queue_generation = 0
++_queue_fetching = {}
+ 
+ RANGE_RE = re.compile(
+     r'(?P<start>\d+)\s*(?:through|thru|to|and|ending\s+at|-|–)\s*(?P<end>\d+)',
+@@ -3448,48 +3501,12 @@ def fetch_verse_text(ref: str) -> str | None:
+ 
+ 
+ # ── VERSE INTERRUPT (wait for speaker to say verse, then display; 60s timeout; cancel on new ref) ─
+-def deliver_verse(ref: str, controller, bypass_cooldown=False, confidence=1.0, source="UNKNOWN", stream=None):
+-    """
+-    Deliver a detected verse: if Verse Interrupt is on, wait for the speaker to say the verse
+-    (fetch text via Bible API, listen for trigger words, 60s timeout; new ref cancels current).
+-    Otherwise send directly to controller.
+-
+-    ── HARD CONFIRMATION GATE ────────────────────────────────────────────────
+-    A verse is presented ONLY when one of these conditions is satisfied:
+-
+-      A) Source is FAST-PATH or TRANSLATION-PATH
+-            → The parser found an explicit book + chapter + verse in the
+-              transcript.  These paths already require colon notation or
+-              full spoken form; no guessing involved.
+-
+-      B) The system is in ONWARDS mode (locked sequential verse-reading)
+-            → The preacher is working through a passage verse-by-verse.
+-              The next verse is the only valid continuation, so no
+-              confirmation window is needed.
+-
+-      C) Source is QUEUE or NEXT VERSE
+-            → The verse was already confirmed and queued during a range
+-              announcement.  No re-confirmation needed.
+-
+-      D) The same reference has been independently detected ≥2 times
+-         within _GATE_WINDOW_SECS seconds
+-            → Two independent hits from the layered detectors (parser,
+-              contextual, sequential, LLM, etc.) arriving in a short
+-              window constitutes strong corroboration.
+-
+-    ALL other detections — including single-hit PARSER, CONTEXTUAL,
+-    SEQUENTIAL, READ-INTENT, RANGE, LLM — are held on the first
+-    occurrence.  No verse is guessed, no nearby verse is substituted.
+-    Prefer silence over a wrong presentation.
+-
+-    ── SYSTEM-ACTION QUARANTINE ─────────────────────────────────────────────
+-    When a manual context change, chapter-browser click, history injection,
+-    or session restore has recently occurred, a quarantine window is active.
+-    During that window all inferred detections (conditions B/D above) are
+-    additionally suppressed until fresh spoken evidence clears the quarantine.
+-    Sources that carry explicit spoken evidence (A, plus any bypass_cooldown
+-    path) are NOT affected by the quarantine.
+-    ──────────────────────────────────────────────────────────────────────────
++def deliver_verse(ref: str, controller, bypass_cooldown=False, confidence=1.0, source="UNKNOWN", stream=None, candidate_id=None):
++    """Validate and route a candidate through scripture/quarantine and interrupt gates.
++
++    Explicit, queue, LLM and watcher sources bypass quarantine as before.
++    Controller confidence, hear-twice verification, worship and cooldown gates
++    remain active. Returns True only when a browser command is accepted.
+     """
+     global _gate_pending
+ 
+@@ -3502,6 +3519,16 @@ def deliver_verse(ref: str, controller, bypass_cooldown=False, confidence=1.0, s
+     # STT streams are running.
+     if stream is None:
+         stream = _safe_stream_role()
++    ref = _normalize_delivery_reference(ref)
++    candidate_id = _delivery_candidate(ref, source, stream, candidate_id)
++    if ref is None or _reject_verse_out_of_range(ref):
++        _delivery_event(candidate_id, ref, source, stream, "validation", "INVALID",
++                        "Malformed or out-of-range reference")
++        return False
++    if controller is None:
++        _delivery_event(candidate_id, ref, source, stream, "controller", "DELIVERY_FAILED",
++                        "Controller unavailable")
++        return False
+ 
+     # ── CONTEXTUAL WATCHER: record the fast-path reference for conflict gating ──
+     # deliver_verse is the single choke point every detection source funnels
+@@ -3526,62 +3553,20 @@ def deliver_verse(ref: str, controller, bypass_cooldown=False, confidence=1.0, s
+         logger.info(f"📖 SR-GATE BLOCKED: {ref} [{source}] — outside locked passage "
+                     f"({_sr_locked_book} {_sr_locked_chapter}, expected v{_sr_expected_verse})")
+         _gate_pending.pop(ref, None)
+-        return
+-
+-    # ── GATE CONDITIONS A / B / C: always pass through ──
+-    # LLM added to bypass — the LLM path now has its own internal guards
+-    # (anchor-match suppression + hardened prompt + paraphrase-content guard)
+-    # so the external gate withholding is no longer needed.
+-    _BYPASS_SOURCES = {"FAST-PATH", "TRANSLATION-PATH", "QUEUE", "NEXT VERSE", "LLM", "WATCHER"}
+-    if source in _BYPASS_SOURCES or bypass_cooldown:
+-        # Condition A / C: explicit ref already verified upstream, or range/queue continuation
+-        # Condition B: bypass_cooldown=True is also set by ONWARDS in controller.send_verse
+-        # ── SCRIPTURE-READ: advance expected verse pointer ──────────────────
+-        if SCRIPTURE_READ_MODE and ":" in ref:
+-            try:
+-                _v = int(ref.rsplit(":", 1)[1])
+-                scripture_read_advance_expected(_v)
+-                # Exit SR mode if a clear new anchor in a DIFFERENT chapter arrives
+-                ref_chapter = ref.rsplit(":", 1)[0].split()[-1]
+-                if _sr_locked_chapter and ref_chapter != _sr_locked_chapter:
+-                    _exit_scripture_read_mode(reason="new-chapter-anchor")
+-            except (ValueError, IndexError):
+-                pass
+-        if VERSE_INTERRUPT_ENABLED:
+-            _start_vtc(ref, controller, source=source, stream=stream)
+-        else:
+-            controller.send_verse(ref, bypass_cooldown=bypass_cooldown, confidence=confidence, source=source, stream=stream)
+-        return
+-
+-    # ── SYSTEM-ACTION QUARANTINE CHECK ──
+-    # When a manual context change, chapter-browser click, history injection,
+-    # or session restore has recently occurred, a quarantine window is active.
+-    # During that window all *inferred* detections are suppressed unless fresh
+-    # spoken evidence arrives.
+-    if _in_system_quarantine(ref if ref else ""):
+-        logger.info(
+-            f"🔒 QUARANTINE BLOCKED inferred detection: {ref} [{source}] — "
+-            f"waiting for fresh spoken evidence after system action"
+-        )
+-        return
++        _delivery_event(candidate_id, ref, source, stream, "scripture_read", "SUPPRESSED",
++                        "Outside locked passage", guard="SCRIPTURE_READ_MODE")
++        return False
+ 
+-    # ── INFERRED DETECTIONS: pass straight through ──
+-    # The hard confirmation gate has been removed.  When the engine hears a
+-    # verse via PARSER, CONTEXTUAL, SEQUENTIAL, RANGE, READ-INTENT, or LLM,
+-    # it now passes directly to the display — no 45-second withholding window,
+-    # no "hear twice" requirement.  The individual detection layers have their
+-    # own guards (e.g. the LLM path has anchor-match suppression + prompt
+-    # hardening).  This makes the engine responsive: when the preacher says a
+-    # verse, it shows immediately.
+-    if SCRIPTURE_READ_MODE and ":" in ref:
+-        try:
+-            scripture_read_advance_expected(int(ref.rsplit(":", 1)[1]))
+-        except (ValueError, IndexError):
+-            pass
++    bypass_sources = {"FAST-PATH", "TRANSLATION-PATH", "QUEUE", "NEXT VERSE", "LLM", "WATCHER"}
++    if source not in bypass_sources and not bypass_cooldown and _in_system_quarantine(ref):
++        _delivery_event(candidate_id, ref, source, stream, "quarantine", "SUPPRESSED",
++                        "Waiting for fresh spoken evidence after system action",
++                        guard="CONTEXT_FLOOR_MANUAL_CONTEXT_BYPASS")
++        return False
+     if VERSE_INTERRUPT_ENABLED:
+-        _start_vtc(ref, controller, source=source, stream=stream)
+-    else:
+-        controller.send_verse(ref, bypass_cooldown=bypass_cooldown, confidence=confidence, source=source, stream=stream)
++        return _start_vtc(ref, controller, source=source, stream=stream, candidate_id=candidate_id)
++    return controller.send_verse(ref, bypass_cooldown=bypass_cooldown, confidence=confidence,
++                                 source=source, stream=stream, candidate_id=candidate_id)
+ 
+ 
+ def get_verse_history() -> list:
+@@ -3880,117 +3865,125 @@ def _stop_onwards():
+     onwards_trigger    = None
+     logger.info("⏹️ ONWARDS mode stopped")
+ 
+-def _cancel_vtc():
+-    global _vtc_pending_ref, _vtc_trigger_words, _vtc_timer, _vtc_source, _vtc_stream
+-    _vtc_source = "UNKNOWN"
+-    _vtc_stream = None
+-    if _vtc_timer:
+-        _vtc_timer.cancel()
+-    _vtc_pending_ref   = None
+-    _vtc_trigger_words = []
+-    _vtc_timer         = None
+-
+-def _start_vtc(ref, controller, source="UNKNOWN", stream=None):
+-    """Fetch verse text via Bible API, then use LLM semantic check to confirm it was spoken. New ref cancels previous."""
+-    global _vtc_pending_ref, _vtc_trigger_words, _vtc_timer, _vtc_source, _vtc_stream
+-
+-    # Which STT stream triggered this VTC — stashed so the deferred confirm-send
+-    # (which fires from a worker thread with no stream context) can still name it.
+-    _stream = stream if stream is not None else _safe_stream_role()
+-
+-    # Chapter-only refs (e.g. "John 3") have no specific verse text to match — skip VTC
++def _cancel_vtc(reason="Pending verse cancelled", outcome="CANCELLED"):
++    global _vtc_pending_ref, _vtc_trigger_words, _vtc_timer, _vtc_source, _vtc_stream, _vtc_candidate_id
++    with _vtc_lock:
++        if _vtc_candidate_id and outcome:
++            _delivery_event(_vtc_candidate_id, _vtc_pending_ref, _vtc_source, _vtc_stream,
++                            "verse_interrupt", outcome, reason)
++        if _vtc_timer:
++            _vtc_timer.cancel()
++        _vtc_pending_ref = None
++        _vtc_trigger_words = []
++        _vtc_timer = None
++        _vtc_source = "UNKNOWN"
++        _vtc_stream = None
++        _vtc_candidate_id = None
++
++
++def _start_vtc(ref, controller, source="UNKNOWN", stream=None, candidate_id=None):
++    """Reserve the candidate before fetching so replaced fetches cannot reappear."""
++    global _vtc_pending_ref, _vtc_trigger_words, _vtc_timer, _vtc_source, _vtc_stream, _vtc_candidate_id
++    stream = stream if stream is not None else _safe_stream_role()
++    candidate_id = _delivery_candidate(ref, source, stream, candidate_id)
+     if ':' not in ref:
+-        logger.debug(f"🔀 VTC skip: {ref} is chapter-only (no verse text to match)")
+-        controller.send_verse(ref, bypass_cooldown=True, source=source, stream=_stream)
+-        return
+-
+-    if _vtc_pending_ref == ref:
+-        return # Ignore duplicate detections of the same verse we are already waiting for
+-
+-    _cancel_vtc()  # void any previous pending ref (cancel-on-new-ref)
+-    _vtc_source = source
+-    _vtc_stream = _stream
+-
+-    text = fetch_verse_text(ref)
+-    if not text:
+-        # Retry once after 1s for transient API failures
+-        logger.debug(f"🔄 VTC: fetch_verse_text({ref}) returned None, retrying in 1s...")
+-        time.sleep(1.0)
++        return controller.send_verse(ref, bypass_cooldown=True, source=source,
++                                     stream=stream, candidate_id=candidate_id)
++    with _vtc_lock:
++        if _vtc_pending_ref == ref:
++            _delivery_event(candidate_id, ref, source, stream, "verse_interrupt", "SUPPRESSED",
++                            "Same reference already pending", pending_candidate_id=_vtc_candidate_id)
++            return False
++        _cancel_vtc("Replaced by new reference")
++        _vtc_pending_ref, _vtc_candidate_id = ref, candidate_id
++        _vtc_source, _vtc_stream = source, stream
++        _delivery_event(candidate_id, ref, source, stream, "verse_interrupt", "QUEUED",
++                        "Waiting for verse text, then spoken semantic match", guard="VERSE_INTERRUPT_ENABLED",
++                        expires_after_s=60, semantic_client_available=_role_has_llm("verse", groq_client, cerebras_client))
++    try:
+         text = fetch_verse_text(ref)
+-    if not text:
+-        logger.warning(f"⚠️ VTC: Could not fetch text for {ref} after retry. Sending instantly.")
+-        controller.send_verse(ref, bypass_cooldown=True, source=source, stream=_stream)
+-        return
+-
+-    _vtc_pending_ref   = ref
+-    _vtc_trigger_words = [text]  # store full verse text in trigger_words[0] for LLM check
+-    logger.info(f"🎯 VTC: Waiting to hear {ref} (semantic match)")
++        if not text:
++            time.sleep(1.0)  # existing single fetch retry
++            text = fetch_verse_text(ref)
++    except Exception as exc:
++        with _vtc_lock:
++            if _vtc_candidate_id == candidate_id:
++                _cancel_vtc("Verse text fetch raised", "DELIVERY_FAILED")
++                _delivery_event(candidate_id, ref, source, stream, "fetch", "ERROR",
++                                "Verse text fetch raised", error_type=type(exc).__name__)
++        return False
++    with _vtc_lock:
++        if _vtc_candidate_id != candidate_id:
++            return False  # replacement already recorded a terminal outcome
++        if not text:
++            _delivery_event(candidate_id, ref, source, stream, "fetch", "ERROR",
++                            "Verse text unavailable; using existing immediate-send fallback",
++                            translation=BIBLE_TRANSLATION)
++            _cancel_vtc(outcome=None)
++            return controller.send_verse(ref, bypass_cooldown=True, source=source,
++                                         stream=stream, candidate_id=candidate_id)
++        _vtc_trigger_words = [text]
++        _vtc_timer = threading.Timer(60.0, lambda: _vtc_expire(ref, candidate_id))
++        _vtc_timer.daemon = True
++        _vtc_timer.start()
++    return False
+ 
+-    # 60s expiry
+-    _vtc_timer = threading.Timer(60.0, lambda: _vtc_expire(ref))
+-    _vtc_timer.daemon = True
+-    _vtc_timer.start()
+ 
+-def _vtc_expire(ref):
+-    global _vtc_pending_ref
+-    if _vtc_pending_ref == ref:
+-        logger.info(f"⏰ VTC expired: {ref} was never spoken — cleared")
+-        _cancel_vtc()
++def _vtc_expire(ref, candidate_id=None):
++    with _vtc_lock:
++        if _vtc_pending_ref == ref and (candidate_id is None or _vtc_candidate_id == candidate_id):
++            _cancel_vtc("Verse was not matched within 60 seconds", "EXPIRED")
+ 
+ _vtc_semantic_in_flight = False
+ _vtc_last_check_time    = 0.0
+ _vtc_last_excerpt       = ""
+ 
+ def check_vtc(text, controller) -> bool:
+-    """Call this on every transcript blob. Returns True if VTC matched and sent."""
++    """Schedule a semantic worker for the current pending candidate."""
+     global _vtc_pending_ref, _vtc_semantic_in_flight, _vtc_last_excerpt, _vtc_last_check_time
+-    if not _vtc_pending_ref or not _vtc_trigger_words:
+-        return False
+-        
+-    now = time.time()
+-    if now - _vtc_last_check_time < 3.0:
+-        return False # Minimum 3s between semantic checks for VTC
+-        
+-    verse_text = _vtc_trigger_words[0]
+-    excerpt    = _excerpt_since_last_advance(40)
+-    
+-    if (groq_client or cerebras_client) and excerpt:
+-        if _vtc_semantic_in_flight:
++    excerpt = _excerpt_since_last_advance(40)
++    with _vtc_lock:
++        if not _vtc_pending_ref or not _vtc_trigger_words:
+             return False
+-        if excerpt == _vtc_last_excerpt:
++        now = time.time()
++        if now - _vtc_last_check_time < 3.0:
+             return False
+-            
++        if not _role_has_llm("verse", groq_client, cerebras_client) or not excerpt:
++            return False
++        if _vtc_semantic_in_flight or excerpt == _vtc_last_excerpt:
++            return False
++        verse_text = _vtc_trigger_words[0]
+         current_ref = _vtc_pending_ref
++        candidate_id, source, stream = _vtc_candidate_id, _vtc_source, _vtc_stream
+         _vtc_semantic_in_flight = True
+         _vtc_last_excerpt = excerpt
+         _vtc_last_check_time = now
+-        
+-        def task():
+-            global _vtc_semantic_in_flight, _vtc_last_excerpt
+-            try:
++
++    def task():
++        global _vtc_semantic_in_flight, _vtc_last_excerpt
++        try:
++            if _shutdown_flag.is_set():
++                return
++            if _llm_semantic_match(verse_text, excerpt, label=current_ref):
+                 if _shutdown_flag.is_set():
+                     return
+-                if _llm_semantic_match(verse_text, excerpt, label=current_ref):
+-                    if _shutdown_flag.is_set():
++                with _vtc_lock:
++                    if _vtc_candidate_id != candidate_id:
+                         return
+-                    if _vtc_pending_ref == current_ref:
+-                        logger.info(f"✅ VTC confirmed: {current_ref}")
+-                        _vtc_confirmed_stream = _vtc_stream
+-                        _cancel_vtc()
+-                        _mark_advance_offset()
+-                        controller.send_verse(current_ref, bypass_cooldown=True, stream=_vtc_confirmed_stream)
+-            except Exception:
+-                if _shutdown_flag.is_set():
+-                    return
+-                raise
+-            finally:
+-                _vtc_semantic_in_flight = False
+-                _vtc_last_excerpt = ""  # clear so the next new excerpt triggers a fresh check
+-                
+-        _vtc_t = threading.Thread(target=task, daemon=True)
+-        _active_bg_threads.append(_vtc_t)
+-        _vtc_t.start()
+-        return False
++                    _cancel_vtc(outcome=None)
++                if controller.send_verse(current_ref, bypass_cooldown=True, source=source,
++                                         stream=stream, candidate_id=candidate_id):
++                    _mark_advance_offset()
++        except Exception as exc:
++            _delivery_event(candidate_id, current_ref, source, stream, "verse_interrupt", "ERROR",
++                            "Semantic worker failed", error_type=type(exc).__name__)
++        finally:
++            _vtc_semantic_in_flight = False
++            _vtc_last_excerpt = ""  # clear so the next new excerpt triggers a fresh check
++
++    _vtc_t = threading.Thread(target=task, daemon=True)
++    _active_bg_threads.append(_vtc_t)
++    _vtc_t.start()
+     return False
+ 
+ 
+@@ -4072,8 +4065,9 @@ def _check_onwards_advance(text, controller) -> bool:
+                     if onwards_target_ref == current_ref:
+                         _onwards_consecutive_no = 0  # reset mismatch counter on success
+                         logger.info(f"🎯 ONWARDS ADVANCE: {current_ref} (Cerebras)")
++                        if not controller.send_verse(current_ref, bypass_cooldown=True, source="ONWARDS"):
++                            return
+                         _mark_advance_offset()
+-                        controller.send_verse(current_ref, bypass_cooldown=True, source="ONWARDS")
+                         onwards_verse += 1
+                         _reset_onwards_timer()
+                         threading.Thread(target=_fetch_next_onwards, daemon=True).start()
+@@ -4086,10 +4080,10 @@ def _check_onwards_advance(text, controller) -> bool:
+                             f"for {current_ref} — aborting ONWARDS (likely wrong chapter context)"
+                         )
+                         _stop_onwards()
+-            except Exception:
+-                if _shutdown_flag.is_set():
+-                    return
+-                raise
++            except Exception as exc:
++                _delivery_event(uuid.uuid4().hex[:12], current_ref, "ONWARDS", None,
++                                "onwards_worker", "ERROR", "Onwards worker failed",
++                                error_type=type(exc).__name__)
+             finally:
+                 _onwards_semantic_in_flight = False
+                 _onwards_last_excerpt = ""  # clear so next new excerpt triggers a fresh check
+@@ -4109,7 +4103,8 @@ def _check_onwards_advance(text, controller) -> bool:
+         threshold = min(2, len(check_words))
+         if matches >= threshold:
+             logger.info(f"🎯 ONWARDS ADVANCE: {onwards_target_ref} (heard '{onwards_trigger[:30]}')")
+-            controller.send_verse(onwards_target_ref, bypass_cooldown=True, source="ONWARDS")
++            if not controller.send_verse(onwards_target_ref, bypass_cooldown=True, source="ONWARDS"):
++                return False
+             onwards_verse += 1
+             _reset_onwards_timer()
+             threading.Thread(target=_fetch_next_onwards, daemon=True).start()
+@@ -4117,21 +4112,58 @@ def _check_onwards_advance(text, controller) -> bool:
+     return False
+ 
+ 
++def _clear_verse_queue(reason):
++    """Caller holds verse_queue_lock; invalidate outstanding fetch workers too."""
++    global _queue_generation
++    _queue_generation += 1
++    for ref, _, _, candidate_id, stream in verse_queue:
++        _delivery_event(candidate_id, ref, "QUEUE", stream, "range_queue", "CANCELLED", reason)
++    for candidate_id, (ref, stream) in _queue_fetching.items():
++        _delivery_event(candidate_id, ref, "QUEUE", stream, "fetch", "CANCELLED", reason)
++    verse_queue.clear()
++    _queue_fetching.clear()
++
++
+ def queue_verse_range(book, chapter, start_verse, end_verse, controller):
++    stream = _safe_stream_role()
+     with verse_queue_lock:
+-        verse_queue.clear()
++        _clear_verse_queue("Replaced by new verse range")
++        generation = _queue_generation
++        candidates = []
++        for v in range(start_verse + 1, end_verse + 1):
++            ref = f"{book} {chapter}:{v}"
++            candidate_id = _delivery_candidate(ref, "QUEUE", stream)
++            candidates.append((candidate_id, ref))
++            _queue_fetching[candidate_id] = (ref, stream)
++            _delivery_event(candidate_id, ref, "QUEUE", stream, "fetch", "QUEUED",
++                            "Range continuation awaiting verse text", queue_length=len(candidates))
+ 
+     def fetch_all():
+-        for v in range(start_verse + 1, end_verse + 1):
+-            ref  = f"{book} {chapter}:{v}"
+-            text = fetch_verse_text(ref)
+-            if text:
+-                with verse_queue_lock:
+-                    verse_queue.append((ref, text, time.time()))  # Add timestamp
+-                logger.info(f"📚 Queued: {ref}")
++        for candidate_id, ref in candidates:
++            with verse_queue_lock:
++                if generation != _queue_generation:
++                    return
++            try:
++                text = fetch_verse_text(ref)
++                error_type = None
++            except Exception as exc:
++                text, error_type = None, type(exc).__name__
++            with verse_queue_lock:
++                if generation != _queue_generation:
++                    return
++                _queue_fetching.pop(candidate_id, None)
++                if text:
++                    verse_queue.append((ref, text, time.time(), candidate_id, stream))
++                    _delivery_event(candidate_id, ref, "QUEUE", stream, "range_queue", "QUEUED",
++                                    "Releases when spoken excerpt semantically matches verse",
++                                    queue_length=len(verse_queue), expires_after_s=180,
++                                    semantic_client_available=_role_has_llm("verse", groq_client, cerebras_client))
++                else:
++                    _delivery_event(candidate_id, ref, "QUEUE", stream, "fetch", "DELIVERY_FAILED",
++                                    "Verse text unavailable", translation=BIBLE_TRANSLATION,
++                                    error_type=error_type)
+ 
+     threading.Thread(target=fetch_all, daemon=True).start()
+-    logger.info(f"📖 Range queued: {book} {chapter}:{start_verse} → {end_verse}")
+ 
+ 
+ _queue_semantic_in_flight = False
+@@ -4145,16 +4177,17 @@ def check_verse_queue(transcript, controller) -> bool:
+     with verse_queue_lock:
+         if not verse_queue:
+             return False
+-        next_ref, verse_text, queue_time = verse_queue[0]
++        next_ref, verse_text, queue_time, candidate_id, stream = verse_queue[0]
+         
+     now = time.time()
+     
+     # Abandonment condition (a): Time-based — abandon after 3 minutes
+     if now - queue_time > 180:  # 3 minutes = 180 seconds
+         with verse_queue_lock:
+-            if verse_queue and verse_queue[0][0] == next_ref:
++            if verse_queue and verse_queue[0][3] == candidate_id:
+                 verse_queue.pop(0)
+-                logger.info(f"⏰ QUEUE abandoned: {next_ref} — exceeded 3 min wait")
++                _delivery_event(candidate_id, next_ref, "QUEUE", stream, "range_queue", "EXPIRED",
++                                "Exceeded 3 minute wait")
+         return False
+     
+     # Abandonment conditions (b) and (c): verse-distance and book-change
+@@ -4168,27 +4201,27 @@ def check_verse_queue(transcript, controller) -> bool:
+                 # Condition (c): Different book — abandon immediately
+                 if queued_book.lower() != current_book.lower():
+                     with verse_queue_lock:
+-                        if verse_queue and verse_queue[0][0] == next_ref:
++                        if verse_queue and verse_queue[0][3] == candidate_id:
+                             verse_queue.pop(0)
+-                            logger.info(f"⏰ QUEUE abandoned: {next_ref} — sermon moved to different book")
++                            _delivery_event(candidate_id, next_ref, "QUEUE", stream, "range_queue", "CANCELLED", "sermon moved to different book")
+                     return False
+                 
+                 # Condition (b): Same book, same chapter — check verse distance (5 verses ahead)
+                 if queued_chapter == current_chapter and current_verse:
+                     if int(current_verse) >= int(queued_verse_num) + 5:
+                         with verse_queue_lock:
+-                            if verse_queue and verse_queue[0][0] == next_ref:
++                            if verse_queue and verse_queue[0][3] == candidate_id:
+                                 verse_queue.pop(0)
+-                                logger.info(f"⏰ QUEUE abandoned: {next_ref} — sermon advanced past target")
++                                _delivery_event(candidate_id, next_ref, "QUEUE", stream, "range_queue", "CANCELLED", "sermon advanced past target")
+                         return False
+                 
+                 # Condition (b-ext): Moved more than 1 chapter ahead in same book
+                 try:
+                     if int(current_chapter) > int(queued_chapter) + 1:
+                         with verse_queue_lock:
+-                            if verse_queue and verse_queue[0][0] == next_ref:
++                            if verse_queue and verse_queue[0][3] == candidate_id:
+                                 verse_queue.pop(0)
+-                                logger.info(f"⏰ QUEUE abandoned: {next_ref} — sermon advanced past target chapter")
++                                _delivery_event(candidate_id, next_ref, "QUEUE", stream, "range_queue", "CANCELLED", "sermon advanced past target chapter")
+                         return False
+                 except ValueError:
+                     pass
+@@ -4202,7 +4235,7 @@ def check_verse_queue(transcript, controller) -> bool:
+     if not excerpt:
+         return False
+         
+-    if groq_client or cerebras_client:
++    if _role_has_llm("verse", groq_client, cerebras_client):
+         if _queue_semantic_in_flight:
+             return False
+         if excerpt == _queue_last_excerpt:
+@@ -4222,17 +4255,17 @@ def check_verse_queue(transcript, controller) -> bool:
+                     if _shutdown_flag.is_set():
+                         return
+                     with verse_queue_lock:
+-                        if verse_queue and verse_queue[0][0] == current_ref:
++                        if verse_queue and verse_queue[0][3] == candidate_id:
+                             verse_queue.pop(0)
+                         else:
+                             return  # Queue advanced while we were checking
+                     logger.info(f"🎯 AUTO-ADVANCE: {current_ref}")
+-                    _mark_advance_offset()
+-                    controller.send_verse(current_ref, bypass_cooldown=True, source="QUEUE")
+-            except Exception:
+-                if _shutdown_flag.is_set():
+-                    return
+-                raise
++                    if controller.send_verse(current_ref, bypass_cooldown=True, source="QUEUE",
++                                             stream=stream, candidate_id=candidate_id):
++                        _mark_advance_offset()
++            except Exception as exc:
++                _delivery_event(candidate_id, current_ref, "QUEUE", stream, "range_queue", "ERROR",
++                                "Queue semantic worker failed", error_type=type(exc).__name__)
+             finally:
+                 _queue_semantic_in_flight = False
+                 _queue_last_excerpt = ""  # clear so next new excerpt triggers a fresh check
+@@ -4665,8 +4698,13 @@ class VerseController:
+         self._send_lock    = threading.Lock()  # protects send_verse against timer-thread races
+         self.vv_version    = "unknown"         # detected VerseVIEW version (verseview10 / verseview11 / unknown)
+         self.remote        = None              # VVRemoteControl facade (set during connect)
++        self._confirm_pending = set()
++        self._confirm_details = {}
++        self._uncertain_sends = {}
+ 
+     def connect(self):
++        self.box = None
++        self.btn = None
+         try:
+             from selenium import webdriver
+             from selenium.webdriver.chrome.service import Service
+@@ -4736,8 +4774,7 @@ class VerseController:
+                 except Exception:
+                     continue
+             if not box:
+-                logger.error("Could not find Bible reference input (tried remotebibleRefID, remote_bibleRefID)")
+-                return False
++                raise RuntimeError("Bible reference input unavailable")
+             self.box = box
+ 
+             # ── Locate PRESENT button ──
+@@ -4764,7 +4801,7 @@ class VerseController:
+                 logger.error("Could not find PRESENT button.")
+                 for b in all_btns:
+                     logger.error(f"  id={b.get_attribute('id')} text={b.text}")
+-                return False
++                raise RuntimeError("PRESENT button unavailable")
+ 
+             self.btn = btn
+             logger.info(f"Connected to VerseView (headless mode) — version: {self.vv_version}")
+@@ -4775,6 +4812,8 @@ class VerseController:
+                 try: self.driver.quit()  # type: ignore
+                 except Exception: pass
+                 self.driver = None
++            self.box = None
++            self.btn = None
+             return False
+ 
+     def close_presentation(self):
+@@ -4788,7 +4827,7 @@ class VerseController:
+         except Exception as e:
+             logger.debug(f"Could not click close button (maybe already closed): {e}")
+ 
+-    def send_verse(self, ref, bypass_cooldown=False, confidence=1.0, source="UNKNOWN", stream=None):
++    def send_verse(self, ref, bypass_cooldown=False, confidence=1.0, source="UNKNOWN", stream=None, candidate_id=None):
+         with self._send_lock:
+             global current_book, current_chapter, current_verse, verses_cited
+             global _session_verse_high_water
+@@ -4797,10 +4836,24 @@ class VerseController:
+             # fast-path calls; threaded callers pass it explicitly.
+             if stream is None:
+                 stream = _safe_stream_role()
++            ref = _normalize_delivery_reference(ref)
++            candidate_id = _delivery_candidate(ref, source, stream, candidate_id)
++
++            def event(stage, outcome, reason, **context):
++                _delivery_event(candidate_id, ref, source, stream, stage, outcome, reason,
++                                adapter=self.vv_version, **context)
++
++            if ref is None or _reject_verse_out_of_range(ref):
++                event("validation", "INVALID", "Malformed or out-of-range reference")
++                return False
++            if _shutdown_flag.is_set():
++                event("controller", "CANCELLED", "Engine stopping")
++                return False
+             # Worship Mode is the master gate — detection ran and logged above, but
+             # nothing gets sent to the display (Selenium / VerseView) while worship is active.
+             if WORSHIP_MODE:
+                 logger.info(f"🎵 [WORSHIP MODE] Detected but suppressed: {ref}")
++                event("worship", "SUPPRESSED", "Worship mode active", guard="WORSHIP_MODE")
+                 return False
+             now = time.time()
+             logger.debug(f"VerseController.send_verse: ref={ref}, bypass={bypass_cooldown}")
+@@ -4828,7 +4881,8 @@ class VerseController:
+                             current_book    = new_book
+                             current_chapter = new_chapter
+                             current_verse   = None
+-                            return True
++                            event("chapter_context", "SUPPRESSED", "Chapter resume is out of range")
++                            return False
+                         ref = _upgraded
+                         logger.info(f"📍 Resuming: chapter ref → {ref} (last known verse this session)")
+                     else:
+@@ -4839,21 +4893,46 @@ class VerseController:
+                         current_chapter = new_chapter
+                         current_verse   = None
+                         logger.info(f"📌 Chapter context set (no display): {new_book} {new_chapter}")
+-                        return True
++                        event("chapter_context", "SUPPRESSED", "Chapter-only reference updates context without display")
++                        return False
+ 
+             # ── MANUAL CONFIRMATION ──
+             if confidence < CONFIDENCE_THRESHOLD and not bypass_cooldown:
+                 if REQUIRE_MANUAL_CONFIRM and CONFIRM_CALLBACK:
++                    if ref in self._confirm_pending:
++                        event("manual_confirm", "SUPPRESSED", "Confirmation already pending",
++                              guard="REQUIRE_MANUAL_CONFIRM")
++                        return False
++                    self._confirm_pending.add(ref)
++                    self._confirm_details[ref] = (candidate_id, source, stream)
++                    event("manual_confirm", "MANUAL_CONFIRM_REQUIRED", "Confidence below threshold",
++                          guard="CONFIDENCE_THRESHOLD", confidence=confidence,
++                          threshold=CONFIDENCE_THRESHOLD)
+                     def _ask_thread():
+                         logger.info(
+                             f"🤔 Holding for manual confirmation: {ref} "
+                             f"(Confidence: {int(confidence*100)}%)"
+                         )
+-                        if CONFIRM_CALLBACK(ref, confidence):
+-                            logger.info(f"✅ User manually approved: {ref}")
+-                            self.send_verse(ref, bypass_cooldown=True, confidence=1.0, source=source, stream=stream)
+-                        else:
+-                            logger.info(f"❌ User rejected: {ref}")
++                        try:
++                            approved = CONFIRM_CALLBACK(ref, confidence)
++                            with self._send_lock:
++                                if ref not in self._confirm_pending:
++                                    return  # cleanup already recorded cancellation
++                            if approved:
++                                if _shutdown_flag.is_set():
++                                    event("manual_confirm", "CANCELLED", "Engine stopped before approval")
++                                else:
++                                    self.send_verse(ref, bypass_cooldown=True, confidence=1.0,
++                                                    source=source, stream=stream, candidate_id=candidate_id)
++                            else:
++                                event("manual_confirm", "CANCELLED", "Operator rejected candidate")
++                        except Exception as exc:
++                            event("manual_confirm", "ERROR", "Confirmation callback failed",
++                                  error_type=type(exc).__name__)
++                        finally:
++                            with self._send_lock:
++                                self._confirm_pending.discard(ref)
++                                self._confirm_details.pop(ref, None)
+                     threading.Thread(target=_ask_thread, daemon=True).start()
+                     return False
+                 else:
+@@ -4861,6 +4940,9 @@ class VerseController:
+                         f"⚠️ Blocked: {ref} (Confidence {int(confidence*100)}% "
+                         f"< Threshold {int(CONFIDENCE_THRESHOLD*100)}%)"
+                     )
++                    event("confidence", "SUPPRESSED", "Confidence below threshold; confirmation unavailable or disabled",
++                          guard="CONFIDENCE_THRESHOLD", confidence=confidence,
++                          threshold=CONFIDENCE_THRESHOLD)
+                     return False
+ 
+             # ── VERIFICATION (hear twice) ──
+@@ -4871,6 +4953,8 @@ class VerseController:
+                     self.pending_verse = ref
+                     self.match_count   = 1
+                     logger.info(f"⏳ Verification pending for: {ref} (Heard once...)")
++                    event("verification", "SUPPRESSED", "Awaiting second detection",
++                          guard="REQUIRE_VERIFY", match_count=self.match_count)
+                     return False
+                 if self.match_count < 2:
+                     return False
+@@ -4887,58 +4971,84 @@ class VerseController:
+                 else:
+                     book_chapter_key += " " + parts[-1]
+             
+-                if (_last_presented_book_chapter == book_chapter_key and 
++                if (self.last_sent == ref and _last_presented_book_chapter == book_chapter_key and
+                     (now - _last_presented_time) < 10):
+-                    # Update the time even when blocking to prevent infinite blocking
+-                    _last_presented_time = now
+                     logger.debug(f"Skipped duplicate chapter within 10s: {ref}")
++                    event("dedup", "SUPPRESSED", "Previously accepted reference is within chapter cooldown",
++                          guard="chapter_dedup", cooldown_remaining_s=10 - (now - _last_presented_time))
+                     return False
+ 
+-            # Always update the time when presenting
+-            _last_presented_book_chapter = book_chapter_key
+-            _last_presented_time = now
+-
+             # ── COOLDOWNS ──
++            uncertain_at = self._uncertain_sends.get(ref)
++            if uncertain_at is not None and now - uncertain_at < max(20, DEDUP_WINDOW):
++                event("dedup", "SUPPRESSED", "Previous PRESENT click failed with uncertain delivery",
++                      guard="uncertain_command", cooldown_remaining_s=max(20, DEDUP_WINDOW) - (now - uncertain_at))
++                return False
+             # Bug 3: 20-second deduplication for exact verse matches (always applies)
+             if ref in self.history:
+                 elapsed = now - self.history[ref]
+                 if elapsed < 20:
+                     logger.info(f"🔁 Suppressed duplicate: {ref} (within 20s window, {elapsed:.1f}s elapsed)")
++                    event("dedup", "SUPPRESSED", "Previously accepted reference is within exact-reference cooldown",
++                          guard="exact_reference_dedup", cooldown_remaining_s=20 - elapsed)
+                     return False
+             if ref in self.history and (now - self.history[ref]) < DEDUP_WINDOW:
+                 logger.debug(f"Skipped duplicate: {ref}")
++                event("dedup", "SUPPRESSED", "Previously accepted reference is within configured dedup window",
++                      guard="DEDUP_WINDOW", cooldown_remaining_s=DEDUP_WINDOW - (now - self.history[ref]))
+                 return False
+             if not bypass_cooldown and self.last_sent and (now - self.last_time) < COOLDOWN:
+                 logger.debug(f"Cooldown active: {ref}")
++                event("cooldown", "SUPPRESSED", "Global delivery cooldown active",
++                      guard="COOLDOWN", cooldown_remaining_s=COOLDOWN - (now - self.last_time))
+                 return False
+ 
+             # ── SEND ──
++            click_attempted = False
++            command_accepted = False
+             try:
+                 if not self.driver:
+                     if not self.connect():
++                        event("controller", "DELIVERY_FAILED", "Controller connection failed",
++                              controller_state="unavailable")
+                         return False
++                if self.box is None or self.btn is None:
++                    event("controller", "DELIVERY_FAILED", "Reference input or PRESENT button unavailable",
++                          controller_state="missing_controls")
++                    return False
+ 
+                 # Dismiss any stale alert left open by a previous bad send (e.g. a
+                 # chapter-only ref that the website rejected with an alert dialog).
+                 # If we don't clear it first, the next execute_script throws
+                 # "unexpected alert open" and the real verse never gets through.
+                 try:
+-                    from selenium.webdriver.support.ui import WebDriverWait
+-                    from selenium.webdriver.support import expected_conditions as EC
+                     alert = self.driver.switch_to.alert
+-                    alert_text = alert.text
+-                    logger.warning(f"⚠️ Stale browser alert detected — dismissing before send: \"{alert_text}\"")
++                    logger.warning("⚠️ Stale browser alert detected — dismissing before send")
+                     alert.dismiss()
+                 except Exception:
+                     pass  # No alert present — proceed normally
+ 
++                event("browser_command", "DELIVERY_REQUESTED", "Setting reference and clicking PRESENT")
+                 self.driver.execute_script("arguments[0].value = arguments[1];", self.box, ref)
++                click_attempted = True
+                 self.driver.execute_script("arguments[0].click();", self.btn)
++                command_accepted = True
++                self._uncertain_sends.pop(ref, None)
++                # Commit dedup state immediately after the command, before ancillary work.
++                self.history[ref] = now
++                self.last_sent = ref
++                self.last_time = now
++                _last_presented_book_chapter = book_chapter_key
++                _last_presented_time = now
++                event("browser_command", "COMMAND_ACCEPTED",
++                      "Browser executed PRESENT click; visible presentation is unverified")
++                if SCRIPTURE_READ_MODE:
++                    scripture_read_advance_expected(int(ref.rsplit(":", 1)[1]))
+                 # When two STT streams are running, announce the verse AND which
+                 # transcription it was detected from (e.g. Malayalam GCP vs
+                 # English AssemblyAI). Single-STT keeps the original one-line log.
+                 _src_desc = _describe_stream(stream) if DUAL_STT_ENABLED else ""
+-                logger.info(f"✅ PRESENTED: {ref}")
++                logger.info(f"✅ COMMAND ACCEPTED: {ref}")
+                 if _src_desc:
+                     logger.info(f"   🎙️ Detected from: {_src_desc}")
+                 _trigger_atem_keyer()
+@@ -5015,21 +5125,6 @@ class VerseController:
+                         _range_latch_active = False
+                         _range_latch_ref = None
+ 
+-                self.history[ref] = now
+-                self.last_sent    = ref
+-                self.last_time    = now
+-            
+-                # Bug 2: update book+chapter tracking
+-                parts = ref.split()
+-                if len(parts) >= 2:
+-                    book_chapter_key = " ".join(parts[:-1])
+-                    if ":" in parts[-1]:
+-                        book_chapter_key += " " + parts[-1].split(":")[0]
+-                    else:
+-                        book_chapter_key += " " + parts[-1]
+-                    _last_presented_book_chapter = book_chapter_key
+-                    _last_presented_time = now
+-
+                 # Bug 4: Update high-water mark for the chapter whenever a verse-level ref is sent
+                 if ":" in ref:
+                     _hwp = ref.split()
+@@ -5051,15 +5146,28 @@ class VerseController:
+ 
+                 return True
+             except Exception as e:
+-                logger.error(f"Failed to send {ref}: {e}")
++                if click_attempted and not command_accepted:
++                    self._uncertain_sends[ref] = now
++                    if len(self._uncertain_sends) > 20:
++                        self._uncertain_sends.pop(min(self._uncertain_sends, key=self._uncertain_sends.get))
++                event("post_command" if command_accepted else "browser_command",
++                      "ERROR" if command_accepted else "DELIVERY_FAILED",
++                      "Post-command bookkeeping failed" if command_accepted else "Browser command failed",
++                      error_type=type(e).__name__, delivery_uncertain=click_attempted and not command_accepted)
+                 try:
+                     self.driver.quit()
+                 except Exception:
+                     pass
+                 self.driver = None
+-                return False
++                return command_accepted
+ 
+     def cleanup(self):
++        with self._send_lock:
++            for ref, (candidate_id, source, stream) in self._confirm_details.items():
++                _delivery_event(candidate_id, ref, source, stream, "manual_confirm", "CANCELLED",
++                                "Controller closed while awaiting operator confirmation")
++            self._confirm_pending.clear()
++            self._confirm_details.clear()
+         if self.driver:
+             try:
+                 self.driver.quit()
+@@ -5817,6 +5925,8 @@ def detect_verse_hybrid(text, controller, confidence=1.0, parser=None) -> bool:
+         refs = [] if is_multi_verse_list else _active_parser(text_for_parser)
+         if refs:
+             verse      = refs[0]
++            candidate_id = _delivery_candidate(verse, "PARSER", _safe_stream_role())
++            blocked_reason = None
+             is_blocked = False
+             
+             # BUG 3: Unconditional Revelation guard (blocks "revelation" in commentary)
+@@ -5837,11 +5947,13 @@ def detect_verse_hybrid(text, controller, confidence=1.0, parser=None) -> bool:
+                     if not _has_explicit_rev:
+                         logger.debug(f"🚫 Revelation detection skipped: >40% Malayalam context in '{text[:60]}'")
+                         is_blocked = True
++                        blocked_reason = 'Revelation lacks explicit wording in Malayalam context'
+                 elif not re.search(r'\brevelation\b', text, re.IGNORECASE):
+                     # "Revelation" does not appear as an isolated English word at all
+                     if _dedup_blocked(text, "revelation"):
+                         logger.info(f"\U0001f6ab BLOCKED: 'Revelation' not a standalone English word in '{text[:60]}'")
+                     is_blocked = True
++                    blocked_reason = 'Revelation is not a standalone book word'
+                 elif not (re.search(r'\bbook\s+of\s+revelation\b', text, re.IGNORECASE) or
+                           re.search(r'\brevelation\s+(?:chapters?|chap|ch)\b', text, re.IGNORECASE) or
+                           re.search(r'\brevelation\s+\d+\b', text, re.IGNORECASE)):
+@@ -5849,6 +5961,7 @@ def detect_verse_hybrid(text, controller, confidence=1.0, parser=None) -> bool:
+                     if _dedup_blocked(text, "revelation"):
+                         logger.info(f"\U0001f6ab BLOCKED: 'Revelation' without chapter/explicit phrasing in '{text[:60]}'")
+                     is_blocked = True
++                    blocked_reason = 'Revelation lacks chapter or explicit book phrasing'
+ 
+             # BUG 4: Unconditional Numbers guard (blocks bare numbers words mapped to book)
+             if "Numbers " in verse:  # Note trailing space to only match the book "Numbers N"
+@@ -5858,6 +5971,7 @@ def detect_verse_hybrid(text, controller, confidence=1.0, parser=None) -> bool:
+                     if _dedup_blocked(text, "numbers"):
+                         logger.info(f"\U0001f6ab BLOCKED: 'Numbers' without chapter/explicit phrasing in '{text[:60]}'")
+                     is_blocked = True
++                    blocked_reason = 'Numbers lacks explicit book phrasing'
+ 
+             # Bug 5: Require an explicit anchor — a book name, chapter/verse keyword, or colon.
+             # A bare digit from casual speech ("one more thing", "three reasons") is not sufficient.
+@@ -5882,8 +5996,11 @@ def detect_verse_hybrid(text, controller, confidence=1.0, parser=None) -> bool:
+                     if _dedup_blocked(text, "no-anchor"):
+                         logger.info(f"\U0001f6ab BLOCKED: No book/chapter/verse anchor in '{text[:60]}'")
+                     is_blocked = True
++                    blocked_reason = 'No book, chapter or verse anchor'
+             if not is_blocked:
+                 is_blocked = _reject_verse_out_of_range(verse)
++                if is_blocked:
++                    blocked_reason = "Reference is out of range"
+             
+             if not is_blocked:
+                 # Bug : Proper Name False Positive Guard (e.g. "Evangelist Daniel")
+@@ -5899,6 +6016,7 @@ def detect_verse_hybrid(text, controller, confidence=1.0, parser=None) -> bool:
+                     if verse not in _active_parser(text_without_name):
+                         logger.info(f"🚫 BLOCKED Layer 1 False Positive: {verse} (Person Name Prefix: '{m_person.group(0).strip()}')")
+                         is_blocked = True
++                        blocked_reason = 'Book name is preceded by a person title'
+                         break
+ 
+             if not is_blocked:
+@@ -5908,6 +6026,7 @@ def detect_verse_hybrid(text, controller, confidence=1.0, parser=None) -> bool:
+                 if _is_book_count_number(text, chap_token):
+                     logger.info(f"🚫 BLOCKED: {verse} — chapter number is a book-count in '{text[:60]}'")
+                     is_blocked = True
++                    blocked_reason = 'Chapter number is a book count'
+ 
+             if not is_blocked:
+                 # Bug Fix 2A (extended): Verse-keyword takes priority over chapter interpretation.
+@@ -5955,6 +6074,7 @@ def detect_verse_hybrid(text, controller, confidence=1.0, parser=None) -> bool:
+                                     f"anchor={current_book} {current_chapter} → Layer 2 will resolve verse"
+                                 )
+                                 is_blocked = True
++                                blocked_reason = 'Chapter interpretation conflicts with spoken verse wording; deferring to contextual layer'
+                             elif _parsed_ch != current_chapter and _parsed_ch_int <= 150:
+                                 # Sub-case B: full ref with different chapter + verse keyword → block
+                                 logger.info(
+@@ -5963,6 +6083,7 @@ def detect_verse_hybrid(text, controller, confidence=1.0, parser=None) -> bool:
+                                     f"chapter keyword → Layer 2 will resolve verse in active chapter"
+                                 )
+                                 is_blocked = True
++                                blocked_reason = 'Parsed chapter conflicts with active anchor; deferring to contextual layer'
+                             else:
+                                 logger.debug(
+                                     f"✅ ALLOWED (2A): {verse} — same chapter or chapter keyword present; "
+@@ -5986,6 +6107,7 @@ def detect_verse_hybrid(text, controller, confidence=1.0, parser=None) -> bool:
+                             f"'{_book_last_word}' treated as person/topic name in '{text[:80]}'"
+                         )
+                     is_blocked = True
++                    blocked_reason = 'Book name is a person or topic'
+ 
+             if not is_blocked:
+                 # Structural-impossibility check — verse/chapter doesn't exist for this book.
+@@ -5993,6 +6115,7 @@ def detect_verse_hybrid(text, controller, confidence=1.0, parser=None) -> bool:
+                 # considers anchor context and logs explicitly that NO substitution is made.
+                 if _is_structurally_impossible(verse, text):
+                     is_blocked = True
++                    blocked_reason = 'Reference is structurally impossible'
+ 
+             if not is_blocked:
+                 chap_num = verse.split()[-1]
+@@ -6005,6 +6128,7 @@ def detect_verse_hybrid(text, controller, confidence=1.0, parser=None) -> bool:
+                 if (not is_explicit_chapter) and any(re.search(rf'\b{chap_num}\s+{b}\b', num_norm) for b in blockers):
+                     logger.info(f"🚫 BLOCKED Layer 1 False Positive: {verse} (Time/People phrase)")
+                     is_blocked = True
++                    blocked_reason = 'Number belongs to a time or people phrase'
+             if not is_blocked:
+                 # Bug 1 fix: Narrative-reading guard — block a book-switch caused by a
+                 # third-person narrative phrase ("he was reading Isaiah 53").  Only apply
+@@ -6016,9 +6140,13 @@ def detect_verse_hybrid(text, controller, confidence=1.0, parser=None) -> bool:
+                         if _is_narrative_reading_context(text, _parsed_book):
+                             logger.info(f"🚫 BLOCKED Layer 1 (narrative reading): '{verse}' — active context stays {current_book} {current_chapter}")
+                             is_blocked = True
++                            blocked_reason = 'Third-person narrative reading is not a passage switch'
++            if is_blocked:
++                _delivery_event(candidate_id, verse, "PARSER", _safe_stream_role(), "parser_guard",
++                                "SUPPRESSED", blocked_reason, guard="false_positive_protection")
+             if not is_blocked:
+                 logger.info(f"🔍 PARSER: {verse} ({int(confidence*100)}% Acc)")
+-                deliver_verse(verse, controller, bypass_cooldown=False, confidence=confidence, source="PARSER")
++                deliver_verse(verse, controller, bypass_cooldown=False, confidence=confidence, source="PARSER", candidate_id=candidate_id)
+                 _last_explicit_ref_time = time.time()
+                 trigger_onwards_if_needed(verse, text)
+                 if ":" in verse:
+@@ -6450,6 +6578,7 @@ def detect_verse_hybrid(text, controller, confidence=1.0, parser=None) -> bool:
+             try:
+                 verse = extract_verse_with_llm(text)
+                 if verse:
++                    candidate_id = _delivery_candidate(verse, "LLM", _llm_stream)
+                     # Bug 5 fix (refined): Suppress LLM verses that are genuinely stale —
+                     # i.e. the sermon has moved well past them AND they are not a valid
+                     # backreference within the *current* sermon passage.
+@@ -6515,11 +6644,18 @@ def detect_verse_hybrid(text, controller, confidence=1.0, parser=None) -> bool:
+                                 )
+                         except (ValueError, IndexError, AttributeError):
+                             pass
++                    if _suppress_stale_llm:
++                        _delivery_event(candidate_id, verse, "LLM", _llm_stream, "anchor", "SUPPRESSED",
++                                        "Sermon moved past candidate in a different passage", guard="stale_llm_anchor")
+                     if not _suppress_stale_llm:
+                         _last_explicit_ref_time = time.time()
+-                        deliver_verse(verse, controller, bypass_cooldown=False, confidence=confidence, source="LLM", stream=_llm_stream)
++                        deliver_verse(verse, controller, bypass_cooldown=False, confidence=confidence, source="LLM", stream=_llm_stream, candidate_id=candidate_id)
+                         trigger_onwards_if_needed(verse, text)
+                         check_and_queue_range(text, verse, controller)
++            except Exception as exc:
++                _delivery_event(uuid.uuid4().hex[:12], None, "LLM", _llm_stream,
++                                "llm_worker", "ERROR", "LLM detection worker failed",
++                                error_type=type(exc).__name__)
+             finally:
+                 _llm_in_flight = False
+ 
+@@ -6581,14 +6717,19 @@ def _detect_explicit_reference(sentence: str, controller) -> bool:
+         return False
+     for ref in refs:
+         if ":" in ref:  # must have chapter:verse — not just a chapter
++            candidate_id = _delivery_candidate(ref, "FAST-PATH", _safe_stream_role())
+             parts = ref.rsplit(":", 1)
+             chap  = parts[0].split()[-1]
+             verse = parts[1]
+             if _is_range_not_verse(sentence, chap, verse):
+                 logger.debug(f"⚡ FAST-PATH skipped: '{ref}' looks like chapter range in '{sentence[:60]}'")
++                _delivery_event(candidate_id, ref, "FAST-PATH", _safe_stream_role(), "parser_guard",
++                                "SUPPRESSED", 'Spoken numbers describe a chapter range', guard="false_positive_protection")
+                 continue
+             if _is_book_count_number(sentence, chap):
+                 logger.debug(f"⚡ FAST-PATH skipped: '{ref}' chapter is a book-count in '{sentence[:60]}'")
++                _delivery_event(candidate_id, ref, "FAST-PATH", _safe_stream_role(), "parser_guard",
++                                "SUPPRESSED", 'Chapter number is a book count', guard="false_positive_protection")
+                 continue
+             # Unified ambiguous-book-as-person guard (replaces John-only checks).
+             # Covers John, Matthew, Mark, Luke, James, Ruth, Joel, Job, Amos, Jonah,
+@@ -6600,12 +6741,18 @@ def _detect_explicit_reference(sentence: str, controller) -> bool:
+                     f"⚡ FAST-PATH skipped: '{_fp_book_last}' is a person/topic name"
+                     f" in '{sentence[:60]}'"
+                 )
++                _delivery_event(candidate_id, ref, "FAST-PATH", _safe_stream_role(), "parser_guard",
++                                "SUPPRESSED", 'Book name is a person or topic', guard="false_positive_protection")
+                 continue
+             # Structural-impossibility check — no substitution; drop entirely.
+             if _is_structurally_impossible(ref, sentence):
+                 logger.debug(f"⚡ FAST-PATH skipped: '{ref}' is structurally impossible")
++                _delivery_event(candidate_id, ref, "FAST-PATH", _safe_stream_role(), "parser_guard",
++                                "SUPPRESSED", 'Reference is structurally impossible', guard="false_positive_protection")
+                 continue
+             if _reject_verse_out_of_range(ref):
++                _delivery_event(candidate_id, ref, "FAST-PATH", _safe_stream_role(), "parser_guard",
++                                "SUPPRESSED", 'Reference is out of range', guard="false_positive_protection")
+                 continue
+ 
+             # Bug 1 fix: Narrative-reading guard — if the sentence describes someone
+@@ -6617,10 +6764,12 @@ def _detect_explicit_reference(sentence: str, controller) -> bool:
+             if current_book and ref_book.lower() != current_book.lower():
+                 if _is_narrative_reading_context(sentence, ref_book):
+                     logger.info(f"⚡ FAST-PATH skipped: narrative reading context for '{ref}' (active context: {current_book} {current_chapter})")
++                    _delivery_event(candidate_id, ref, "FAST-PATH", _safe_stream_role(), "parser_guard",
++                                    "SUPPRESSED", 'Third-person narrative reading is not a passage switch', guard="false_positive_protection")
+                     continue
+ 
+             logger.info(f"⚡ FAST-PATH explicit ref: {ref}")
+-            deliver_verse(ref, controller, bypass_cooldown=True, confidence=1.0, source="FAST-PATH")
++            deliver_verse(ref, controller, bypass_cooldown=True, confidence=1.0, source="FAST-PATH", candidate_id=candidate_id)
+             trigger_onwards_if_needed_standalone(ref, sentence)
+             return True
+ 
+@@ -6699,15 +6848,24 @@ def _detect_from_translation(english_text: str, controller) -> bool:
+     except Exception:
+         return False
+     for ref in refs:
++        candidate_id = _delivery_candidate(ref, "TRANSLATION-PATH", _safe_stream_role())
+         if ":" not in ref:
++            _delivery_event(candidate_id, ref, "TRANSLATION-PATH", _safe_stream_role(), "translation_guard",
++                            "SUPPRESSED", 'Chapter-only translations require more evidence', guard="translation_evidence")
+             continue  # chapter-only guesses from translated text are too risky
+         # Require the translated text to be substantial enough to be reliable.
+         # Very short translations (e.g. hallucinated "Joel 3:5") are discarded.
+         if len(english_text.split()) < 5:
++            _delivery_event(candidate_id, ref, "TRANSLATION-PATH", _safe_stream_role(), "translation_guard",
++                            "SUPPRESSED", 'Translated text is too short', guard="translation_evidence")
+             continue
+         if _is_book_count_number(english_text, ref.split()[-1].split(":")[0]):
++            _delivery_event(candidate_id, ref, "TRANSLATION-PATH", _safe_stream_role(), "translation_guard",
++                            "SUPPRESSED", 'Chapter number is a book count', guard="translation_evidence")
+             continue
+         if _reject_verse_out_of_range(ref):
++            _delivery_event(candidate_id, ref, "TRANSLATION-PATH", _safe_stream_role(), "translation_guard",
++                            "SUPPRESSED", 'Reference is out of range', guard="translation_evidence")
+             continue
+         # Unified ambiguous-book-as-person guard — same logic as FAST-PATH.
+         _tr_ref_book  = " ".join(ref.split()[:-1])
+@@ -6717,13 +6875,17 @@ def _detect_from_translation(english_text: str, controller) -> bool:
+                 f"⚡ TRANSLATION-PATH skipped: '{_tr_book_last}' is a person/topic"
+                 f" name in translated text '{english_text[:60]}'"
+             )
++            _delivery_event(candidate_id, ref, "TRANSLATION-PATH", _safe_stream_role(), "translation_guard",
++                            "SUPPRESSED", 'Book name is a person or topic', guard="translation_evidence")
+             continue
+         # Structural-impossibility check — no substitution; drop the ref entirely.
+         if _is_structurally_impossible(ref, english_text):
+             logger.debug(f"⚡ TRANSLATION-PATH skipped: '{ref}' is structurally impossible")
++            _delivery_event(candidate_id, ref, "TRANSLATION-PATH", _safe_stream_role(), "translation_guard",
++                            "SUPPRESSED", 'Reference is structurally impossible', guard="translation_evidence")
+             continue
+         logger.info(f"⚡ TRANSLATION-PATH ref: {ref}")
+-        deliver_verse(ref, controller, bypass_cooldown=True, confidence=1.0, source="TRANSLATION-PATH")
++        deliver_verse(ref, controller, bypass_cooldown=True, confidence=1.0, source="TRANSLATION-PATH", candidate_id=candidate_id)
+         trigger_onwards_if_needed_standalone(ref, english_text)
+         return True
+     return False
+@@ -6915,6 +7077,23 @@ def _transcript_extra(is_secondary: bool) -> dict:
+             "vv_stream_role": "secondary" if is_secondary else "primary"}
+ 
+ 
++def _with_transcript_context(callback, is_secondary):
++    role = "secondary" if is_secondary else "primary"
++
++    def wrapped(*args, **kwargs):
++        token = STT_STREAM_ROLE.set(role)
++        try:
++            return callback(*args, **kwargs)
++        except Exception as exc:
++            _delivery_event(uuid.uuid4().hex[:12], None, "TRANSCRIPT", role,
++                            "transcript_callback", "ERROR", "Transcript callback failed",
++                            error_type=type(exc).__name__)
++            raise
++        finally:
++            STT_STREAM_ROLE.reset(token)
++    return wrapped
++
++
+ def create_transcript_handler(controller, is_secondary: bool, tag: str, parser):
+     """Return a callback with the on_transcript(sentence, is_final, metadata) signature.
+ 
+@@ -6960,7 +7139,7 @@ def create_transcript_handler(controller, is_secondary: bool, tag: str, parser):
+         _last_transcript_time = time.time()
+         _process_transcript_blob(sentence, partial_context, controller, parser=parser)
+ 
+-    return handle_transcript
++    return _with_transcript_context(handle_transcript, is_secondary)
+ 
+ 
+ def create_sarvam_transcript_handler(controller, is_secondary: bool, tag: str, parser):
+@@ -7029,7 +7208,7 @@ def create_sarvam_transcript_handler(controller, is_secondary: bool, tag: str, p
+         # Also run colon-notation detection on the English translation.
+         _detect_from_translation(english_text, controller)
+ 
+-    return handle_transcript
++    return _with_transcript_context(handle_transcript, is_secondary)
+ 
+ 
+ def launch_stt_task(controller, is_secondary: bool = False):
+@@ -7409,6 +7588,9 @@ async def main():
+     finally:
+         # BUG 2: Set shutdown flag FIRST so background threads can see it and exit
+         _shutdown_flag.set()
++        _cancel_vtc("Engine stopped")
++        with verse_queue_lock:
++            _clear_verse_queue("Engine stopped")
+         # Join all active background threads with timeout before tearing down shared resources
+         for _bg_t in list(_active_bg_threads):
+             try:
+@@ -7453,4 +7635,4 @@ async def main():
+ 
+ 
+ if __name__ == "__main__":
+-    asyncio.run(main())
+\ No newline at end of file
++    asyncio.run(main())

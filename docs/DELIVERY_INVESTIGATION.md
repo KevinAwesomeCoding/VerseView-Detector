@@ -1,0 +1,555 @@
+# Verse delivery investigation
+
+Investigated the working tree at `/Users/kevinanil/VerseView-Detector`, branch
+`main`, starting commit `0d3bd38`. The only pre-existing change was untracked
+`.DS_Store`; it was preserved. The initial code investigation sent no live
+commands. The separately approved live verification below used the installed
+VerseVIEW instance and its isolated output.
+
+## Confirmed findings
+
+The strongest demonstrated cause is in `vv_streaming_master.py`,
+`VerseController.send_verse`:
+
+- The previous chapter guard compared only book/chapter. It blocked **changed
+  verse numbers** within ten seconds, despite its comment saying “unless verse
+  changed.”
+- It wrote `_last_presented_book_chapter` and `_last_presented_time` before
+  cooldown checks or the browser command. A failed connection therefore marked
+  the chapter as presented.
+- Blocked detections refreshed that timer, allowing frequent detections to keep
+  extending suppression.
+
+Before editing, an isolated replay against the actual engine produced:
+
+| Sequence | Previous result |
+| --- | --- |
+| `John 3:16` at synthetic time 100, then `John 3:17` at 105; explicit bypass | First accepted; changed verse rejected |
+| `Romans 8:1` at 200 with connection failure, then valid mock browser at 201 | Retry rejected; zero browser calls |
+
+Both sequences now pass. The chapter guard checks the exact last reference,
+blocked candidates do not refresh it, and accepted-command state is committed
+immediately after the PRESENT click returns. Exact-reference deduplication,
+configured deduplication, and the global cooldown remain active.
+
+Additional findings supported by code and focused regression tests:
+
+- `queue_verse_range` cleared the list without invalidating the previous fetch
+  worker. A deliberately delayed old fetch could append into a replacement
+  range. Generation checks now prevent this and record cancellation.
+- `check_vtc` and `check_verse_queue` required cloud clients even though
+  `_llm_semantic_match` supports local routing. They now use the existing
+  `_role_has_llm` helper; local-only matching is tested.
+- Scripture-reading and ONWARDS progression could advance before, or despite,
+  failed delivery. They now advance after command acceptance.
+- Chapter-only context updates returned success without a browser command, and
+  the GUI suggestion action reported “sent” without checking the outcome.
+  These now report context-only suppression or pending/blocked delivery.
+- SDK callback threads could lose stream context. Transcript callbacks now bind
+  their actual stream and restore prior context, including when they raise.
+
+These are demonstrated defects, but there is **no matched production
+undelivered-reference example proving which one caused the reported incident**.
+
+## Existing runtime evidence
+
+Read only selected delivery/connection lines from
+`~/Library/Application Support/VerseView/verseview.log`:
+
+- Line 549: `2026-08-21 01:08:24,997` — FAST-PATH explicit ref `John 3:16`.
+- Line 550: `2026-08-21 01:08:25,018` — previous `PRESENTED` log for that ref.
+- Lines 267–375: August 20 connection failures report ChromeDriver supporting
+  Chrome version 152.
+- Lines 675 and 707: `2026-09-20 18:07:30,626` and `18:07:36,193` —
+  `net::ERR_CONNECTION_REFUSED` during connection.
+
+The successful sequence's last confirmed stage is the browser-command path;
+its old “PRESENTED” wording does not prove visible output. The other failures
+stop at initialization and do not establish a detected-but-undelivered incident.
+The old chapter suppression and ordinary cooldown messages were DEBUG-only, so
+absence from the INFO log cannot establish that a function never ran.
+
+## Actual trace and intentional stops
+
+| Path / implementation | Relevant stops or intermediate states |
+| --- | --- |
+| STT provider callbacks → `create_transcript_handler` / `create_sarvam_transcript_handler` | Empty/partial/noise handling; Sarvam translation; callback errors |
+| `_process_transcript_blob` → `_detect_explicit_reference`, `detect_verse_hybrid`, `_detect_from_translation` | Self-correction, scripture filters, book/person/narrative guards, structural/range validation, insufficient translated evidence |
+| Hybrid contextual, sequential, range, read-intent, and threaded LLM paths | Anchor/progression rules, stale LLM results, LLM pacing and context deduplication |
+| `deliver_verse` | Validation, scripture passage lock, system-action quarantine; explicit/LLM/watcher/queue exceptions retained |
+| `_start_vtc` → `check_vtc` | Verse Interrupt waits for semantic match; same pending reference suppressed; replacement, 60-second expiry, fetch failure/fallback |
+| `queue_verse_range` → `check_verse_queue` | Range text fetch; semantic-match release; replacement, three-minute expiry, book/verse/chapter abandonment, shutdown cancellation |
+| `_check_onwards_advance` | Semantic or existing keyword match; mismatch limit; progression only after accepted send |
+| `VerseController.send_verse` | Worship, chapter-only context, confidence/manual approval, hear-twice verification, exact/chapter/global cooldowns, controller/control availability |
+| `VerseController.connect` and browser command | V10/V11 detection, primary/legacy selectors, reconnect after send failure; command exceptions |
+
+`settings.py` retains its defaults: confidence 0.75, manual confirmation enabled,
+hear-twice verification enabled, cooldown 3 seconds, dedup window 60 seconds,
+Verse Interrupt disabled. Manual confirmation applies to below-threshold
+candidates on paths that do not bypass that confidence check; it does not hold
+all detected references. Watcher passive suggestions remain operator actions.
+Watcher suggestion deduplication and LLM request deduplication describe emitted
+suggestions/requests, not proof of delivery, and have not been removed.
+
+`bible_fetcher.py` supplies verse text/translation fallbacks for deferred matching;
+immediate browser reference delivery does not require that fetch.
+`session_state.py` stores session metadata and has no presentation acknowledgement.
+`vv_bot_bridge.py` routes direct operator actions separately from automatic
+transcript delivery. `vv_remote_control.py` remains unchanged; the automatic
+Bible path uses the controller's shared V10/V11 selectors rather than its
+version-specific song/schedule adapters.
+
+## Changes and diagnostics
+
+- `vv_streaming_master.py`: focused delivery-state fixes, correlated metadata,
+  deferred candidate identity, queue replacement safety, and safe thread errors.
+- `vv_gui.py`: small read-only diagnostics panel and accurate suggestion outcome.
+- `tests/test_delivery.py`: isolated engine/browser/routing/queue regression tests.
+- `.gitignore`: retain this regression suite while leaving scratch test ignores.
+- This report: evidence, trace, commands, and verification limits.
+
+Events use `VERSE_DELIVERY` followed by JSON in the existing log. Fields include
+candidate ID, normalized reference, source, stream, configured language, UTC
+ISO timestamp, stage, outcome, reason, and applicable guard/countdown/adapter
+context. IDs persist through range fetching, semantic workers, and manual
+confirmation. SDK callbacks explicitly identify primary/secondary streams.
+No new event includes transcript content, credentials, or exception messages;
+errors include their type. These diagnostic records are excluded from the
+normal transcript widgets and Discord live-log handler.
+
+The engine retains 300 events. **Verse Delivery Diagnostics** shows the most
+recent 80, refreshes through Tk `after(500, ...)`, and stays read-only. Find a
+reference, then follow its ID in the panel or search the log for that ID. Follow
+`QUEUED` and `MANUAL_CONFIRM_REQUIRED` to their later outcome; neither means
+successful delivery. Guard names and cooldown remaining are in the JSON log.
+Range expiry is checked on subsequent transcript callbacks; an idle pending
+range stays in memory until another callback or engine shutdown records its
+outcome. A semantic worker error keeps the candidate pending and records ERROR.
+
+## Meaning of success and uncertain delivery
+
+`COMMAND_ACCEPTED` means Selenium returned from setting the input and executing
+the PRESENT button click. There is no server acknowledgement or output-screen
+verification in this integration. **It does not confirm visible presentation.**
+No `PRESENTATION_CONFIRMED` event is emitted.
+
+A failure before clicking leaves delivered-reference history untouched. A
+failure *during* the PRESENT click may have delivered despite the exception;
+its event includes `delivery_uncertain=true`. Repeated automatic candidates are
+held for `max(20, DEDUP_WINDOW)` seconds, independently of delivered history, to
+limit duplicate presentation. There is no new automatic retry loop. Later
+spoken detections may try again after that window; inspect the screen before
+any operator resend when delivery is uncertain.
+
+## Verification
+
+Executed from the repository root:
+
+```sh
+python3 -m unittest discover -s tests -v
+python3 -m compileall -q vv_streaming_master.py vv_gui.py vv_remote_control.py vv_bot_bridge.py settings.py session_state.py bible_fetcher.py parse_reference_eng.py parse_reference_ml.py parse_reference_hindi.py contextual_watcher.py stt_providers tests
+git diff --check
+```
+
+Results: **39 tests passed**; compilation passed; diff whitespace checks passed.
+No pre-existing test suite was found. Tests use the actual engine functions,
+fake Selenium modules/browser controls, mocked fetch/semantic results, and an
+HTTP-request prohibition. V10, V11, and legacy selectors run through the actual
+connect/version-detection code with a fake browser. English, Hindi, Malayalam,
+stream attribution, callback failures, manual hold/rejection/cancellation,
+concurrency, queue lifecycle, failed-send state, and GUI bounded-refresh behavior
+are covered. GUI refresh tests execute the actual method with fake widgets.
+
+At the initial investigation stage, no real browser/VerseVIEW end-to-end test,
+cloud/local LLM response test, or visual GUI layout inspection had been performed.
+The subsequent live verification below supersedes the browser/output and layout
+limitations where explicitly stated. Direct remote/manual presentation controls retain
+existing behavior and are outside the new automatic-delivery correlation path.
+
+## Safe operator verification
+
+Use a separate VerseVIEW test instance and non-live display, with outbound
+webhooks and ATEM disabled. Point the detector at that test instance. Do not
+use a service presentation screen for this check.
+
+1. Announce `John 3:16`, then `John 3:17` within ten seconds. Check the diagnostics
+   and the isolated output separately; both commands should be accepted.
+2. Repeat the second reference immediately; confirm suppression and its guard.
+3. Exercise an inferred candidate with hear-twice/manual confirmation enabled;
+   confirm that a pending outcome is distinguished from command acceptance.
+4. Test a range with Verse Interrupt/semantic matching as appropriate. Confirm
+   queue entry, release, replacement, or expiry is traceable by ID.
+5. Interrupt the test connection before a command, restore it, and provide fresh
+   spoken evidence. Check the failure and subsequent attempt. If the click
+   itself is uncertain, inspect the isolated output and respect the cooldown.
+6. Inspect the diagnostics panel at your usual window size and verify that the
+   transcript, suggestions, and history controls remain usable.
+
+## Approved live verification — 2026-10-03, America/Chicago
+
+**John 3:16 → John 3:17 visibly worked on the actual presentation output.**
+The browser commands were accepted **8.086609 seconds apart**. Computer Use
+captured both references and the correct English verse text in the native
+`THEME 1` window, whose document was
+`app.asar/presentation/presentation1.html`. This was the audience presentation
+window, distinct from the control application's Genesis preview. Malayalam
+text also appeared under the existing bilingual theme; its translation was
+not independently audited.
+
+### Environment and isolation
+
+- Repository: same working tree, `main`, HEAD `0d3bd38`; existing delivery fixes
+  and unrelated `.DS_Store` preserved. No commit, push, or deployment.
+- Installed VerseVIEW: `/Applications/VerseVIEW11.app`, version **11.0.0**.
+  Target: `http://127.0.0.1:50010/control.html`; Main enabled on
+  **Screen 1 → 1470×956**, Stage and AUX disabled. Existing theme:
+  **Blue stars motion background**. Routing/theme were not changed.
+- Before sending, the user answered the explicit isolation/approval request
+  with “it isnt do not worry,” confirming no audience connection in context.
+  The user separately approved a temporary dependency environment.
+- The installed detector reports `build-0d3bd38-230`; that bundle does not
+  contain the uncommitted fixes. It was not used as evidence for the fixes.
+- Ran Python **3.13** from a disposable venv with customtkinter **6.0.0**,
+  Selenium **4.50.0**, webdriver-manager **4.1.2**, requests **2.34.2**, and
+  certifi **2026.7.22**. Chrome **154.0.8037.93** worked with the already cached
+  ChromeDriver **153.0.8010.52** in this session. No driver was downloaded and
+  no existing cache was reconciled or deleted. This does not establish general
+  compatibility of those different major versions.
+- Live `VerseController.connect` detected `verseview11` and selected fallback
+  IDs `remote_bibleRefID` / `remote_bible_present`. The missing first-choice
+  input selector incurred about 15 seconds of wait during connection.
+- The real source GUI was titled `VerseView Detector — SOURCE DELIVERY
+  VERIFICATION`. Import paths and SHA-256 fingerprints were recorded in
+  [actions.jsonl](evidence/2026-10-03-delivery/actions.jsonl). Engine hash:
+  `3ed212223c53c0fb9e2a7525678c28033e44385107b4f32c205d24e7248bf95e`;
+  GUI hash: `4208cbb0747beac61a1fe6c90698bdc2f5db953f4e14d837a55874319bfcf87b`.
+
+### Entry point and settings
+
+A disposable runner invoked the existing
+`create_transcript_handler(controller, False, '[TEST-REPLAY]', parse_eng)`
+callback with final transcripts. That callback ran queue checks, transcript
+logging, `_process_transcript_blob`, parsing/contextual detection,
+`deliver_verse`, and the actual Selenium controller. No mock browser or final
+send shortcut was used for the live scenarios.
+
+Microphone capture, audio transport, STT recognition/provider SDKs, and normal
+GUI Start/engine-thread orchestration were bypassed. The GUI's streaming status
+therefore remained **Stopped**, despite its attached live controller. The
+history polling logic that requires an active streaming session, the chapter
+browser fetch loop, and full Start/Stop behavior were not verified.
+
+Test-process settings: English, KJV, primary stream only; cooldown **3 s**,
+dedup window **60 s**, manual confirmation **true**, hear-twice verification
+**true**, confidence threshold **0.75**, Verse Interrupt **false**. Explicit
+FAST-PATH references retain their existing confidence/verification bypass;
+manual confirmation does not hold every explicit reference. For the manual
+test only, the threshold became **0.90**, then returned to **0.75**.
+
+Settings/session writes and substantive test logs were redirected to the
+temporary directory. Credentials, sync, bot, ATEM, watcher, cloud/local LLMs,
+and notes saving were disabled through sanitized test-process settings; saved
+credentials were not loaded. Microphone enumeration and update checks were
+disabled in the runner. Queue verse text used the existing real fetch path.
+
+### Test evidence
+
+Times below are local CDT on October 3; JSON events contain UTC timestamps on
+October 4. The [32-event snapshot](evidence/2026-10-03-delivery/events.json),
+[source log](evidence/2026-10-03-delivery/source.log),
+[input/action record](evidence/2026-10-03-delivery/actions.jsonl), and
+[disposable source runner](evidence/2026-10-03-delivery/source-runner.py.txt)
+preserve the test evidence. Native screenshots were returned inline in the
+verification chat; no standalone screenshot files were exported.
+
+| Input / time / candidate | Expected | Actual diagnostics | Direct output evidence / verdict |
+| --- | --- | --- | --- |
+| `John chapter three verse sixteen`, 23:46:27.508, `1e3e8d4883f7` | Normalize and present John 3:16 | DETECTED → DELIVERY_REQUESTED → COMMAND_ACCEPTED at .532 | Native THEME 1 screenshot and AX text showed John 3:16 and “For God so loved the world…”; **PASS, visible** |
+| `John chapter three verse seventeen`, 23:46:35.601, `625d03a3fa99` | Changed verse accepted within 10 s | Same three stages; COMMAND_ACCEPTED at .618, 8.09 s after first | Native presentation screenshot and AX text changed to John 3:17, “For God sent not his Son…”; **PASS, visible** |
+| Repeat John 3:17, 23:46:50.926, `a443c38b94e7` | Suppress exact duplicate | SUPPRESSED by `exact_reference_dedup`, 15.3 s after acceptance; no new browser command | **PASS, live suppression trace**; output pixels after the repeat were not separately recaptured |
+| `verse eighteen`, threshold .90, 23:46:58.792, `ab28b741c172` | Hold contextual 75% candidate until approved | MANUAL_CONFIRM_REQUIRED; last accepted reference stayed John 3:17. CUA observed actual Low Confidence Verse dialog and clicked Yes. Same ID reached COMMAND_ACCEPTED at 23:47:25.716 | Settled native output showed John 3:18 with “He that believeth on him…”; **PASS, hold/approval trace and visible approved result**. Output pixels during the hold were not separately captured |
+| `verses nineteen through twenty`, 23:47:43.654; first `9aa405b7bbc7`, queued `37b82ec608e7` | Hold first inferred verse under hear-twice verification; queue continuation | John 3:19 awaited second detection. John 3:20 fetched and QUEUED, semantic client unavailable | **PASS, real queue/verification trace**; no presentation command for either candidate |
+| `verses twenty one through twenty two`, 23:47:51.318; first `1552f6d9dfcb`, queued `0e9ff666a541` | Replace old range with correlated cancellation | John 3:20 CANCELLED under original ID. John 3:21 awaited second detection; John 3:22 fetched/QUEUED | **PASS, live replacement trace**. John 3:22 later EXPIRED at 23:51:31.359; final queue length zero. Semantic release **UNVERIFIED live** |
+| `Romans chapter eight verse one`, unavailable test-only URL, 23:49:02.283, `7a5cb712fa34` | Explain connection failure without poisoning delivered state | ERR_CONNECTION_REFUSED; DELIVERY_FAILED at 23:49:03.371; last accepted reference remained John 3:18 | **PASS, real connection failure trace**; failed-attempt output pixels not captured |
+| Restore URL, fresh same transcript at 23:49:11.610, `a523faba058d` | Retry fresh evidence without false chapter suppression | Candidate arrived 8.24 s after failure event; real reconnect succeeded and COMMAND_ACCEPTED at 23:49:27.616 | **PASS, live recovery trace**. Initial recovery pixels were not captured before GUI inspection. A later replay at 23:51:31.360 (`ad939211c79b`) was accepted and native THEME 1 screenshot/AX text confirmed Romans 8:1, “There is therefore now no condemnation…” |
+
+The input record contains only the deliberate synthetic test phrases. Each
+accepted attempt had its own candidate identity; the manual approval retained
+its original identity. The later Romans replay was deliberate, after more than
+the configured dedup window, not an unexplained retry. No unrequested accepted
+commands appeared in the captured event trace. Continuous screen recording
+was not performed, so this is not a proof against every possible delayed
+external presentation.
+
+### Diagnostic UI observations
+
+Computer Use directly inspected the real CTk GUI at its default **1060×700**
+size and after native window zoom (screenshot **2940×1718** physical pixels).
+The diagnostics title and populated event text were readable, with wrapped
+long lines and a visible scrollbar. Normal transcript/status logging continued
+above it, including the replay inputs, without diagnostics JSON flooding that
+pane. Start/Stop and bottom action controls remained visible. Diagnostics state
+was `disabled` in a live snapshot, consistent with read-only operation.
+
+The default size is cramped: the transcript shows only a few lines and the
+history/chapter sidebar headers are substantially clipped by the available
+height. Zooming provides readable sidebar headers and more transcript area.
+This is a **layout limitation**, not a clean pass for every supported window
+size. The runner did not populate the sidebar because streaming remained
+stopped. No speculative layout refactor was made.
+
+Scrolling older diagnostics is **UNVERIFIED**: native scroll/drag attempts
+either produced no demonstrated movement or Computer Use errors
+(`noWindowsAvailable`, invalid ScreenCaptureKit parameter, and an off-screen
+window-position error). A native menu also temporarily impeded input and was
+explicitly dismissed. These results do not isolate a scrollbar code defect.
+The remaining manual check is to open the source GUI, zoom it, scroll the
+diagnostics thumb to the top and back, then test the normal small window and
+divider with populated history while streaming.
+
+The bounded history is established independently by code and tests:
+`deque(maxlen=300)`, locked copied snapshots, last **80** GUI events, and
+500 ms main-Tk polling. The unit tests cover truncation/copy behavior and the
+actual refresh method with fake widgets. The live run generated 32 events;
+it did not reach the cap. No `PRESENTATION_CONFIRMED` event was added; observed
+pixels are test-report evidence only.
+
+### Cleanup, checks, and verdict
+
+The test-only target was restored to port 50010 before recovery. Confidence
+returned to .75; manual confirmation, cooldowns, and verification were preserved.
+CUA clicked Close Main Presentation and restored the VERSES tab. The control
+preview again showed Genesis 1:1. Routing and theme were never edited. VerseVIEW
+recent-reference chips now include the test references; they were left intact
+instead of deleting application history. The source runner and its owned
+headless browser were stopped. Temporary environment cleanup is recorded below.
+
+The created `/tmp/verseview-delivery-verify-20261003` directory, including the
+venv and temporary settings/session files, was removed after copying the safe
+evidence into this repository. System Python packages and installed application
+bundles were not modified. Pip may retain ordinary downloaded-package cache
+entries; existing caches were not purged.
+
+Saved detector settings were byte-for-byte unchanged: SHA-256 before and after
+`67c625931f0b92d51156cc808b759005cdf79af7ff29eac7442544fc4e99df8b`.
+The isolated import smoke check appended one SSL-bundle startup line to the
+existing detector log before the runner redirected logging; no existing log
+content was removed. Blank test webhook URLs generated Invalid URL errors in
+the old notification helper; these were configuration-side ancillary errors,
+not delivery failures, and did not transmit to a webhook.
+
+The **39 unit tests**, compilation command, and whitespace check listed above
+passed again during verification. Worker replacement/local-only matching remain
+focused automated-test results; neither was promoted to a live LLM claim.
+This verification changed the investigation document and added the safe evidence
+files; it made no further production-code changes.
+
+**Verdict:** the modified source delivered the requested same-chapter transition
+to the real installed VerseVIEW output, with additional live safeguard traces
+and approved manual delivery. Mock-tested internals remain distinct from live
+behavior. Microphone/STT transport, live semantic release, V10 output, full
+streaming orchestration, scrolling, small-window usability, and long-run
+intermittency are not fully verified. The original production incident still
+lacks matched detection/delivery/output evidence and is **not conclusively
+explained or proven permanently resolved** by this session.
+
+## Packaged application and microphone verification — October 4, 2026
+
+This stage treats the preceding live-source results as reported evidence, rather
+than repeating transcript injection. No transcript callback injection or source
+runner is used in this stage. Live speech results below will be filled from the
+packaged app's own microphone/STT logs and observed VerseVIEW output.
+
+### Build provenance
+
+- Branch `main`, source revision `0d3bd382a291d77b16f181cb189eadcdd7295ba4`.
+- Included the existing working-tree changes in `vv_streaming_master.py` and
+  `vv_gui.py`, plus the small layout correction described below. `.gitignore`
+  changes were copied but do not affect runtime. The unrelated `.DS_Store` was
+  preserved and excluded from staging. Reports/tests are validation material,
+  not executable application inputs.
+- Used the existing `verseview.spec` and the repository's macOS workflow:
+  PyInstaller, then an ad-hoc signature on the separate artifact. No packaging
+  specification, signing policy, or system security setting was changed.
+- User explicitly approved a temporary PyPI build environment, Homebrew
+  PortAudio, and test-artifact signing. PortAudio 19.7.0 was installed; Homebrew
+  also performed its ordinary automatic update/cache cleanup. System Python
+  packages were not installed or changed.
+- Local interpreter: python.org **Python 3.13.15**, Apple Silicon arm64; the
+  existing CI workflow selects Python 3.11. PyInstaller **6.22.3**. Exact package
+  versions are in `docs/evidence/2026-10-04-packaged/dependencies.txt`.
+- Build command:
+  `/tmp/verseview-package-build-20261004/bin/pyinstaller --clean -y verseview.spec`
+  from `dist/verification-20261004/source`, a copy of the current tracked files.
+  Only the staged `version.txt` was assigned a verification build tag.
+- Artifact:
+  `/Users/kevinanil/VerseView-Detector/dist/verification-20261004/VerseView Detector Test.app`.
+  Tag: `verify-0d3bd38-dirty-20261004-531a2b2d`.
+- Executable SHA-256:
+  `e828065b6ecf445b9a6e39951be3000417d3a0894dd311cfe400afcd2fe2f35a`.
+- `codesign --force --deep --sign -` and
+  `codesign --verify --deep --strict --verbose=2` succeeded on this artifact.
+  This is an ad-hoc signed local test bundle; no notarization was performed.
+- Extracted the executable's `vv_gui` code and PYZ archive's
+  `vv_streaming_master` code. Recursive comparisons of bytecode, constants,
+  nested functions, argument/closure metadata and exception/line tables match
+  freshly compiled staged source exactly, omitting only build-specific filenames.
+  `verify_archive.py` and `provenance.json` preserve the check and hashes.
+
+CUA launched the **packaged bundle**. Its title shows the verification tag.
+At 00:12:06 CDT, PID **11745**, parent PID 1, ran
+`.../VerseView Detector Test.app/Contents/MacOS/VerseView_Detector`.
+`process-final.json` records the full process path. No `vv_gui.py` or source
+runner process was used. The startup log resolves certifi inside the bundle's
+Frameworks directory. The existing `/Applications/VerseView Detector.app` was
+not replaced or modified.
+
+### Target, settings, and approval
+
+CUA inspected `/Applications/VerseVIEW11.app`, control window
+**VerseVIEW 11.0.0 #2**. The resolved remote endpoint is
+`http://127.0.0.1:50010/control.html`. Main Presentation is enabled on
+**Screen 1 → 1470×956**; Stage and AUX are disabled. Theme is Blue stars motion
+background. The user explicitly confirmed isolation from projectors, broadcasts,
+livestreams and audiences, and approved the spoken transition, duplicate, manual
+and semantic-queue tests. Display routing and themes have not been changed.
+
+Original detector settings SHA-256:
+`67c625931f0b92d51156cc808b759005cdf79af7ff29eac7442544fc4e99df8b`.
+An original byte-for-byte backup is held in a private temporary directory outside
+the repository. No prior session file existed. Provider **Deepgram**, language
+**English**, microphone index **2**, verification **on**, manual confirmation
+**on**, confidence **.75**, cooldown **3 seconds**, deduplication **60 seconds**,
+verse interrupt **off**. Configured cloud/local LLM choices and STT credentials
+are retained. Webhook URLs and settings-sync URL were temporarily cleared and
+automatic notes saving disabled to keep test activity local; these changes must
+be restored after testing.
+
+Device-index enumeration changed between launches: the first artifact listed
+index 2 as Kevin's iPhone Microphone; the rebuilt artifact lists index 2 as
+**MacBook Air Microphone**. The actual opened device must be confirmed in the
+provider log before speech testing; an index alone is not a stable device name.
+
+### Packaged diagnostic layout
+
+The first artifact reproduced clipping at the default **1060×700** window:
+both history headers were cut off and only a short transcript region remained,
+while the Suggestions region occupied much of the available height.
+`default-before.png` preserves the screenshot. Enlarging the window exposed
+both headers, separating a geometry problem from absent widgets.
+
+The smallest correction reserves a **200-pixel minimum** for the existing
+transcript/history grid row. No panels, controls or delivery guards were
+redesigned. The rebuilt packaged artifact visibly shows both history headers,
+manual reference entry and a readable transcript region at the same default
+size (`default-after.png`). Start, Stop and essential toolbar controls remain
+visible at default and enlarged sizes. Diagnostics are still a separate bounded
+text panel below Suggestions.
+
+Added a focused real-Tk geometry regression. At a constrained 470-pixel region,
+the old row configuration allocates only **68 pixels** to transcript/history and
+fails the usable-height check; the corrected configuration passes. Negative
+control evidence is in `layout-regression-control.log`. All **40 tests**,
+compilation, and `git diff --check` passed after the change.
+
+CUA successfully scrolled the packaged settings sidebar down to Options,
+Advanced Settings and Save/Export/Import, then back upward. Evidence:
+`settings-scroll.png`. Diagnostic-event scrolling, outcome accessibility while
+events arrive, transcription interference, and spoken end-to-end delivery
+remain pending at this checkpoint. CUA coordinate
+clicks on Start produced no engine-start log or status change even after raising
+and enlarging the window. This is not yet attributed to the application: the
+user was asked to click Start directly while monitoring continues.
+
+### Real microphone startup checkpoint — 07:39–07:49 CDT
+
+The user clicked Start in the packaged artifact. Its normal engine connected
+to VerseVIEW at **07:39:56.533**, opened **[2] MacBook Air Microphone** at
+**07:40:01.777**, and connected English **Deepgram Nova-3** over WebSocket at
+**07:40:02.070**. PID 11745 remained the packaged executable. This confirms
+microphone initialization and provider connection; no speech transcript was
+captured in that first startup, so it is not a completed speech-delivery test.
+The default 60-second inactivity timer stopped it at **07:40:58.535**, closing
+the browser and provider connection. The WebSocket close/send warnings occur
+during this shutdown and are not evidence of a missed detected reference.
+
+The stopped app was closed and its normal saved inactivity timeout temporarily
+increased from **60 to 600 seconds** for test coordination. After an idle
+relaunch, its existing **Auto-Start** preference was temporarily enabled to
+avoid another manual Start step. The same unchanged packaged artifact then
+auto-started, connected VerseVIEW at **07:48:04.934**, opened the MacBook Air
+microphone at **07:48:05.073**, and connected Deepgram at **07:48:05.298**.
+These two additional settings must also be restored from the original backup.
+No callback injection, microphone substitution, code patch or new delivery
+retry was introduced. Explicit-reference FAST-PATH already bypasses hear-twice
+verification by its existing design; the verification preference itself stays on.
+
+Startup also reported **Cerebras HTTP 402 / quota required** for the outline
+service. This is separate from the successfully connected Deepgram STT and
+VerseVIEW controller. No provider billing/account setting was changed.
+
+The user has been asked to speak John 3:16, then John 3:17 after four seconds,
+then repeat John 3:17. Two 45-second native-output monitoring intervals captured
+zero command acceptances, and no speech text appeared in the provider log at
+the checkpoint. Whether the user spoke during those intervals is not established;
+do not attribute this absence to an STT failure without that fact. Spoken
+transition, duplicate, manual and semantic-queue cases remain unverified.
+
+Separately, at the user's request, CUA changed and verified macOS Lock Screen
+preferences: display off after **2 minutes on battery** and **10 minutes on the
+power adapter**, both previously Never. These are requested permanent user
+preferences, not temporary detector-test settings.
+
+
+### Actual spoken-reference checkpoint — 08:34–08:41 CDT
+
+The user started the same packaged application again. PID **22495**, parent 1,
+started at **07:47:43 CDT** and runs the exact test bundle executable; the
+process evidence is in `process-microphone.json`. The microphone log confirms
+**[2] MacBook Air Microphone**, opened **08:34:18.761**, and configured
+English **Deepgram Nova-3**, connected **08:34:18.971**. No transcript injection
+was used. Times below are October 4 CDT; structured events preserve UTC times.
+
+| STT output and time | Candidate | Delivery result |
+| --- | --- | --- |
+| “Let's give our attention to John chapter three verses sixteen.” 08:34:28.852 | `f18bae740e3d` | DETECTED 08:34:28.860110; DELIVERY_REQUESTED 08:34:28.869601; COMMAND_ACCEPTED 08:34:28.888018 |
+| “Let's give our attention to John chapter three verses seventeen.” 08:34:51.424 | `1c71b4d67b84` | DETECTED 08:34:51.451802; DELIVERY_REQUESTED 08:34:51.459056; COMMAND_ACCEPTED 08:34:51.466562 |
+| “Let's read John chapter three verses seventeen.” 08:35:01.077 | `9f037adeb504` | DETECTED 08:35:01.093621; SUPPRESSED 08:35:01.116702, exact-reference chapter guard, 0.340 s remaining |
+| “John chapter three verses seventeen.” 08:35:11.857 | `b935c4606b99` | DETECTED 08:35:11.862020; SUPPRESSED 08:35:11.865717, configured dedup guard, 39.591 s remaining |
+
+The user supplied speech; the quoted text is the provider's recognized text,
+not an independently recorded waveform. **PASS**: real microphone/STT transport,
+explicit-reference detection and command acceptance for both references;
+**PASS**: duplicate suppression at both guards. Commands were accepted
+**22.578544 seconds apart**, so the requested within-ten-seconds condition is
+**UNVERIFIED**, not a passing timing test. Visible verse text for either
+acceptance was not captured while those commands arrived. CUA subsequently
+observed the control window's recent references, which does not establish
+actual presentation output. A repeat with a four-second spoken gap is requested.
+
+At **08:35:40.200** the log reports Deepgram WebSocket closure, followed by
+sender stop and normal controller shutdown at **08:35:40.959**. The next observed
+GUI is Stopped. There is no recorded inactivity message for this shutdown and
+its trigger is not established. These warnings occurred after the accepted
+references; they do not establish a failed downstream delivery. Preserve them
+as a transport/shutdown observation rather than silently treating it as success
+for continuous listening. Blank local-test webhook URLs cause ancillary
+Invalid URL messages after acceptance; no outbound webhook request succeeded.
+
+CUA observed populated diagnostic outcomes and separate transcription at the
+default window, including both SUPPRESSED reasons and candidate IDs. It currently
+returns `noWindowsAvailable` for native detector window actions, preventing
+verified diagnostic scrolling and approval-button interaction through automation.
+This is a Computer Use interaction limitation; no evidence-supported application
+change has been made for it. Manual confirmation and semantic queue release
+remain **UNVERIFIED** in this packaged microphone stage.
+
+
+At the user's request, verification was paused for a repository commit and push.
+The 40-test suite, compilation and whitespace checks passed again at 08:44 CDT.
+Configured credential values were absent from the evidence text being committed.
+The original installed application's **588 regular non-symlink files** match the
+pre-test manifest exactly (`installed-app-preservation.json`). Temporary detector
+settings and the build environment remain in place for the pending verification;
+cleanup has not yet been claimed. The separate test bundle remains the artifact
+identified above; committing its source does not rebuild or replace that bundle.

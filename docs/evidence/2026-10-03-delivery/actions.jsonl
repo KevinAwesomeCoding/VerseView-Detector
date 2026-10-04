@@ -1,0 +1,31 @@
+{"time": 1791089138.4487932, "kind": "source", "engine": "/Users/kevinanil/VerseView-Detector/vv_streaming_master.py", "gui": "/Users/kevinanil/VerseView-Detector/vv_gui.py", "engine_sha256": "3ed212223c53c0fb9e2a7525678c28033e44385107b4f32c205d24e7248bf95e", "gui_sha256": "4208cbb0747beac61a1fe6c90698bdc2f5db953f4e14d837a55874319bfcf87b"}
+{"time": 1791089143.995717, "kind": "command", "op": "connect"}
+{"time": 1791089161.23084, "kind": "connected", "connected": true, "version": "verseview11"}
+{"time": 1791089187.50193, "kind": "command", "op": "pair", "delay": 8}
+{"time": 1791089187.5623748, "kind": "pair_first_complete", "last_sent": "John 3:16"}
+{"time": 1791089195.6348622, "kind": "pair_second_complete", "last_sent": "John 3:17"}
+{"time": 1791089210.925015, "kind": "command", "op": "replay", "text": "John chapter three verse seventeen"}
+{"time": 1791089210.9277382, "kind": "replay_complete", "text": "John chapter three verse seventeen", "last_sent": "John 3:17"}
+{"time": 1791089217.650191, "kind": "command", "op": "config", "confidence": 0.9, "manual": true}
+{"time": 1791089217.650966, "kind": "config", "confidence": 0.9, "manual": true}
+{"time": 1791089218.7609441, "kind": "command", "op": "replay", "text": "verse eighteen"}
+{"time": 1791089218.7924511, "kind": "replay_complete", "text": "verse eighteen", "last_sent": "John 3:17"}
+{"time": 1791089263.634932, "kind": "command", "op": "replay", "text": "verses nineteen through twenty"}
+{"time": 1791089263.634732, "kind": "command", "op": "config", "confidence": 0.75}
+{"time": 1791089263.635657, "kind": "config", "confidence": 0.75, "manual": true}
+{"time": 1791089263.657059, "kind": "replay_complete", "text": "verses nineteen through twenty", "last_sent": "John 3:18"}
+{"time": 1791089271.3161678, "kind": "command", "op": "replay", "text": "verses twenty one through twenty two"}
+{"time": 1791089271.329398, "kind": "replay_complete", "text": "verses twenty one through twenty two", "last_sent": "John 3:18"}
+{"time": 1791089302.2918751, "kind": "command", "op": "disconnect"}
+{"time": 1791089342.281259, "kind": "command", "op": "replay", "text": "Romans chapter eight verse one"}
+{"time": 1791089343.3713431, "kind": "replay_complete", "text": "Romans chapter eight verse one", "last_sent": "John 3:18"}
+{"time": 1791089350.581515, "kind": "command", "op": "restore_target"}
+{"time": 1791089351.60783, "kind": "command", "op": "replay", "text": "Romans chapter eight verse one"}
+{"time": 1791089367.635384, "kind": "replay_complete", "text": "Romans chapter eight verse one", "last_sent": "Romans 8:1"}
+{"time": 1791089484.194397, "kind": "command", "op": "snapshot"}
+{"time": 1791089484.196662, "kind": "snapshot", "events": 28, "last_sent": "Romans 8:1", "queue": 1, "diag_state": "disabled"}
+{"time": 1791089491.356098, "kind": "command", "op": "replay", "text": "Romans chapter eight verse one"}
+{"time": 1791089491.410201, "kind": "replay_complete", "text": "Romans chapter eight verse one", "last_sent": "Romans 8:1"}
+{"time": 1791089552.469598, "kind": "command", "op": "snapshot"}
+{"time": 1791089552.471283, "kind": "snapshot", "events": 32, "last_sent": "Romans 8:1", "queue": 0, "diag_state": "disabled"}
+{"time": 1791089637.443907, "kind": "command", "op": "quit"}
