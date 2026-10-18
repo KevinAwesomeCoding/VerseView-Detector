@@ -1,6 +1,17 @@
 # Mac physical acceptance checkpoint — October 18, 2026
 
-**Later user-spoken checkpoint:** normal packaged **0.11.2** now has actual real
+**Latest repeat, 15:12 CDT:** normal packaged 0.11.2 recognized all three full
+English phrases. 3:16 and 3:17 PRESENT commands were accepted **9.475974 seconds
+apart**; repeated 3:17 was recognized and suppressed by the exact-reference guard,
+with no second command. **PASS for rapid command transition and duplicate
+suppression.** The user explicitly confirms both verses appeared and the repeat
+stayed unchanged (**visible reference behavior user-confirmed**). Exact visible
+verse text and contemporaneous automated output capture remain unverified.
+See the [latest investigation entry](../docs/DELIVERY_INVESTIGATION.md) for IDs and
+timestamps. Earlier checkpoints below retain their historical results.
+
+
+**Earlier user-spoken checkpoint:** normal packaged **0.11.2** now has actual real
 microphone/Deepgram recognition and accepted PRESENT commands for 3:16 and 3:17,
 23.564752 seconds apart. Two earlier phrases produced a chapter-only parse and a
 verification hold. Follow-up inspection found Spoken Numeral Mode is off; the

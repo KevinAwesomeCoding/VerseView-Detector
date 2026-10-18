@@ -1,5 +1,49 @@
 # Verse delivery investigation
 
+## 2026-10-18 15:12 CDT: rapid spoken transition and duplicate repeat pass
+
+The user repeated the planned English test in the same normal packaged **0.11.2**
+application (source `e54b905fabe60ebfcf60f61916a15ab67079bb11`, build
+`2026-10-18T17-04-40-349Z-e54b905f-darwin-arm64`, dashboard PID **62977**,
+owned frozen backend PID **68579**, fresh recognition session
+`5491c40b74384ba68a67f44d55b56954`). Actual Deepgram final transcripts preserve
+the three full spoken references; this was not callback replay.
+
+| Recognized phrase / CDT time | Candidate | Stage timestamps and outcome |
+| --- | --- | --- |
+| “John chapter three verse sixteen.” **15:12:04.105655** | `56f3d2d957af` | DETECTED .107107 → DELIVERY_REQUESTED .116335 → COMMAND_ACCEPTED **15:12:04.132218**. |
+| “John chapter three verse seventeen.” **15:12:13.590509** | `491f7290f08b` | DETECTED .591819 → DELIVERY_REQUESTED .597708 → COMMAND_ACCEPTED **15:12:13.608192**. |
+| “John chapter three verse seventeen.” **15:12:24.073479** | `a14c0f5c96ed` | DETECTED .074330 → SUPPRESSED **15:12:24.075213**, dedup: “Previously accepted reference is within exact-reference cooldown.” No DELIVERY_REQUESTED or COMMAND_ACCEPTED for this candidate. |
+
+**PASS:** real English microphone/STT, explicit-reference detection and browser
+command execution for 3:16 then 3:17, accepted **9.475974 seconds apart**, within
+the requested ten seconds. **PASS:** the repeated reference was recognized and
+intentionally suppressed before sending, not missed by STT. This repeat occurred
+outside the short chapter cooldown but inside the exact-reference cooldown.
+
+**Visible reference behavior: PASS by explicit user observation.** The user
+reported that John 3:16 worked, John 3:17 worked, and the third repetition did not
+trigger output again. This supports the intended visible transition/duplicate
+behavior for this run. There was no contemporaneous automated capture of either
+presentation, and exact visible verse text was not quoted or independently
+verified; those evidence limits remain explicit. Do not describe log acceptance
+alone as a captured-screen pass or frame-accurate display latency measurement.
+
+The backend is now recognition **stopped**, after acknowledged Stop request
+`445858e50d0843c4b26be6f760a77d34`; the host remains available. This inspection
+sent no commands and changed no settings. Local evidence:
+`desktop-preview/test-results/spoken-repeat-20261018/{observer.json,results.json}`;
+full raw log is retained privately at
+`/tmp/verseview-spoken-repeat-20261018/verseview.log` (700 folder / 600 file).
+No rebuild or repeated suite was needed for this evidence-only update.
+
+Manual approval on real speech, dual English/Malayalam recognition, semantic queue
+release, diagnostic scrolling during active transcription and Windows physical
+acceptance remain open. Milestone progress stays **6/8, 75%**. This successful
+repeat does not establish the cause of the original intermittent incident, which
+remains unresolved.
+
+
 ## 2026-10-18: spoken-number configuration clarification
 
 A follow-up offline audit found that the first no-PRESENT case above follows an

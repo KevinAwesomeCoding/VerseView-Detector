@@ -80,3 +80,10 @@ A colloquial spoken-number phrase parsed chapter-only, and a split 3:17 transcri
 was held by verification. Native populated Activity scrolling passed while stopped.
 Actual visible verse output, rapid timing and remaining physical gates stay open;
 see the latest investigation entry. No guard was disabled. Progress remains 75%.
+
+15:12 CDT repeat: actual packaged 0.11.2 English STT recognized all three full
+phrases. John3:16/3:17 commands were accepted9.475974s apart; repeat3:17 was
+suppressed by exact-reference cooldown without another send. The user confirms
+both visible verses worked and repeat did not retrigger. These cases pass within
+that evidence scope; exact verse-text capture and remaining physical cases stay
+open. Progress remains6/8,75%; original incident unresolved.
