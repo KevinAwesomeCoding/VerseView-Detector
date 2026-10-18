@@ -3,7 +3,9 @@
 **Later user-spoken checkpoint:** normal packaged **0.11.2** now has actual real
 microphone/Deepgram recognition and accepted PRESENT commands for 3:16 and 3:17,
 23.564752 seconds apart. Two earlier phrases produced a chapter-only parse and a
-verification hold. Actual visible verse output and the within-ten-seconds condition
+verification hold. Follow-up inspection found Spoken Numeral Mode is off; the
+shorthand chapter-only parse is documented behavior for that setting, not a
+proven regression. No setting was changed. Actual visible verse output and the within-ten-seconds condition
 remain unverified. Populated native Activity scrolling passed while stopped.
 See the [latest investigation entry](../docs/DELIVERY_INVESTIGATION.md) for the
 exact transcript/candidate/stage timeline. The earlier away-from-computer session

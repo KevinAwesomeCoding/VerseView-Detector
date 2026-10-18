@@ -1,5 +1,33 @@
 # Verse delivery investigation
 
+## 2026-10-18: spoken-number configuration clarification
+
+A follow-up offline audit found that the first no-PRESENT case above follows an
+existing explicit parser setting: saved **`spoken_numeral_mode=false`**, also the
+default in `settings.py` and `configure()`. `parse_reference_eng.py` deliberately
+expects “John three sixteen” to be chapter-only when this mode is off; its existing
+self-test documents that expectation. The frozen backend maps persisted configure
+parameters without replacing this value. Earlier wording calling this a “parsing
+gap” describes the observed mismatch with the user's intent, not an established
+regression in this code path.
+
+The pure parser, without loading the engine or launching services, reproduced the
+exact recognized phrase as **John 3 with the mode off**, **John 3:16 with it on**.
+Twelve expected comparison results matched across both modes, also covering explicit
+chapter/verse speech, colon syntax, a chapter-only phrase and a chapter range.
+This bounded comparison does not establish broad false-positive safety or a real
+speech/presentation pass. Evidence: local
+`desktop-preview/test-results/spoken-20261018-1937/parser-mode-audit.json`.
+
+No runtime change, build, settings toggle or live test was made. Verification
+remains enabled, and the separate split-transcript 3:17 hold is unchanged. Keep
+“chapter three, verse sixteen” as the explicit test phrasing under the current
+configuration. A deliberate choice to support shorthand can use the existing mode;
+that choice has not been applied automatically. The remaining presentation question
+still needs the user's observation or contemporaneous capture of the output screen.
+Original incident unresolved; progress remains **6/8, 75%**.
+
+
 ## 2026-10-18 14:36–14:38 CDT: actual user-spoken preview checkpoint
 
 The user launched the normal packaged 0.11.2 backend (PID **68579**, dashboard
