@@ -18,3 +18,19 @@ test('Settings view acknowledges bot commands without visiting the engine contro
   assert.match(html,/Bot request acknowledged/);
   assert.doesNotMatch(html.match(/<button[^>]*data-engine-action="stop_bot"[^>]*>/)[0],/disabled/);
 });
+
+test('setup instructions distinguish the bundled host from an external detector and label saved Bible settings',()=>{
+  const snapshot={connection:'connected',message:'Connected',sources:[],session:{session_id:'a'.repeat(32),pid:123,engine_state:'configured',config:{},
+    host:{managed:true},control:{results:[],settings:{values:{bible_translation:'WEB'}}}}};
+  const window={previewShell:{getObserver:()=>snapshot,getBackend:()=>({status:'unavailable'})},detectorSettings:{render:()=>''}};
+  const document={getElementById:()=>({addEventListener:()=>{}}),addEventListener:()=>{}};
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../src/observer.js'),'utf8'),{window,document,Event,setTimeout:()=>{}});
+  let html=window.observerView.settings(snapshot);
+  assert.match(html,/Close the backend before editing credentials/);
+  assert.match(html,/Saved Bible translation: WEB · applies on Start/);
+  assert.doesNotMatch(html,/VERSEVIEW_OBSERVER|VERSEVIEW_DESKTOP_CONTROL/);
+  snapshot.session.config.bible_translation='KJV';
+  html=window.observerView.settings(snapshot);assert.match(html,/Engine Bible translation: KJV/);assert.doesNotMatch(html,/Saved Bible translation/);
+  snapshot.session.host.managed=false;
+  html=window.observerView.settings(snapshot);assert.match(html,/VERSEVIEW_OBSERVER=1/);assert.match(html,/VERSEVIEW_DESKTOP_CONTROL=1/);
+});

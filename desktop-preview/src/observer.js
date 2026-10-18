@@ -122,7 +122,7 @@
     const unknown = session?.transcripts.filter(row => row.stream === 'unknown').slice(-3) || [];
     return status(snapshot) + controlPanel(snapshot) + (layout.endsWith('focus') ? output(session) + transcripts : transcripts + output(session))
       + (unknown.length ? `<section class="vv-panel vv-observer-unknown"><h2>Unattributed speech</h2>${unknown.map(row => `<p>${escape(row.text)}</p>`).join('')}</section>` : '')
-      + '<p class="vv-caption vv-observer-note">The detector owns recognition and delivery. Queue and presentation settings remain in its existing window.</p>';
+      + `<p class="vv-caption vv-observer-note">${session?.host?.managed ? 'The bundled detector owns recognition and delivery. Advanced queue and presentation options are in its private backend settings file.' : 'The detector owns recognition and delivery. Queue and presentation settings remain in its existing window.'}</p>`;
   }
 
   function activity(snapshot) {
@@ -132,10 +132,13 @@
 
   function settings(snapshot) {
     const session = snapshot.session;
+    const managed = session?.host?.managed;
+    const bible = session?.config.bible_translation;
+    const savedBible = session?.control?.settings?.values?.bible_translation;
     return status(snapshot) + syncPanel(snapshot) + botPanel(snapshot) + window.detectorSettings.render(snapshot) + `<section class="vv-panel preview-about" aria-label="Observer setup"><h2>Local detector connection</h2>
-      <p class="vv-caption">${session?.host?.managed ? "This dashboard owns the bundled backend and its private preview profile. The installed detector has not been replaced." : "The preview reads structured snapshots from your local VerseView/Observer folder. The installed detector has not been replaced."}</p>
-      <p class="vv-caption">An updated detector must be started with <code>VERSEVIEW_OBSERVER=1</code> to publish the feed. Also set <code>VERSEVIEW_DESKTOP_CONTROL=1</code> to enable start/stop and candidate decisions. Without that opt-in the connection stays read only. Speech and connection settings can be saved above while stopped; credentials and advanced options remain in the detector.</p>
-      <p class="vv-caption">${session ? `Session ${escape(session.session_id)} · Bible setting: ${escape(session.config.bible_translation || 'not reported')}` : 'No observer session selected.'}</p></section>`;
+      <p class="vv-caption">${managed ? "This dashboard owns the bundled backend and its private preview profile. The installed detector has not been replaced." : "The preview reads structured snapshots from your local VerseView/Observer folder. The installed detector has not been replaced."}</p>
+      <p class="vv-caption">${managed ? 'Use the engine controls to start or stop recognition. Speech and connection settings can be saved above while recognition is stopped. Close the backend before editing credentials or advanced options in its private settings file.' : 'An updated detector must be started with <code>VERSEVIEW_OBSERVER=1</code> to publish the feed. Also set <code>VERSEVIEW_DESKTOP_CONTROL=1</code> to enable start/stop and candidate decisions. Without that opt-in the connection stays read only. Speech and connection settings can be saved above while stopped; credentials and advanced options remain in the detector.'}</p>
+      <p class="vv-caption">${session ? `Session ${escape(session.session_id)} · ${bible ? `Engine Bible translation: ${escape(bible)}` : savedBible ? `Saved Bible translation: ${escape(savedBible)} · applies on Start` : 'Bible setting: not reported'}` : 'No observer session selected.'}</p></section>`;
   }
 
   function syncPanel(snapshot){

@@ -1,6 +1,9 @@
 (()=>{
   const root=document.getElementById('verseview-prototype');
   const observing=()=>window.previewShell.getMode()==='observer';
+  const connectionNotice=()=>window.previewShell.getObserver().session?.host?.managed
+    ? 'Bundled backend connected. Use the engine controls to start or stop.'
+    : 'Local engine connection. Controls require explicit opt-in in the detector.';
   const themes={
     sage:{name:'Sage',description:'Soft sage · follows system',preview:['#edf1ea','#fff','#247e69']},
     midnight:{name:'Midnight',description:'Matte charcoal & indigo',preview:['#111319','#242834','#6c7ce0']},
@@ -153,7 +156,7 @@
       app.innerHTML=`<div class="vv-shell"><aside class="vv-sidebar">${brand()}<div><div class="vv-eyebrow vv-nav-label">Workspace</div>${nav()}</div><div class="vv-sidebar-foot"><p>${observing()?'Detector connection':'Rehearsal workspace'}</p><p>${observing()?'Local engine feed':'Sample data only'}</p></div></aside>
         <main class="vv-main"><div class="vv-narrow-nav">${brand()}${nav()}</div><header class="vv-topline"><div><h1>${titles[state.view]||titles.session}</h1><p class="vv-subtitle">${subtitles[state.view]||subtitles.session}</p></div><div class="vv-live-controls">${themePicker(prefix)}${observing()?'<span class="vv-pill">Local feed</span>':button('toggle',state.listening?'Pause demo':'Resume demo',state.listening?'pause':'play',!state.listening)}</div></header>
         <div class="vv-content">${state.view==='session'?session(prefix):state.view==='activity'?(observing()?window.observerView.activity(window.previewShell.getObserver()):activity()):state.view==='outline'&&observing()?window.observerView.outline(window.previewShell.getObserver()):state.view==='testing'?testing(prefix):appearance()+(observing()?window.observerView.settings(window.previewShell.getObserver()):settings(prefix))+desktopInfo()}</div>
-        <div class="${state.view==='session'?'vv-live-announcement':'vv-feedback'}" role="status" aria-live="polite">${state.view==='session'?'':icon('info')}<span>${esc(observing()?'Local engine connection. Controls require explicit opt-in in the detector.':state.feedback)}</span></div><footer class="vv-foot"><span>${observing()?'Desktop preview · live observer':'Desktop preview · sample data only'}</span><span>${observing()?'Delivery guards remain in the engine':'No microphone or VerseVIEW connection'}</span></footer></main></div>`;
+        <div class="${state.view==='session'?'vv-live-announcement':'vv-feedback'}" role="status" aria-live="polite">${state.view==='session'?'':icon('info')}<span>${esc(observing()?connectionNotice():state.feedback)}</span></div><footer class="vv-foot"><span>${observing()?'Desktop preview · live observer':'Desktop preview · sample data only'}</span><span>${observing()?'Delivery guards remain in the engine':'No microphone or VerseVIEW connection'}</span></footer></main></div>`;
       app.scrollTop=scrollTop;
     }
     window.detectorSettings?.syncControls();
