@@ -1,5 +1,23 @@
 # Verse delivery investigation
 
+## 2026-10-18: standalone outline notes and explicit display implementation
+
+Preview 0.9.0 connects the existing outline loop to revision-bound editable
+notes. Captured dispatch routing and callbacks, stale-reply checks, typed text
+limits and executor draining on Stop prevent an old generation from overwriting
+new operator notes or starting a later fallback after Stop. A separate plain-text
+outline window requires explicit selection/opening and closes on lost session,
+feed or monitor; its real window/fullscreen output has not been exercised.
+
+Source `b62103e4fba8868b9d677ad304154582392641a0`, local build
+`2026-10-18T10-22-51-380Z-b62103e4-darwin-arm64`: 122 Python tests, 42 Node
+tests, six packaged Mac suites and 180 layout cases passed. Actual frozen
+outline processing used mocked models/STT/browser services. Native CI
+39118943718 passed Windows x64 and both Mac architectures. Physical speech,
+model quality, audience/VerseVIEW output and live queue release remain deferred.
+The original intermittent delivery incident remains unresolved. Details:
+[outline verification](../desktop-preview/OUTLINE_VERIFICATION.md).
+
 ## 2026-10-18: standalone watcher suggestions
 
 Preview 0.8.0 adds six expiring, stream-attributed watcher suggestions and

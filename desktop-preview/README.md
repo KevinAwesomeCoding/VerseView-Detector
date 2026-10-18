@@ -3,7 +3,7 @@
 A separate Electron dashboard for macOS and Windows, with local engine events,
 **optional start/stop, candidate approval, and non-secret settings**, and a separate sample demo. The
 Python companion owns microphone/STT, settings, and guarded delivery. Version
-0.8.0 bundles the native backend, recovery, local-model warmup and watcher suggestions; external-detector observation still works.
+0.9.0 bundles the native backend, recovery, warmup, watcher suggestions and editable outline notes; external-detector observation still works.
 The installed detector remains unchanged. This milestone is still in progress.
 
 ## Standalone companion (milestone 6 in progress)
@@ -32,8 +32,7 @@ app open for cleanup. Unexpected exits are visible and are never automatically
 restarted. Explicit relaunch selects the new owned PID and leaves recognition
 stopped. Closing an external detector feed remains outside this ownership.
 
-Compatibility is incomplete. Saved live-outline display,
-Discord bot or settings sync settings block
+Compatibility is incomplete. Saved Discord bot or settings sync settings block
 Start with a named migration message. Their values are retained; they are not
 silently disabled. Full legacy feature parity remains open. Session transcripts/optional summaries have a headless save path,
 but real cloud summary behavior has not been physically verified.
@@ -54,6 +53,19 @@ and the existing guarded manual-delivery path; it reports command acceptance or
 the need to inspect delivery activity. Advice itself is never labeled delivered.
 Existing engine automatic WATCHER behavior remains unchanged. See
 [suggestions verification](SUGGESTIONS_VERIFICATION.md) for packages and limits.
+
+The Outline view connects the existing opt-in generation loop to editable notes.
+Save uses the current session and note revision; a delayed model reply cannot
+overwrite newer operator edits. Stop drains owned executor work, retaining the
+notes in memory. Closing the backend clears them. Generated text above the
+4,000-character editor limit retains previous notes with a fixed error notice.
+
+A separate outline window opens only after you select a current monitor or
+Windowed preview and explicitly open it. It displays plain text, supports Escape
+and closes if its feed/session/target disappears. It is separate from VerseVIEW
+verse output. Actual output-window/fullscreen routing remains physically
+unverified; only injected-window routing and packaged editor tests were run.
+See [outline verification](OUTLINE_VERIFICATION.md) for exact builds and limits.
 
 Smart Schedule now shares the legacy local timetable: Saturday Malayalam;
 Sunday English from 09:10, Malayalam from 10:40 and Hindi from 16:40. In the
