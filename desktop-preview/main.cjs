@@ -1,6 +1,6 @@
 'use strict';
 
-const { app, BrowserWindow, ipcMain, Menu, nativeTheme, session, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu, nativeTheme, session, shell, screen } = require('electron');
 const path = require('node:path');
 const os = require('node:os');
 const { pathToFileURL } = require('node:url');
@@ -8,6 +8,7 @@ const { DARK_THEMES, validTheme, backdropPolicy, backgroundColor } = require('./
 const { EngineFeedReader, feedDirectory } = require('./engine-feed.cjs');
 const { EngineCommands } = require('./engine-commands.cjs');
 const { BackendManager } = require('./backend-manager.cjs');
+const { OutlineOutput } = require('./outline-output.cjs');
 const fs = require('node:fs');
 
 app.setName('VerseView Desktop Preview');
@@ -17,6 +18,7 @@ if (process.env.VV_PREVIEW_TEST_PROFILE === '1') {
   app.setPath('userData', path.join(app.getPath('userData'), 'QA'));
 }
 let window;
+let outlineOutput;
 let theme = 'glass';
 let appearance;
 let build = { sourceRevision: 'development', buildId: 'development' };
@@ -29,6 +31,7 @@ const observerDirectory = process.env.VV_PREVIEW_TEST_PROFILE === '1' && process
   : feedDirectory({ platform: process.platform, appData: app.getPath('appData'), home: app.getPath('home') });
 const observer = new EngineFeedReader({ directory: observerDirectory, onChange: snapshot => {
   if (window && !window.isDestroyed()) window.webContents.send('preview:observer-changed', snapshot);
+  outlineOutput?.update(snapshot);
 } });
 
 const commands = new EngineCommands(observer);
@@ -42,7 +45,10 @@ const backendProfile = path.join(app.getPath('userData'), 'Backend');
 const manager = new BackendManager({ root: backendRoot, profile: backendProfile,
   sourceProfile: qa ? (process.env.VV_BACKEND_SOURCE_PROFILE || path.join(backendProfile, 'EmptySource')) : path.dirname(observerDirectory),
   verification: qa && process.env.VV_BACKEND_VERIFY === '1',
-  onChange: state => { if (window && !window.isDestroyed()) window.webContents.send('preview:backend-changed', state); } });
+  onChange: state => {
+    if(state.status!=='ready')outlineOutput?.close();
+    if (window && !window.isDestroyed()) window.webContents.send('preview:backend-changed', state);
+  } });
 function useObserverDirectory(directory) {
   observer.stop(); observer.directory = directory; observer.selected = null; observer.cache.clear();
   observer.signature = ''; observer.start();
@@ -120,6 +126,19 @@ ipcMain.handle('preview:send-suggestion', (event, sessionId, suggestionId) => {
   if (!trusted(event)) throw new Error('Untrusted preview sender');
   return commands.submit(sessionId, 'send_suggestion', undefined, undefined, undefined, suggestionId);
 });
+ipcMain.handle('preview:edit-outline',(event,sessionId,revision,text)=>{
+  if(!trusted(event))throw new Error('Untrusted preview sender');
+  return commands.submit(sessionId,'edit_outline',undefined,undefined,undefined,undefined,{revision,text});
+});
+ipcMain.handle('preview:outline-output-state',event=>{
+  if(!trusted(event))throw new Error('Untrusted preview sender');return outlineOutput.state();
+});
+ipcMain.handle('preview:open-outline-output',(event,sessionId,target)=>{
+  if(!trusted(event))throw new Error('Untrusted preview sender');return outlineOutput.open(sessionId,target);
+});
+ipcMain.handle('preview:close-outline-output',event=>{
+  if(!trusted(event))throw new Error('Untrusted preview sender');return outlineOutput.close();
+});
 
 ipcMain.handle('preview:backend-state', event => {
   if (!trusted(event)) throw new Error('Untrusted preview sender');
@@ -163,12 +182,19 @@ function createWindow() {
   window.webContents.on('will-attach-webview', event => event.preventDefault());
   window.webContents.on('did-finish-load', updateBackdrop);
   window.once('ready-to-show', () => { updateBackdrop(); window.show(); });
-  window.on('closed', () => { window = null; });
+  window.on('closed', () => { window = null; outlineOutput?.close(); });
   updateBackdrop();
   window.loadFile(path.join(__dirname, 'src', 'index.html'));
 }
 
 app.whenReady().then(() => {
+  outlineOutput=new OutlineOutput({BrowserWindow,screen,readSnapshot:()=>observer.poll(),
+    page:path.join(__dirname,'src/outline-display.html'),preload:path.join(__dirname,'outline-preload.cjs'),
+    onChange:state=>{if(window&&!window.isDestroyed())window.webContents.send('preview:outline-output-changed',state);}});
+  for(const event of ['display-added','display-removed','display-metrics-changed'])screen.on(event,()=>{
+    outlineOutput.update(observer.snapshot);
+    if(window&&!window.isDestroyed())window.webContents.send('preview:outline-output-changed',outlineOutput.state());
+  });
   observer.start();
   session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
   session.defaultSession.setPermissionCheckHandler(() => false);
@@ -187,6 +213,7 @@ app.whenReady().then(() => {
 nativeTheme.on('updated', updateBackdrop);
 app.on('window-all-closed', () => app.quit());
 app.on('before-quit', event => {
+  outlineOutput?.close();
   if (quitting) { observer.stop(); return; }
   if (!manager.child) { observer.stop(); return; }
   event.preventDefault();

@@ -1281,6 +1281,7 @@ PANIC_KEY              = "esc"
 LIVE_POINTS_PROMPT         = ""
 LIVE_POINTS_CALLBACK       = None
 LIVE_POINTS_GET_CURRENT_CB = None
+LIVE_POINTS_STATUS_CALLBACK = None
 
 SMART_AMEN_ENABLED  = True
 SMART_AMEN_KEYWORDS = [
@@ -2249,15 +2250,24 @@ def check_smart_amen(text, controller):
 
 
 # ── LIVE POINTS LOOP  (Cerebras → Groq fallback) ─────────────────────────────
-async def live_points_loop():
+async def live_points_loop(interval=90):
     global full_sermon_transcript, LLM_ENABLED, groq_client, cerebras_client
     global LIVE_POINTS_PROMPT, LIVE_POINTS_CALLBACK, LIVE_POINTS_GET_CURRENT_CB
     global LIVE_POINTS_ENABLED, _live_outline_last_dispatch, _groq_outline_call_times
 
     last_processed_length = 0
+    session_stop = stop_event
+    publish = LIVE_POINTS_CALLBACK
+    current_notes = LIVE_POINTS_GET_CURRENT_CB
+    status_callback = LIVE_POINTS_STATUS_CALLBACK
+    def report_status(status):
+        if status_callback:
+            try: status_callback(status)
+            except Exception: logger.debug('Outline status callback failed', exc_info=True)
 
-    while not stop_event.is_set():
-        await asyncio.sleep(90)
+    while not session_stop.is_set():
+        await asyncio.sleep(interval)
+        if session_stop.is_set(): return
 
         # Bug 8: respect the Live Points enabled toggle — do nothing when it is off
         if not LIVE_POINTS_ENABLED:
@@ -2265,7 +2275,7 @@ async def live_points_loop():
 
         if (not LLM_ENABLED
                 or not _role_has_llm("outline", cerebras_client, groq_client)
-                or not LIVE_POINTS_CALLBACK):
+                or not publish):
             continue
 
         # Bug 2: minimum 20s between consecutive outline dispatches
@@ -2280,7 +2290,7 @@ async def live_points_loop():
         last_processed_length       = len(current_transcript)
         _live_outline_last_dispatch = time.time()
 
-        current_display = LIVE_POINTS_GET_CURRENT_CB().strip() if LIVE_POINTS_GET_CURRENT_CB else ""
+        current_display = current_notes().strip() if current_notes else ""
         if current_display:
             prompt = (
                 f"{LIVE_POINTS_PROMPT}\n\n"
@@ -2291,12 +2301,20 @@ async def live_points_loop():
             prompt = f"{LIVE_POINTS_PROMPT}\n\nTranscript:\n{current_transcript}"
 
         try:
+            # Capture routing for this dispatch. Stop may leave a synchronous
+            # provider call finishing, but it must not use a later session's
+            # clients or start another fallback tier after cancellation.
+            local_outline = _local_client_for('outline') if _local_llm_active_for('outline') else None
+            outline_cerebras, outline_groq = cerebras_client, groq_client
+            failure_policy = LOCAL_LLM_ON_FAILURE
+            report_status('generating')
             def fetch_points():
                 # Local LLM tier — ONLY when the "Live Outline" role is set to
                 # Local LLM. Runs inside run_in_executor (below), so a slow local
                 # model delays only this 90s background loop.
-                if _local_llm_active_for("outline"):
-                    _oc = _local_client_for("outline")
+                if session_stop.is_set(): return None
+                if local_outline:
+                    _oc = local_outline
                     try:
                         response = _oc.chat.completions.create(
                             model=_oc.model,
@@ -2305,15 +2323,16 @@ async def live_points_loop():
                         return response.choices[0].message.content.strip()
                     except Exception as e:
                         _log_local_llm_failure("outline", e)
-                        if LOCAL_LLM_ON_FAILURE != "fallback":
+                        if failure_policy != "fallback" or session_stop.is_set():
                             logger.warning("⏭️ Live outline skipped this cycle (local LLM unreachable).")
                             return None
                         logger.warning("🔁 Local LLM outline failed — falling back to cloud...")
 
                 # Cerebras live outline generation
-                if cerebras_client:
+                if session_stop.is_set(): return None
+                if outline_cerebras:
                     try:
-                        response = cerebras_client.chat.completions.create(
+                        response = outline_cerebras.chat.completions.create(
                             model="gpt-oss-120b",
                             messages=[{"role": "user", "content": prompt}],
                         )
@@ -2322,7 +2341,8 @@ async def live_points_loop():
                         logger.warning(f"Live points generation via Cerebras failed: {e}. Falling back to Groq...")
 
                 # Fallback to Groq — log explicitly for production tracking
-                if groq_client:
+                if session_stop.is_set(): return None
+                if outline_groq:
                     _now_rpm = time.time()
                     _groq_outline_call_times[:] = [t for t in _groq_outline_call_times if _now_rpm - t < 60]
                     if len(_groq_outline_call_times) >= _GROQ_OUTLINE_RPM_LIMIT:
@@ -2334,7 +2354,7 @@ async def live_points_loop():
                         logger.warning(
                             f"🔄 Groq FALLBACK — live outline — {_dt_fb.datetime.now().strftime('%H:%M:%S')}"
                         )
-                        response = groq_client.chat.completions.create(
+                        response = outline_groq.chat.completions.create(
                             model="llama-3.3-70b-versatile",
                             messages=[{"role": "user", "content": prompt}],
                         )
@@ -2346,10 +2366,14 @@ async def live_points_loop():
 
             loop = asyncio.get_event_loop()
             result = await loop.run_in_executor(None, fetch_points)
+            if session_stop.is_set(): return
             if result:
-                LIVE_POINTS_CALLBACK(result)
+                publish(result)
+            else:
+                report_status('failed')
         except Exception as e:
             logger.error(f"Live points loop execution error: {e}")
+            report_status('failed')
 
 
 # ── SERMON SUMMARY  (Mistral → Cerebras → Groq) ──────────────────────────────
@@ -2760,6 +2784,7 @@ def configure(
     local_llm_keep_alive_summary="", # blank → LOCAL_LLM_KEEP_ALIVE_DEFAULTS["summary"] ("10m")
     confirm_request_callback=None,
     bot_bridge_enabled=True,
+    live_points_status_callback=None,
 ):
     global DEEPGRAM_API_KEY, GROQ_API_KEY, GEMINI_API_KEY, CEREBRAS_API_KEY, MISTRAL_API_KEY, SARVAM_API_KEY
     global SARVAM_API_KEY_BACKUP, _sarvam_using_backup
@@ -2777,7 +2802,7 @@ def configure(
     global CONFIDENCE_THRESHOLD, REQUIRE_MANUAL_CONFIRM, CONFIRM_CALLBACK, CONFIRM_REQUEST_CALLBACK, REQUIRE_VERIFY, PANIC_KEY, SMART_AMEN_ENABLED
     global full_sermon_transcript, verses_cited
     global LIVE_POINTS_PROMPT, LIVE_POINTS_CALLBACK, LIVE_POINTS_GET_CURRENT_CB
-    global LIVE_POINTS_ENABLED, SILENCE_TIMEOUT
+    global LIVE_POINTS_ENABLED, SILENCE_TIMEOUT, LIVE_POINTS_STATUS_CALLBACK
     global normalize_numbers_only
     global VERSE_INTERRUPT_ENABLED, SPOKEN_NUMERAL_MODE, WORSHIP_MODE, _verse_history
     global ATEM_ENABLED, ATEM_IP, ATEM_KEY_DURATION
@@ -3111,6 +3136,7 @@ def configure(
     LIVE_POINTS_PROMPT         = live_points_prompt
     LIVE_POINTS_CALLBACK       = live_points_callback
     LIVE_POINTS_GET_CURRENT_CB = live_points_get_current_cb
+    LIVE_POINTS_STATUS_CALLBACK = live_points_status_callback
     LIVE_POINTS_ENABLED        = live_points_enabled
     SILENCE_TIMEOUT            = silence_timeout
     logger.info(f"📋 Live Points: {'ON' if LIVE_POINTS_ENABLED else 'OFF'}")

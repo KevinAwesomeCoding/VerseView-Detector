@@ -22,6 +22,7 @@ from service_schedule import effective_start_settings
 from desktop_recovery import SessionRecovery, RecoveryError
 from desktop_warmup import SessionWarmup
 from desktop_suggestions import WatcherInbox
+from desktop_outline import SessionOutline
 
 
 class BackendError(ValueError):
@@ -94,8 +95,7 @@ def configuration(values, config, engine, confirm):
 
 def start_problem(values):
     # Keep unsupported settings intact and make their limitations explicit.
-    unsupported = [('live_points_llm_enabled', 'live outline display'),
-                   ('discord_bot_token', 'Discord bot'),
+    unsupported = [('discord_bot_token', 'Discord bot'),
                    ('settings_sync_url', 'settings sync')]
     active = [name for key, name in unsupported if values.get(key)]
     if active:
@@ -125,6 +125,7 @@ class EngineRuntime:
         self.has_started = False
         self.warmup = SessionWarmup()
         self.suggestions = WatcherInbox(engine, lambda: self.state() == 'running')
+        self.outline = SessionOutline()
 
     def state(self):
         if not self.thread or not self.thread.is_alive(): return 'stopped'
@@ -145,7 +146,14 @@ class EngineRuntime:
         mapped = configuration(values, config, self.engine, confirm)
         if hasattr(self, 'suggestions'):
             mapped['watcher_suggestion_callback'] = self.suggestions.prepare(values.get('watcher_enabled'))
+        if hasattr(self, 'outline'):
+            callback, current, status = self.outline.prepare(values.get('live_points_llm_enabled'))
+            mapped.update(live_points_callback=callback, live_points_get_current_cb=current,
+                          live_points_status_callback=status, live_points_enabled=bool(values.get('live_points_llm_enabled')))
         self.engine.configure(**mapped)
+        if hasattr(self, 'outline'):
+            self.outline.provider_ready = bool(self.engine.LLM_ENABLED and
+                self.engine._role_has_llm('outline', self.engine.cerebras_client, self.engine.groq_client))
         if restored:
             # configure resets anchor/quarantine and the secondary buffer.
             # Restore after it, before any recognition tasks can be launched.
@@ -165,6 +173,7 @@ class EngineRuntime:
         self.stop_requested.set()
         self.warmup.cancel()
         self.suggestions.cancel()
+        self.outline.cancel()
         if self.loop and self.loop.is_running():
             self.loop.call_soon_threadsafe(self._signal_stop)
 
@@ -195,6 +204,7 @@ class EngineRuntime:
                 self.loop.run_until_complete(self._main(values))
             self.warmup.cancel()
             self.suggestions.cancel()
+            self.outline.cancel()
             self.stop_requested.set()
             self.checkpoint('stopped')
             if not self.verification:
@@ -202,6 +212,7 @@ class EngineRuntime:
         except Exception:
             self.warmup.cancel()
             self.suggestions.cancel()
+            self.outline.cancel()
             self.checkpoint('error')
             logging.getLogger(__name__).exception('Backend engine or session processing failed')
             self.error = 'Engine or session processing failed. Inspect the private backend log.'
@@ -209,10 +220,14 @@ class EngineRuntime:
         finally:
             self.stop_requested.set()
             self.suggestions.cancel()
+            self.outline.cancel()
             self.suggestions.join()
             pending = asyncio.all_tasks(self.loop)
             for task in pending: task.cancel()
             if pending: self.loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+            # A cancelled async task can leave a synchronous model call in the
+            # loop's executor. Retain Stopping until owned calls have returned.
+            self.loop.run_until_complete(self.loop.shutdown_default_executor())
             self.loop.close()
             self.loop = None
 
@@ -266,7 +281,7 @@ class BackendHost:
         self.publisher.begin({'streams': {}}, origin='callback-replay' if runtime.verification else 'engine')
         self.control = DesktopControl(publisher, self.state, self.start, runtime.stop, enabled=True, settings=self.settings,
                                       panic=runtime.panic, recovery=getattr(runtime, 'recovery', None),
-                                      suggestions=getattr(runtime, 'suggestions', None))
+                                      suggestions=getattr(runtime, 'suggestions', None), outline=getattr(runtime, 'outline', None))
 
     def state(self):
         return 'closed' if self.closing else self.runtime.state()

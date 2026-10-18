@@ -132,3 +132,12 @@ test('watcher suggestions omit raw model payload and bound identities/text',()=>
   assert.equal(decoded.control.suggestions.rows[0].stream,'secondary');
   assert.equal(JSON.stringify(decoded).includes('PRIVATE'),false);assert.equal(JSON.stringify(decoded).includes('SECRET'),false);
 });
+test('outline snapshots expose bounded plain text without private provider fields',()=>{
+  const value=fixture();value.control={id:'b'.repeat(32),state:'running',actions:['edit_outline'],outline:{
+    revision:'d'.repeat(32),text:'<script>plain notes</script>',source:'model',status:'updated',
+    enabled:true,active:true,provider_ready:true,api_key:'SECRET',prompt:'PRIVATE-PROMPT'}};
+  const decoded=decodeSnapshot(value,now);
+  assert.equal(decoded.control.outline.text,'<script>plain notes</script>');
+  assert.equal(JSON.stringify(decoded).includes('SECRET'),false);assert.equal(JSON.stringify(decoded).includes('PRIVATE'),false);
+  value.control.outline.text='x'.repeat(4001);assert.equal(decodeSnapshot(value,now).control.outline,null);
+});

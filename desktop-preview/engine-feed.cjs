@@ -17,9 +17,10 @@ function feedDirectory({ platform, appData, home }) {
 function decodeControl(value) {
   if (!value || !/^[a-f0-9]{32}$/.test(value.id) || !['stopped', 'starting', 'running', 'stopping', 'closed'].includes(value.state)) return null;
   return { id: value.id, state: value.state,
-    actions: Array.isArray(value.actions) ? value.actions.filter(action => ['start', 'stop', 'save_settings', 'panic', 'restore_session', 'discard_session', 'send_suggestion'].includes(action)) : [],
+    actions: Array.isArray(value.actions) ? value.actions.filter(action => ['start', 'stop', 'save_settings', 'panic', 'restore_session', 'discard_session', 'send_suggestion', 'edit_outline'].includes(action)) : [],
     recovery: decodeRecovery(value.recovery),
     suggestions: decodeSuggestions(value.suggestions),
+    outline:decodeOutline(value.outline),
     settings: settingsPolicy.decode(value.settings),
     pending: (Array.isArray(value.pending) ? value.pending : []).slice(0, 16)
       .filter(item => item && text(item.candidate_id, 128) && text(item.reference, 128))
@@ -29,6 +30,14 @@ function decodeControl(value) {
     results: (Array.isArray(value.results) ? value.results : []).slice(-32)
       .filter(item => item && /^[a-f0-9]{32}$/.test(item.id))
       .map(item => ({ id: item.id, action: text(item.action, 16), outcome: text(item.outcome, 24), reason: text(item.reason, 200) })) };
+}
+
+function decodeOutline(value){
+  if(!value||!/^[a-f0-9]{32}$/.test(value.revision||'')||typeof value.text!=='string'||value.text.length>4000)return null;
+  return {revision:value.revision,text:value.text,source:['manual','model'].includes(value.source)?value.source:'',
+    updated_at:timestamp(value.updated_at),enabled:value.enabled===true,active:value.active===true,
+    provider_ready:value.provider_ready===true,status:['idle','waiting','generating','error','edited','updated','stopped'].includes(value.status)?value.status:'idle',
+    message:text(value.message,400)};
 }
 
 function decodeSuggestions(value) {

@@ -164,6 +164,21 @@ class DesktopControlTests(unittest.TestCase):
         self.assertEqual(self.result()['outcome'],'requested')
         self.assertIn('inspect delivery activity',self.result()['reason'])
 
+    def test_outline_edits_check_revision_state_and_do_not_start_or_present(self):
+        from desktop_outline import SessionOutline
+        outline=SessionOutline();self.broker.outline=outline
+        revision=outline.snapshot()['revision']
+        self.broker.execute(self.request('edit_outline',outline_revision=revision,outline_text='കുറിപ്പുകൾ'))
+        self.assertEqual(self.result()['outcome'],'saved')
+        self.assertEqual(outline.snapshot()['text'],'കുറിപ്പുകൾ')
+        self.start.assert_not_called();self.stop.assert_not_called()
+        self.broker.execute(self.request('edit_outline',outline_revision=revision,outline_text='Stale replacement'))
+        self.assertEqual(self.result()['outcome'],'rejected')
+        self.assertEqual(outline.snapshot()['text'],'കുറിപ്പുകൾ')
+        self.state='stopping'
+        self.broker.execute(self.request('edit_outline',outline_revision=outline.snapshot()['revision'],outline_text='During stop'))
+        self.assertEqual(self.result()['outcome'],'rejected')
+
     def test_recovery_decisions_require_current_revision_and_stopped_host(self):
         from desktop_recovery import SessionRecovery
         recovery = SessionRecovery(self.temporary.name)

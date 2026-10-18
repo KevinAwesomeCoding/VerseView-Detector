@@ -13,6 +13,7 @@ import threading
 import uuid
 from desktop_settings import SettingsError
 from desktop_recovery import RecoveryError
+from desktop_outline import OutlineError
 
 _HEX = re.compile(r"^[a-f0-9]{32}$")
 
@@ -22,12 +23,13 @@ def now_seconds():
 
 
 class DesktopControl:
-    def __init__(self, publisher, state, start, stop, *, enabled=False, clock=now_seconds, settings=None, panic=None, recovery=None, suggestions=None):
+    def __init__(self, publisher, state, start, stop, *, enabled=False, clock=now_seconds, settings=None, panic=None, recovery=None, suggestions=None, outline=None):
         self.publisher, self.state = publisher, state
         self.start, self.stop, self.enabled, self.clock = start, stop, enabled, clock
         self.settings, self.panic = settings, panic
         self.recovery = recovery
         self.suggestions = suggestions
+        self.outline = outline
         self.control_id = uuid.uuid4().hex
         self.directory = publisher.directory / f"control-{os.getpid()}-{self.control_id}"
         self.session_id = None
@@ -66,8 +68,11 @@ class DesktopControl:
             settings = self.settings.snapshot() if self.settings else None
             if state == 'stopped' and settings:
                 actions.append('save_settings')
+            if state in ('stopped', 'running') and self.outline:
+                actions.append('edit_outline')
             self.publisher.emit('control', value={
                 'id': self.control_id, 'state': state, 'actions': actions, 'settings': settings, 'recovery': recovery, 'suggestions': suggestions,
+                'outline': self.outline.snapshot() if self.outline else None,
                 'pending': [{key: item[key] for key in ('candidate_id', 'reference', 'confidence', 'stream', 'source')}
                             for item in self.pending.values()], 'results': self.results[-32:]})
 
@@ -114,7 +119,7 @@ class DesktopControl:
             outcome = 'rejected'
             reason = 'Invalid, expired, or stale command'
             created = request.get('created_at')
-            valid = (set(request) <= {'id', 'control_id', 'session_id', 'created_at', 'action', 'candidate_id', 'settings_revision', 'changes', 'recovery_revision', 'suggestion_id'}
+            valid = (set(request) <= {'id', 'control_id', 'session_id', 'created_at', 'action', 'candidate_id', 'settings_revision', 'changes', 'recovery_revision', 'suggestion_id', 'outline_revision', 'outline_text'}
                      and request.get('control_id') == self.control_id
                      and request.get('session_id') == self.session_id
                      and isinstance(created, (float, int)) and not isinstance(created, bool)
@@ -139,6 +144,9 @@ class DesktopControl:
                             raise ValueError('Invalid suggestion identity')
                         self.suggestions.send(suggestion_id)
                         outcome, reason = 'requested', 'Suggestion send requested; inspect delivery activity for acceptance or guards.'
+                    elif action == 'edit_outline' and state in ('stopped', 'running') and self.outline:
+                        self.outline.edit(request.get('outline_revision'), request.get('outline_text'))
+                        outcome, reason = 'saved', 'Outline notes updated. Display output changes only in a window you explicitly opened.'
                     elif action == 'save_settings' and state == 'stopped' and self.settings:
                         self.settings.save(request.get('settings_revision'), request.get('changes'))
                         outcome, reason = 'saved', 'Settings saved. They apply when you next start the engine.'
@@ -156,11 +164,11 @@ class DesktopControl:
                             reason = 'Candidate is no longer awaiting approval'
                     else:
                         reason = 'Action unavailable in the current engine state'
-                except (SettingsError, RecoveryError) as exc:
+                except (SettingsError, RecoveryError, OutlineError) as exc:
                     outcome, reason = 'rejected', str(exc)
                 except Exception:
                     outcome, reason = 'failed', 'Detector control failed; inspect the detector log'
-            self.results.append(dict(id=command_id, action=action if action in ('start', 'stop', 'approve', 'reject', 'save_settings', 'panic', 'restore_session', 'discard_session', 'send_suggestion') else 'unknown',
+            self.results.append(dict(id=command_id, action=action if action in ('start', 'stop', 'approve', 'reject', 'save_settings', 'panic', 'restore_session', 'discard_session', 'send_suggestion', 'edit_outline') else 'unknown',
                                      outcome=outcome, reason=reason))
             self.results = self.results[-32:]
             self.refresh()

@@ -12,6 +12,14 @@ contextBridge.exposeInMainWorld('verseviewDesktop', Object.freeze({
   clearOutput: sessionId => ipcRenderer.invoke('preview:clear-output', sessionId),
   recoverSession: (sessionId, revision, restore) => ipcRenderer.invoke('preview:recover-session', sessionId, revision, restore),
   sendSuggestion: (sessionId, suggestionId) => ipcRenderer.invoke('preview:send-suggestion', sessionId, suggestionId),
+  editOutline:(sessionId,revision,text)=>ipcRenderer.invoke('preview:edit-outline',sessionId,revision,text),
+  outlineOutputState:()=>ipcRenderer.invoke('preview:outline-output-state'),
+  openOutlineOutput:(sessionId,target)=>ipcRenderer.invoke('preview:open-outline-output',sessionId,target),
+  closeOutlineOutput:()=>ipcRenderer.invoke('preview:close-outline-output'),
+  onOutlineOutputChanged:callback=>{
+    const listener=(_event,value)=>callback(value);ipcRenderer.on('preview:outline-output-changed',listener);
+    return ()=>ipcRenderer.removeListener('preview:outline-output-changed',listener);
+  },
   backendState: () => ipcRenderer.invoke('preview:backend-state'),
   launchBackend: () => ipcRenderer.invoke('preview:launch-backend'),
   closeBackend: () => ipcRenderer.invoke('preview:close-backend'),

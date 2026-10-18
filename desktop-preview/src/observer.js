@@ -131,6 +131,8 @@
       <p class="vv-caption">${session ? `Session ${escape(session.session_id)} · Bible setting: ${escape(session.config.bible_translation || 'not reported')}` : 'No observer session selected.'}</p></section>`;
   }
 
+  function outline(snapshot){return status(snapshot)+controlPanel(snapshot)+window.liveOutline.render(snapshot);}
+
   const testGate = () => '<section class="vv-panel preview-about" aria-label="Sample mode separation"><h2>Sample demo</h2><p class="vv-caption">Sample controls are separate from the detector feed. Switch to Sample demo to run them; the detector feed and its controls remain separate.</p><button type="button" class="vv-btn" data-action="sample-mode">Open sample demo</button></section>';
   function updateRecoveryAvailability(snapshot) {
     const session = snapshot.session, control = session?.control;
@@ -145,7 +147,7 @@
         control.suggestions.busy||!control.suggestions.rows.some(row=>row.id===button.dataset.suggestionId&&row.state==='available')||command?.outcome==='submitted';
     }
   }
-  window.observerView = Object.freeze({ session: sessionView, activity, settings, testGate, controls: controlPanel, updateRecoveryAvailability });
+  window.observerView = Object.freeze({ session: sessionView, activity, settings, outline, testGate, controls: controlPanel, updateRecoveryAvailability });
   const root = document.getElementById('verseview-prototype');
   root.addEventListener('toggle', event => {
     if(event.target.matches('[data-suggestion-panel]')){

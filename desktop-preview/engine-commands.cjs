@@ -7,8 +7,8 @@ const { randomUUID } = require('node:crypto');
 // Only the main process writes commands. No renderer paths, URLs, or arbitrary IPC.
 class EngineCommands {
   constructor(reader, { clock = Date.now } = {}) { this.reader = reader; this.clock = clock; }
-  async submit(sessionId, action, candidateId, settingsChange, recoveryRevision, suggestionId) {
-    if (!['start', 'stop', 'approve', 'reject', 'save_settings', 'panic', 'restore_session', 'discard_session', 'send_suggestion'].includes(action) || !/^[a-f0-9]{32}$/.test(sessionId || '')) {
+  async submit(sessionId, action, candidateId, settingsChange, recoveryRevision, suggestionId, outlineChange) {
+    if (!['start', 'stop', 'approve', 'reject', 'save_settings', 'panic', 'restore_session', 'discard_session', 'send_suggestion', 'edit_outline'].includes(action) || !/^[a-f0-9]{32}$/.test(sessionId || '')) {
       throw new Error('Invalid detector command');
     }
     if (['approve', 'reject'].includes(action) && (typeof candidateId !== 'string' || !candidateId || candidateId.length > 128)) {
@@ -18,6 +18,8 @@ class EngineCommands {
     const recoveryAction = ['restore_session', 'discard_session'].includes(action);
     if (recoveryAction && !/^[a-f0-9]{32}$/.test(recoveryRevision || '')) throw new Error('Invalid recovery revision');
     if (action === 'send_suggestion' && !/^[a-f0-9]{32}$/.test(suggestionId || '')) throw new Error('Invalid suggestion identity');
+    if(action==='edit_outline'&&(!/^[a-f0-9]{32}$/.test(outlineChange?.revision||'')||typeof outlineChange.text!=='string'
+      ||outlineChange.text.length>4000||outlineChange.text.includes('\0')))throw new Error('Invalid outline update');
     if (action === 'save_settings') {
       if (!/^[a-f0-9]{32}$/.test(settingsChange?.revision || '')) throw new Error('Invalid settings revision');
       changes = settingsPolicy.validatePatch(settingsChange.changes);
@@ -29,7 +31,7 @@ class EngineCommands {
       || this.clock() - Date.parse(session.updated_at) > 6000 || control.state === 'closed') {
       throw new Error('Detector session unavailable; refresh before acting');
     }
-    if (['start', 'stop', 'save_settings', 'panic', 'restore_session', 'discard_session', 'send_suggestion'].includes(action) ? !control.actions.includes(action)
+    if (['start', 'stop', 'save_settings', 'panic', 'restore_session', 'discard_session', 'send_suggestion', 'edit_outline'].includes(action) ? !control.actions.includes(action)
       : control.state !== 'running' || !control.pending.some(item => item.candidate_id === candidateId)) {
       throw new Error('Action is no longer available');
     }
@@ -43,6 +45,9 @@ class EngineCommands {
       || !control.suggestions.rows.some(row => row.id === suggestionId && row.state === 'available'))) {
       throw new Error('Suggestion is no longer available');
     }
+    if(action==='edit_outline'&&(!['running','stopped'].includes(control.state)||control.outline?.revision!==outlineChange.revision)){
+      throw new Error('Outline changed or editing is unavailable; reload the latest notes');
+    }
     const directory = path.join(this.reader.directory, `control-${session.pid}-${control.id}`);
     const stat = await fs.promises.lstat(directory);
     if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('Invalid detector inbox');
@@ -51,7 +56,8 @@ class EngineCommands {
       ...(['approve', 'reject'].includes(action) ? { candidate_id: candidateId } : {}),
       ...(action === 'save_settings' ? { settings_revision: settingsChange.revision, changes } : {}),
       ...(recoveryAction ? { recovery_revision: recoveryRevision } : {}),
-      ...(action === 'send_suggestion' ? { suggestion_id:suggestionId } : {}) };
+      ...(action === 'send_suggestion' ? { suggestion_id:suggestionId } : {}),
+      ...(action==='edit_outline'?{outline_revision:outlineChange.revision,outline_text:outlineChange.text}:{}) };
     const temporary = path.join(directory, `.command-${id}.tmp`);
     try {
       await fs.promises.writeFile(temporary, JSON.stringify(request), { encoding: 'utf8', mode: 0o600, flag: 'wx' });

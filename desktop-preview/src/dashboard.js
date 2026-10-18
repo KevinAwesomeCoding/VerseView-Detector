@@ -92,7 +92,7 @@
       transcript(stream==='secondary'?'യോഹന്നാൻ മൂന്നാം അധ്യായം പതിനേഴാം വാക്യം.':'John chapter three, verse seventeen.',ref,accepted?'Reference detected · command accepted':'Duplicate suppressed',accepted?'ok':'muted',stream,id);
     }
   }
-  const nav=()=>`<nav class="vv-nav" aria-label="Dashboard navigation">${[['session','radio','Live session'],['activity','list-filter','Activity'],['testing','flask-conical','Test area'],['settings','sliders-horizontal','Settings']].map(([view,i,label])=>`<button class="cursor-interaction" type="button" data-action="view" data-view="${view}" aria-current="${state.view===view?'page':'false'}">${icon(i)}${label}</button>`).join('')}</nav>`;
+  const nav=()=>`<nav class="vv-nav" aria-label="Dashboard navigation">${[['session','radio','Live session'],['activity','list-filter','Activity'],...(observing()?[['outline','notebook-pen','Outline']]:[]),['testing','flask-conical','Test area'],['settings','sliders-horizontal','Settings']].map(([view,i,label])=>`<button class="cursor-interaction" type="button" data-action="view" data-view="${view}" aria-current="${state.view===view?'page':'false'}">${icon(i)}${label}</button>`).join('')}</nav>`;
   const brand=()=>`<div class="vv-brand"><span class="vv-brand-mark" aria-hidden="true">v</span><span>VerseView<span style="display:block;font-size:9px;letter-spacing:2px;color:var(--vv-muted);margin-top:-3px">DETECTOR</span></span></div>`;
   const button=(action,label,i='',primary=false,extra='')=>`<button type="button" class="vv-btn cursor-interaction ${primary?'vv-btn-primary':''}" data-action="${action}" ${extra}>${i?icon(i):''}${label}</button>`;
   function themePicker(prefix){return `<div class="vv-theme-control">${icon('palette')}<label class="vv-live-announcement" for="${prefix}-theme">Color theme</label><select id="${prefix}-theme" class="vv-theme-select cursor-interaction" data-setting="theme" aria-label="Color theme">${Object.entries(themes).map(([key,t])=>`<option value="${key}" ${state.theme===key?'selected':''}>${t.name}</option>`).join('')}</select></div>`}
@@ -148,15 +148,16 @@
     const focused=root.contains(document.activeElement)?{layout:document.activeElement.closest('[data-layout]')?.dataset.layout,action:document.activeElement.dataset.action,view:document.activeElement.dataset.view,setting:document.activeElement.dataset.setting,stream:document.activeElement.dataset.stream,themeChoice:document.activeElement.dataset.themeChoice}:null;
     for(const app of root.querySelectorAll('[data-layout]')){
       const prefix=`vv-${app.dataset.layout}`;
-      const titles={session:'Live session',activity:'Delivery activity',testing:'Test area',settings:'Settings'};
-      const subtitles=observing()?{session:'Speech streams, candidate decisions, and delivery status',activity:'Structured events from the detector',testing:'Samples stay separate from live observations',settings:'Appearance, speech, and VerseVIEW connection'}:{session:'Sample audio · English and Malayalam',activity:'Detection, approval, and delivery details',testing:'Sample speech · no microphone required',settings:'Audio, recognition, and delivery'};
+      const titles={session:'Live session',activity:'Delivery activity',outline:'Sermon outline',testing:'Test area',settings:'Settings'};
+      const subtitles=observing()?{session:'Speech streams, candidate decisions, and delivery status',activity:'Structured events from the detector',outline:'Editable notes and an optional separate display',testing:'Samples stay separate from live observations',settings:'Appearance, speech, and VerseVIEW connection'}:{session:'Sample audio · English and Malayalam',activity:'Detection, approval, and delivery details',testing:'Sample speech · no microphone required',settings:'Audio, recognition, and delivery'};
       app.innerHTML=`<div class="vv-shell"><aside class="vv-sidebar">${brand()}<div><div class="vv-eyebrow vv-nav-label">Workspace</div>${nav()}</div><div class="vv-sidebar-foot"><p>${observing()?'Detector connection':'Rehearsal workspace'}</p><p>${observing()?'Local engine feed':'Sample data only'}</p></div></aside>
         <main class="vv-main"><div class="vv-narrow-nav">${brand()}${nav()}</div><header class="vv-topline"><div><h1>${titles[state.view]||titles.session}</h1><p class="vv-subtitle">${subtitles[state.view]||subtitles.session}</p></div><div class="vv-live-controls">${themePicker(prefix)}${observing()?'<span class="vv-pill">Local feed</span>':button('toggle',state.listening?'Pause demo':'Resume demo',state.listening?'pause':'play',!state.listening)}</div></header>
-        <div class="vv-content">${state.view==='session'?session(prefix):state.view==='activity'?(observing()?window.observerView.activity(window.previewShell.getObserver()):activity()):state.view==='testing'?testing(prefix):appearance()+(observing()?window.observerView.settings(window.previewShell.getObserver()):settings(prefix))+desktopInfo()}</div>
+        <div class="vv-content">${state.view==='session'?session(prefix):state.view==='activity'?(observing()?window.observerView.activity(window.previewShell.getObserver()):activity()):state.view==='outline'&&observing()?window.observerView.outline(window.previewShell.getObserver()):state.view==='testing'?testing(prefix):appearance()+(observing()?window.observerView.settings(window.previewShell.getObserver()):settings(prefix))+desktopInfo()}</div>
         <div class="${state.view==='session'?'vv-live-announcement':'vv-feedback'}" role="status" aria-live="polite">${state.view==='session'?'':icon('info')}<span>${esc(observing()?'Local engine connection. Controls require explicit opt-in in the detector.':state.feedback)}</span></div><footer class="vv-foot"><span>${observing()?'Desktop preview · live observer':'Desktop preview · sample data only'}</span><span>${observing()?'Delivery guards remain in the engine':'No microphone or VerseVIEW connection'}</span></footer></main></div>`;
       app.scrollTop=scrollTop;
     }
     window.detectorSettings?.syncControls();
+    window.liveOutline?.syncControls();
     if(globalThis.lucide)lucide.createIcons({attrs:{width:16,height:16}});
     if(focused?.layout){
       const app=root.querySelector(`[data-layout="${focused.layout}"]`);
@@ -208,7 +209,7 @@
   root.addEventListener('input',e=>{if(e.target.dataset.setting==='threshold'){state.threshold=Number(e.target.value);root.querySelectorAll('.vv-threshold').forEach(el=>el.textContent=`${state.threshold}%`)}});
   root.addEventListener('preview:layout',()=>{render();root.querySelector('[data-layout]').scrollTop=0});
   root.addEventListener('preview:environment',render);
-  root.addEventListener('preview:mode',()=>{render();root.querySelector('[data-layout]').scrollTop=0});
+  root.addEventListener('preview:mode',()=>{if(!observing()&&state.view==='outline')state.view='session';render();root.querySelector('[data-layout]').scrollTop=0});
   let observerRefreshPending=false;
   // Patch only observer content. Keep theme/navigation controls and unchanged
   // source selectors in place while provider events arrive. No remote HTML is
@@ -232,6 +233,7 @@
   function observerRefresh(){
     if(!observing())return;
     window.detectorSettings?.updateAvailability(window.previewShell.getObserver());
+    window.liveOutline?.updateAvailability(window.previewShell.getObserver());
     window.observerView.updateRecoveryAvailability(window.previewShell.getObserver());
     const selection=window.getSelection();
     if(selection&&!selection.isCollapsed&&root.contains(selection.anchorNode)){
@@ -251,10 +253,11 @@
     if(!content||state.view==='testing')return;
     const snapshot=window.previewShell.getObserver();
     const next=document.createElement('div');next.className='vv-content';
-    next.innerHTML=state.view==='session'?window.observerView.session(snapshot,`vv-${root.querySelector('[data-layout]').dataset.layout}`):state.view==='activity'?window.observerView.activity(snapshot):appearance()+window.observerView.settings(snapshot)+desktopInfo();
+    next.innerHTML=state.view==='session'?window.observerView.session(snapshot,`vv-${root.querySelector('[data-layout]').dataset.layout}`):state.view==='activity'?window.observerView.activity(snapshot):state.view==='outline'?window.observerView.outline(snapshot):appearance()+window.observerView.settings(snapshot)+desktopInfo();
     const surface=root.querySelector('[data-layout]'),scrollTop=surface.scrollTop;
     patchObserverNode(content,next);
     window.detectorSettings?.syncControls();
+    window.liveOutline?.syncControls();
     if(globalThis.lucide)lucide.createIcons({attrs:{width:16,height:16}});
     surface.scrollTop=scrollTop;
   }

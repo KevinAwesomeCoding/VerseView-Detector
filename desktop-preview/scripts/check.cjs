@@ -8,8 +8,10 @@ for (const directory of ['', 'src', 'scripts', 'tests']) {
     if (/\.(c?js)$/.test(name)) execFileSync(process.execPath, ['--check', path.join(root, directory, name)], { stdio: 'inherit' });
   }
 }
-const html = fs.readFileSync(path.join(root, 'src', 'index.html'), 'utf8');
-if (!html.includes("connect-src 'none'") || /<script[^>]*>\s*[^<\s]/.test(html)) {
-  throw new Error('Preview must keep its offline CSP and external script files');
+for(const name of ['index.html','outline-display.html']){
+  const html = fs.readFileSync(path.join(root, 'src', name), 'utf8');
+  if (!html.includes("connect-src 'none'") || /<script[^>]*>\s*[^<\s]/.test(html)) {
+    throw new Error('Preview must keep its offline CSP and external script files');
+  }
 }
 console.log('JavaScript syntax and offline page checks passed.');

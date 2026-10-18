@@ -115,3 +115,15 @@ test('suggestion sends target only an active available identity, not a renderer 
   f.session.control.state='stopped';
   await assert.rejects(f.client.submit(f.sessionId,'send_suggestion',undefined,undefined,undefined,identity));
 });
+test('outline edits are typed, bounded and bound to the current revision and state',async t=>{
+  const f=setup(t),revision='d'.repeat(32);
+  f.session.control.actions=['edit_outline'];f.session.control.outline={revision,text:''};
+  const send=value=>f.client.submit(f.sessionId,'edit_outline',undefined,undefined,undefined,undefined,value);
+  await assert.rejects(send({revision:'e'.repeat(32),text:'Stale notes'}));
+  await assert.rejects(send({revision,text:'x'.repeat(4001)}));
+  await assert.rejects(send({revision,text:'\0'}));
+  const result=await send({revision,text:'കുറിപ്പുകൾ <script>plain text</script>'});
+  const request=JSON.parse(fs.readFileSync(path.join(f.inbox,`command-${result.id}.json`)));
+  assert.equal(request.outline_revision,revision);assert.equal(request.outline_text,'കുറിപ്പുകൾ <script>plain text</script>');
+  f.session.control.state='starting';await assert.rejects(send({revision,text:'Unavailable'}));
+});
