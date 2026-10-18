@@ -49,6 +49,12 @@ resolving the isolated target; production distribution/replacement decisions
 remain separate. Do not start live services or replace the installed app merely
 because an automation asks to continue.
 
+See the [final incident/gap audit](DELIVERY_GAP_AUDIT.md) for the supported
+findings and exact remaining user actions. It also records an older packaged
+test's unfinished settings-restoration claim; current QA cleanup must not be
+treated as proof that those historical settings were restored. Any restoration
+needs review of the user's intended current values before changing them.
+
 Update this file and include the bar in future progress updates and completion
 reports. Count a milestone only after its implementation and scoped verification
 are complete. Latest completed milestone: standalone integration (preview 0.11.0).

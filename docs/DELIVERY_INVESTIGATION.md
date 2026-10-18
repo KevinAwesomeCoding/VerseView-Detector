@@ -1,5 +1,28 @@
 # Verse delivery investigation
 
+## 2026-10-18: final read-only incident and acceptance gap audit
+
+The [consolidated gap audit](DELIVERY_GAP_AUDIT.md) rechecked historical/current
+delivery guards, existing regression assertions and preserved source/microphone
+events without launching services or repeating completed suites. The old source
+replay's accepted transition was 8.086609 seconds with reported visible output;
+the later packaged real-speech transition was 22.578544 seconds without captured
+visible output. These cannot be combined into a current-preview physical pass.
+The original incident still lacks a matched failure trace establishing cause.
+
+The audit also identifies an earlier cleanup gap: the Oct 4 packaged report left
+temporary detector settings pending. Today's read-only settings hash differs
+from the recorded baseline, but values were not inspected and this cannot
+distinguish test changes from later user choices. No settings were restored or
+changed. Review the private backup and intended settings with the user before
+any restoration. Current preview QA cleanup does not establish historical
+production-profile restoration. The permanent display timeouts remain untouched.
+
+Milestones 1–6 are complete within documented scope; 7 is physically deferred
+and 8 retains distribution/acceptance/replacement gates. Progress remains 75%.
+The audit gives the smallest coordinated manual sessions and final approval
+steps; no installed-app change, signing change or release occurred.
+
 ## 2026-10-18: isolated preview install, update and rollback
 
 Preview 0.11.1 source `af3334529cdfbb543b0083ab7949cbfa26bd204b`, Mac build
