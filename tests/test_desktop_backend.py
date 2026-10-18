@@ -100,7 +100,7 @@ class BackendTests(unittest.TestCase):
         import datetime
         from service_schedule import effective_start_settings
         saturday = datetime.datetime(2026, 10, 17, 12)
-        with patch('desktop_backend.effective_start_settings', side_effect=lambda raw: effective_start_settings(raw, saturday)):
+        with patch('desktop_backend.effective_start_settings', side_effect=lambda raw, _: effective_start_settings(raw, saturday)):
             self.assertTrue(host.start())
         effective = runtime.start.call_args.args[0]
         self.assertEqual((effective['language'], effective['secondary_language']), ('Malayalam', 'en'))
@@ -120,7 +120,7 @@ class BackendTests(unittest.TestCase):
         self.addCleanup(host.close)
         import datetime
         from service_schedule import effective_start_settings
-        with patch('desktop_backend.effective_start_settings', side_effect=lambda raw: effective_start_settings(raw, datetime.datetime(2026, 10, 17))):
+        with patch('desktop_backend.effective_start_settings', side_effect=lambda raw, _: effective_start_settings(raw, datetime.datetime(2026, 10, 17))):
             self.assertFalse(host.start())
         runtime.start.assert_not_called()
         self.assertIn('supported primary language', host.notice)
@@ -154,11 +154,11 @@ class BackendTests(unittest.TestCase):
         with patch.dict(os.environ, {'VERSEVIEW_PROFILE_DIRECTORY': self.temporary.name}):
             self.assertEqual(self.real_app_data_dir(), Path(self.temporary.name))
         with patch.dict(os.environ, {}, clear=True):
-            with patch('pathlib.Path.mkdir'):
+            with patch('pathlib.Path.home', return_value=Path(self.temporary.name)/'legacy-home'), patch('pathlib.Path.mkdir'):
                 self.assertNotEqual(self.real_app_data_dir(), Path(self.temporary.name))
 
     def test_settings_module_import_does_not_require_tkinter(self):
-        source = Path(settings.__file__).read_text()
+        source = Path(settings.__file__).read_text(encoding='utf-8')
         import ast
         tree = ast.parse(source)
         self.assertFalse(any(isinstance(node, ast.Import) and any(alias.name.startswith('tkinter') for alias in node.names)

@@ -197,13 +197,14 @@ class EngineRuntime:
 
 
 class BackendHost:
-    def __init__(self, config, publisher, runtime, devices):
+    def __init__(self, config, publisher, runtime, devices, clock=None):
         from desktop_control import DesktopControl
         from desktop_settings import DesktopSettings
         self.config, self.publisher, self.runtime = config, publisher, runtime
         self.closing = False
         self.notice = 'Recognition is stopped. Saved auto-start is not activated in this preview.'
         self.devices = devices
+        self.clock = clock
         self.store = ProfileStore(config, self.state, lambda: self.devices)
         self.settings = DesktopSettings(self.store.read, self.store.apply)
         self.publisher.begin({'streams': {}}, origin='callback-replay' if runtime.verification else 'engine')
@@ -214,7 +215,7 @@ class BackendHost:
 
     def start(self):
         values, _ = self.store.load()
-        values, scheduled = effective_start_settings(values)
+        values, scheduled = effective_start_settings(values, self.clock() if self.clock else None)
         schedule_notice = ('Smart Schedule selected ' + scheduled +
                            (' with English secondary. ' if scheduled != 'English' else ' only. ')) if scheduled else ''
         try:
@@ -285,7 +286,11 @@ def main():
             devices = [{'id': index, 'label': str(audio.get_device_info_by_index(index)['name'])}
                        for index in range(audio.get_device_count()) if audio.get_device_info_by_index(index).get('maxInputChannels', 0) > 0]
         finally: audio.terminate()
-    host = BackendHost(config, observer_feed._publisher, runtime, devices)
+    clock = None
+    if args.verify_isolated:
+        from backend_verification import verification_time
+        clock = verification_time
+    host = BackendHost(config, observer_feed._publisher, runtime, devices, clock=clock)
     host.tick()
     observer_feed._publisher.flush()
     print(json.dumps({'ready': True, 'pid': os.getpid(), 'frozen': bool(getattr(sys, 'frozen', False)),

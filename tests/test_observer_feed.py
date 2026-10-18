@@ -26,7 +26,7 @@ class ObserverTests(unittest.TestCase):
 
     def snapshot(self):
         self.publisher.flush()
-        return json.loads((Path(self.directory.name) / f"engine-{os.getpid()}.json").read_text())
+        return json.loads((Path(self.directory.name) / f"engine-{os.getpid()}.json").read_text(encoding='utf-8'))
 
     def test_disabled_export_does_not_create_files_or_threads(self):
         disabled = observer_feed.ObserverPublisher(False, Path(self.directory.name) / "disabled")

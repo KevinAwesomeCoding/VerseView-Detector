@@ -75,6 +75,30 @@ fs.mkdirSync(output, { recursive: true });
     assert.equal((await page.content()).includes('SECRET-STT-KEY'), false);
     checks.push('Standalone settings save uses only the private preview profile and preserves credentials/unknown fields; original source unchanged');
     await page.screenshot({ path: path.join(output, 'backend-settings.png') });
+    // Only this disposable QA profile is edited. Verification supplies a fixed
+    // Sunday-noon clock; normal packaged recognition always uses local time.
+    const schedulePath = path.join(backendProfile, 'settings.json');
+    const scheduledSettings = { ...JSON.parse(fs.readFileSync(schedulePath)), smart_schedule: true,
+      language: 'English', stt_engine: 'deepgram', secondary_stt_engine: 'sarvam' };
+    fs.writeFileSync(schedulePath, JSON.stringify(scheduledSettings));
+    await nav('Live session'); await action('start').click();
+    await page.waitForFunction(() => window.previewShell.getObserver().session.host?.notice.includes('supported primary language'));
+    assert.equal(await page.evaluate(() => window.previewShell.getObserver().session.control.state), 'stopped');
+    scheduledSettings.stt_engine = 'sarvam';
+    fs.writeFileSync(schedulePath, JSON.stringify(scheduledSettings));
+    await action('start').click();
+    await page.waitForFunction(() => window.previewShell.getObserver().session.config.streams.primary.language === 'ml' &&
+      window.previewShell.getObserver().session.control?.state === 'running');
+    const scheduled = await page.evaluate(() => window.previewShell.getObserver().session);
+    assert.equal(scheduled.config.streams.secondary.language, 'en');
+    assert.equal(scheduled.config.streams.secondary.provider, 'deepgram');
+    assert.equal(scheduled.config.streams.secondary.enabled, true);
+    assert.match(scheduled.host.notice, /Smart Schedule selected Malayalam with English secondary/);
+    assert.deepEqual(JSON.parse(fs.readFileSync(schedulePath)), scheduledSettings);
+    await page.screenshot({ path: path.join(output, 'backend-schedule.png') });
+    await action('stop').click();
+    await page.waitForFunction(() => window.previewShell.getObserver().session.control.state === 'stopped');
+    checks.push('Smart Schedule applies the fixed QA service clock only on explicit Start, rejects incompatible providers, configures Malayalam/English, and leaves saved choices intact');
     process.kill(childPid, 'SIGKILL');
     await page.waitForFunction(() => window.previewShell.getBackend().status === 'failed');
     await page.waitForTimeout(800);

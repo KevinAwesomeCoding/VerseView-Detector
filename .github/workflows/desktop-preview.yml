@@ -6,6 +6,15 @@ on:
   push:
     branches:
       - codex/desktop-backend
+    paths:
+      - '*.py'
+      - 'stt_providers/**'
+      - 'tests/**'
+      - 'verseview.spec'
+      - 'requirements.txt'
+      - '.github/workflows/desktop-preview.yml'
+      - 'desktop-preview/**'
+      - '!desktop-preview/*.md'
 
 permissions:
   contents: read

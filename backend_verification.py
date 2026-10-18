@@ -1,7 +1,13 @@
 """Explicit frozen-backend QA adapter. Never selected for normal recognition."""
 import asyncio
+import datetime as dt
 from contextlib import contextmanager, ExitStack
 from unittest.mock import Mock, patch
+
+
+def verification_time():
+    """Fixed Sunday Malayalam service; selected only by the explicit QA host."""
+    return dt.datetime(2026, 10, 18, 12)
 
 
 @contextmanager

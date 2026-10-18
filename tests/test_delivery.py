@@ -625,7 +625,7 @@ class DeliveryTests(unittest.TestCase):
         import ast
         from pathlib import Path
         from types import SimpleNamespace
-        tree = ast.parse(Path(engine.__file__).with_name('vv_gui.py').read_text())
+        tree = ast.parse(Path(engine.__file__).with_name('vv_gui.py').read_text(encoding='utf-8'))
         app = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == 'VerseViewApp')
         method = next(node for node in app.body if isinstance(node, ast.FunctionDef) and node.name == '_update_delivery_diagnostics')
         namespace = {'engine': engine}
@@ -663,7 +663,7 @@ class DeliveryTests(unittest.TestCase):
         root.grid_columnconfigure(0, weight=1)
         mid = tk.Frame(root)
         mid.grid(row=0, column=0, sticky='nsew')
-        tree = ast.parse(Path(engine.__file__).with_name('vv_gui.py').read_text())
+        tree = ast.parse(Path(engine.__file__).with_name('vv_gui.py').read_text(encoding='utf-8'))
         statements = [node for node in ast.walk(tree)
                       if isinstance(node, ast.Expr)
                       and isinstance(node.value, ast.Call)
