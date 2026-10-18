@@ -50,7 +50,7 @@ with tempfile.TemporaryDirectory(prefix='vv-sync-smoke-') as temporary:
             saved=json.loads(path.read_text(encoding='utf-8'));credential=Path(saved['gcp_credentials_path'])
             assert saved['deepgram_api_key']=='SECRET-SYNCED-STT' and saved['discord_bot_token']=='SECRET-SYNCED-BOT'
             assert saved['language']=='English' and saved['dedup_window']==91 and saved['future']=={'keep':42}
-            assert credential.parent==profile/'credentials' and credential.exists()
+            assert credential.parent.resolve()==(profile/'credentials').resolve() and credential.exists()
             assert 'SECRET' not in json.dumps(value)
             before=path.read_bytes();command(value,'pull_settings')
             value=wait_for(lambda s:s['control']['sync']['status']=='unchanged');assert path.read_bytes()==before
