@@ -130,6 +130,9 @@ class DesktopBot:
             if not self.thread or not self.thread.is_alive():return
             self.stopping.set();self.status='stopping';self.message='Stopping the owned Discord bot.'
             child=self.child
+            bridge=self.bridge
+        if bridge:
+            with bridge.lock:bridge.closing=True
         if child:
             threading.Thread(target=self._end_child,args=(child,),name='BotShutdown',daemon=True).start()
 

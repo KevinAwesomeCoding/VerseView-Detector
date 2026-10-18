@@ -15,6 +15,23 @@ from observer_feed import ObserverPublisher
 
 
 class BackendTests(unittest.TestCase):
+    def test_close_signals_engine_stop_even_when_owned_bot_is_still_draining(self):
+        publisher=ObserverPublisher(True,self.temporary.name)
+        runtime=SimpleNamespace(verification=True,state=lambda:'running',stop=Mock(),panic=Mock(),thread=None,
+                                error='',stop_requested=threading.Event(),profile=Path(self.temporary.name))
+        host=BackendHost(settings,publisher,runtime,[])
+        try:
+            with patch.object(host.bot,'close',return_value=False):
+                self.assertFalse(host.close());runtime.stop.assert_called_once();self.assertTrue(host.control.closed)
+        finally:host.close()
+
+    def test_stop_tolerates_loop_finishing_between_status_check_and_signal(self):
+        from desktop_backend import EngineRuntime
+        runtime=EngineRuntime(ObserverPublisher(True,self.temporary.name),Path(self.temporary.name),True)
+        runtime.loop=Mock();runtime.loop.is_running.return_value=True
+        runtime.loop.call_soon_threadsafe.side_effect=RuntimeError('Loop already closed')
+        runtime.stop();self.assertTrue(runtime.stop_requested.is_set());runtime.publisher.close()
+
     def test_headless_session_files_write_without_gui_or_provider_calls(self):
         from desktop_backend import EngineRuntime
         with tempfile.TemporaryDirectory() as directory:

@@ -129,8 +129,10 @@ test('bot decoder omits credentials and private log text and bounds command hist
     config:{streams:{primary:{enabled:true},secondary:{enabled:false}}},transcripts:[],delivery_events:[]};
   fixture.control.bot={status:'online',configured:true,pid:456,token:'SECRET',log:'SECRET',proof:{frozen:true,token:'SECRET'},
     events:Array.from({length:40},()=>({id:'c'.repeat(32),route:'/goto',timestamp:new Date(f.now).toISOString(),http_status:200,outcome:'acknowledged',ref:'SECRET'}))};
+  fixture.control.bot.events[39].outcome='unknown';fixture.control.bot.events[39].http_status=504;
   const bot=decodeSnapshot(fixture).control.bot;
   assert.equal(bot.events.length,32);assert.equal(bot.pid,456);assert.equal(JSON.stringify(bot).includes('SECRET'),false);
+  assert.equal(bot.events.at(-1).outcome,'unknown');
 });
 test('suggestion sends target only an active available identity, not a renderer reference',async t=>{
   const f=setup(t),identity='d'.repeat(32);

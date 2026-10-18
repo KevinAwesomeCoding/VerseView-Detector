@@ -103,6 +103,21 @@ class BotTests(unittest.TestCase):
         finally:release.set();worker.join();waiter.join()
         self.assertTrue(drained.is_set())
 
+    def test_delayed_power_acknowledgement_is_unknown_and_is_not_retried(self):
+        with tempfile.TemporaryDirectory() as directory:
+            runtime=self.runtime(Path(directory));runtime.state=lambda:'stopped'
+            runtime.publisher.begin({'streams':{}});start=Mock(return_value=True)
+            control=DesktopControl(runtime.publisher,runtime.state,start,Mock(),enabled=True)
+            bridge=ManagedBotBridge(runtime);bridge.start()
+            try:
+                with patch.dict(os.environ,{'VV_BRIDGE_TOKEN':bridge.token}):
+                    code,body=bridge_request('http://127.0.0.1:'+str(bridge.port),'/start')
+                self.assertEqual(code,504);self.assertIn('unknown',body)
+                self.assertEqual(bridge.snapshot()[-1]['outcome'],'unknown');start.assert_not_called()
+                self.assertEqual(len(list(control.directory.glob('command-*.json'))),1)
+                control.tick();start.assert_called_once()
+            finally:bridge.stop();control.close();runtime.publisher.close()
+
     def test_explicit_close_keeps_existing_close_behavior_separate_from_clear(self):
         runtime=SimpleNamespace(state=lambda:'running',stop_requested=threading.Event())
         bridge=ManagedBotBridge(runtime);bridge.start()
@@ -138,6 +153,7 @@ class BotTests(unittest.TestCase):
                 deadline=time.monotonic()+10
                 while bot.snapshot()['status']=='starting' and time.monotonic()<deadline:time.sleep(.05)
                 self.assertEqual(bot.snapshot()['status'],'online')
+                bot.stop();self.assertTrue(bot.bridge.closing)
                 self.assertTrue(bot.close());self.assertIsNone(bot.child);self.assertEqual(bot.snapshot()['status'],'stopped')
                 with self.assertRaises(BotError):bot.start()
             finally:bot.close();runtime.publisher.close()

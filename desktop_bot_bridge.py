@@ -117,9 +117,9 @@ class ManagedBotBridge:
         while time.monotonic()<deadline:
             result=next((row for row in (self.runtime.publisher.snapshot() or {}).get('control',{}).get('results',[]) if row['id']==identity),None)
             if result:return result['outcome']=='requested'
-            if self.closing:return False
+            if self.closing:return None
             time.sleep(.03)
-        return False
+        return None
 
     def present(self,reference,identity):
         engine=self.runtime.engine
@@ -138,7 +138,7 @@ class ManagedBotBridge:
     def record(self,identity,route,code):
         with self.lock:
             self.events=(self.events+[dict(id=identity,route=route,http_status=code,
-                timestamp=dt.datetime.now(dt.timezone.utc).isoformat(),outcome='acknowledged' if code==200 else 'rejected')])[-32:]
+                timestamp=dt.datetime.now(dt.timezone.utc).isoformat(),outcome='acknowledged' if code==200 else 'unknown' if code==504 else 'rejected')])[-32:]
 
     def snapshot(self):
         with self.lock:return [dict(row) for row in self.events]
@@ -166,7 +166,7 @@ class _ManagedHandler(_BridgeHandler):
             if len(self.path)>1024:self._send(400,'Invalid request');return
             if self.route in ('/start','/stop'):
                 ok=self.bridge.power(self.route[1:],self.request_id)
-                self._send(200 if ok else 409,'Engine request acknowledged; use /status to check readiness.');return
+                self._send(200 if ok else 504 if ok is None else 409,'Engine request acknowledged; use /status to check readiness.');return
             if self.route=='/status':
                 self._send(200,'Engine '+self.bridge.runtime.state());return
             if self.route=='/version':return self._handle_version({})
@@ -189,6 +189,7 @@ class _ManagedHandler(_BridgeHandler):
     def _send(self,code,body):
         if code>=400:
             body={403:'Bridge request rejected.',409:'Action was not accepted. Check the local dashboard and delivery activity.',
+                  504:'Command outcome is unknown. Check the local dashboard before trying again.',
                   503:'Engine control is unavailable.'}.get(code,'Control request failed. Inspect the private backend log.')
         if getattr(self,'request_id',None):self.bridge.record(self.request_id,self.route,code)
         super()._send(code,body)

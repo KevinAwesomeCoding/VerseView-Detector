@@ -174,7 +174,8 @@ class EngineRuntime:
         self.suggestions.cancel()
         self.outline.cancel()
         if self.loop and self.loop.is_running():
-            self.loop.call_soon_threadsafe(self._signal_stop)
+            try:self.loop.call_soon_threadsafe(self._signal_stop)
+            except RuntimeError:pass  # The owned loop may have just completed.
 
     def panic(self):
         self.engine.trigger_panic()
@@ -320,11 +321,11 @@ class BackendHost:
 
     def close(self):
         self.closing = True
-        if not self.bot.close():return False
-        self.control.close()
         self.runtime.stop()
+        bot_closed=self.bot.close()
+        self.control.close()
         if self.runtime.thread: self.runtime.thread.join(timeout=25)
-        if self.runtime.thread and self.runtime.thread.is_alive(): return False
+        if not bot_closed or self.runtime.thread and self.runtime.thread.is_alive(): return False
         self.publisher.close()
         return True
 
@@ -377,9 +378,12 @@ def main():
     try:
         while not shutdown.wait(.15): host.tick()
     finally:
-        if not host.close():
-            print(json.dumps({'error': 'Backend still stopping; process retained for cleanup'}), flush=True)
-            while runtime.thread and runtime.thread.is_alive(): runtime.thread.join(timeout=1)
+        warned=False
+        while not host.close():
+            if not warned:
+                print(json.dumps({'error': 'Backend still stopping; process retained for cleanup'}), flush=True)
+                warned=True
+            time.sleep(.2)
 
 
 if __name__ == '__main__':

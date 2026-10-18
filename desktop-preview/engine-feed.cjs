@@ -41,7 +41,7 @@ function decodeBot(value){
     events:(Array.isArray(value.events)?value.events:[]).slice(-32)
       .filter(row=>row&&/^[a-f0-9]{32}$/.test(row.id||'')&&['/start','/stop','/status','/version','/goto','/next','/prev','/present','/clear','/close'].includes(row.route)&&timestamp(row.timestamp))
       .map(row=>({id:row.id,route:row.route,timestamp:row.timestamp,http_status:Number.isInteger(row.http_status)?row.http_status:0,
-        outcome:row.outcome==='acknowledged'?'acknowledged':'rejected'}))};
+        outcome:row.outcome==='acknowledged'?'acknowledged':row.outcome==='unknown'?'unknown':'rejected'}))};
 }
 
 function decodeOutline(value){
