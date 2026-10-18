@@ -11,7 +11,10 @@ const { verify: verifyBackend } = require('./backend-integrity.cjs');
   const resources = target.endsWith('.app') ? path.join(target, 'Contents', 'Resources') : path.join(target, 'resources');
   const archive = path.join(resources, 'app.asar');
   const { listPackage, extractFile } = await import('@electron/asar');
-  const build = JSON.parse(extractFile(archive, 'build-info.json'));
+  // ASAR's directory lookup splits on the host's path.sep. Keep provenance
+  // keys portable, but use native separators when reading archive entries.
+  const read = relative => extractFile(archive, path.normalize(relative));
+  const build = JSON.parse(read('build-info.json'));
   const files = listPackage(archive).filter(file => path.extname(file));
   const allowed = /^(src\/|main\.cjs$|preload\.cjs$|appearance\.cjs$|backend-manager\.cjs$|engine-feed\.cjs$|engine-commands\.cjs$|package\.json$|build-info\.json$)/;
   for (const file of files) {
@@ -19,15 +22,15 @@ const { verify: verifyBackend } = require('./backend-integrity.cjs');
     assert.match(relative, allowed, `Unexpected packaged file: ${relative}`);
     if (relative === 'build-info.json') continue;
     if (relative === 'package.json') {
-      assert.deepEqual(JSON.parse(extractFile(archive, relative)), build.runtimeManifest);
+      assert.deepEqual(JSON.parse(read(relative)), build.runtimeManifest);
       continue;
     }
-    const digest = crypto.createHash('sha256').update(extractFile(archive, relative)).digest('hex');
+    const digest = crypto.createHash('sha256').update(read(relative)).digest('hex');
     assert.equal(digest, build.sourceFiles[relative], `Packaged bytes differ: ${relative}`);
   }
   for (const required of ['main.cjs', 'preload.cjs', 'appearance.cjs', 'backend-manager.cjs', 'engine-feed.cjs', 'engine-commands.cjs', 'src/index.html', 'src/dashboard.js',
     'src/settings-policy.js', 'src/settings.js', 'src/desktop.js', 'src/desktop.css', 'src/dashboard.css', 'src/vendor/lucide.min.js', 'src/vendor/lucide.LICENSE']) {
-    assert.ok(extractFile(archive, required).length, required);
+    assert.ok(read(required).length, required);
   }
   if (build.backend) {
     const manifest = verifyBackend(path.join(resources, 'backend'), build.platform, build.arch);
