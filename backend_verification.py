@@ -36,6 +36,7 @@ def isolated_engine(engine):
         for name, value in [('VerseController', lambda: controller), ('reconcile_chromedriver_cache', Mock()),
                             ('multi_fetch', Mock(return_value='Isolated verse text')), ('_trigger_atem_keyer', Mock()),
                             ('send_to_discord', Mock()), ('_start_bot_bridge', None),
+                            ('PANIC_KEY', None),
                             ('launch_stt_task', lambda _ctrl, is_secondary=False: asyncio.create_task(speech(is_secondary)))]:
             stack.enter_context(patch.object(engine, name, value))
         stack.enter_context(patch('requests.sessions.Session.request', side_effect=AssertionError('Live HTTP forbidden in verification')))

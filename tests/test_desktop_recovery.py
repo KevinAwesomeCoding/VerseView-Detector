@@ -119,6 +119,17 @@ class RecoveryTests(unittest.TestCase):
         next_host.choose(next_host.snapshot()['revision'], True)
         self.assertEqual(len(next_host.for_start()['transcript']), 5000)
 
+    def test_engine_string_context_is_preserved_and_numeric_legacy_context_is_adapted(self):
+        string_context = {**fixture(), 'current_chapter': '3', 'current_verse': '17',
+                          'sermon_anchor': {'book': 'John', 'chapter': '3', 'verse': '17'}}
+        self.recovery.save(string_context, 'autosave')
+        next_host = SessionRecovery(self.profile)
+        next_host.choose(next_host.snapshot()['revision'], True)
+        self.assertEqual(next_host.for_start()['current_chapter'], '3')
+        self.assertEqual(next_host.for_start()['current_verse'], '17')
+        self.assertEqual(sermon_data(fixture())['current_verse'], '16')
+        self.assertIsNone(sermon_data({**fixture(), 'current_verse': ''})['current_verse'])
+
     def test_runtime_restores_after_configure_before_thread_and_keeps_checkpoint(self):
         from desktop_backend import EngineRuntime
         import settings

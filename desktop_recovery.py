@@ -4,6 +4,7 @@ import datetime as dt
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import tempfile
 import threading
@@ -25,9 +26,11 @@ def sermon_data(raw):
             raise RecoveryError('Recovery content is invalid or exceeds its size limit.')
         return value
     def number(value):
-        if value is not None and (type(value) is not int or not 1 <= value <= 200):
-            raise RecoveryError('Recovery verse context is invalid.')
-        return value
+        if value is None or value == '': return None
+        if type(value) is int and 1 <= value <= 200: return str(value)
+        if isinstance(value, str) and re.fullmatch(r'[0-9]{1,3}', value) and 1 <= int(value) <= 200:
+            return value
+        raise RecoveryError('Recovery verse context is invalid.')
     def book(value):
         return None if value is None else text(value, 64)
     cited, history = raw.get('verses_cited', []), raw.get('verse_history', [])
