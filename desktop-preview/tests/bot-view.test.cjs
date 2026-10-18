@@ -1,5 +1,18 @@
 'use strict';
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
+test('connection notice never describes a stale or closed managed feed as connected',()=>{
+  const window={},document={getElementById:()=>({addEventListener:()=>{}}),addEventListener:()=>{}};
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../src/observer.js'),'utf8'),{window,document,Event,setTimeout:()=>{}});
+  const snapshot={connection:'connected',session:{host:{managed:true},control:{state:'stopped'}}};
+  const notice=()=>window.observerView.connectionNotice(snapshot);
+  assert.match(notice(),/Bundled backend connected/);
+  for(const connection of ['stale','disconnected']){
+    snapshot.connection=connection;assert.match(notice(),/feed unavailable/);assert.doesNotMatch(notice(),/backend connected/);
+  }
+  snapshot.connection='connected';snapshot.session.control.state='closed';assert.match(notice(),/controls are disabled/);
+  snapshot.session.host.managed=false;assert.match(notice(),/explicit opt-in/);
+  delete snapshot.session;assert.match(notice(),/explicit opt-in/);
+});
 test('Settings view acknowledges bot commands without visiting the engine controls or waiting for a timeout',async()=>{
   const listeners={},id='c'.repeat(32),sessionId='a'.repeat(32),hostId='b'.repeat(32);
   const snapshot={connection:'connected',message:'Connected',sources:[],session:{session_id:sessionId,pid:123,engine_state:'configured',config:{},

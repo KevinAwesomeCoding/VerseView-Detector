@@ -64,7 +64,7 @@ function inventory(directory) {
     assert.equal(processInfo.packaged, true); assert.equal(fs.realpathSync(processInfo.executable), fs.realpathSync(executable));
     assert.equal((await page.content()).includes('SECRET-'), false);
     const environment = await page.evaluate(() => window.verseviewDesktop.environment());
-    if (environment.version === '0.11.1') {
+    if (environment.version === require('../package.json').version) {
       assert.equal((await page.content()).includes('VERSEVIEW_OBSERVER=1'), false);
       assert.match(await surface.locator('[aria-label="Observer setup"]').textContent(), /Saved Bible translation: .*applies on Start/);
       assert.match(await surface.locator('.vv-feedback').textContent(), /Bundled backend connected/);

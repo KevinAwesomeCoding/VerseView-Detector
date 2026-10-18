@@ -183,7 +183,14 @@
         control.suggestions.busy||!control.suggestions.rows.some(row=>row.id===button.dataset.suggestionId&&row.state==='available')||command?.outcome==='submitted';
     }
   }
-  window.observerView = Object.freeze({ session: sessionView, activity, settings, outline, testGate, controls: controlPanel, updateRecoveryAvailability });
+  function connectionNotice(snapshot) {
+    if (!snapshot.session?.host?.managed) return 'Local engine connection. Controls require explicit opt-in in the detector.';
+    if (snapshot.connection !== 'connected' || snapshot.session.control?.state === 'closed') {
+      return 'Bundled backend feed unavailable. Showing the last snapshot; controls are disabled.';
+    }
+    return 'Bundled backend connected. Use the engine controls to start or stop.';
+  }
+  window.observerView = Object.freeze({ session: sessionView, activity, settings, outline, testGate, controls: controlPanel, updateRecoveryAvailability, connectionNotice });
   const root = document.getElementById('verseview-prototype');
   root.addEventListener('toggle', event => {
     if(event.target.matches('[data-suggestion-panel]')){

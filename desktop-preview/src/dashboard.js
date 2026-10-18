@@ -1,9 +1,7 @@
 (()=>{
   const root=document.getElementById('verseview-prototype');
   const observing=()=>window.previewShell.getMode()==='observer';
-  const connectionNotice=()=>window.previewShell.getObserver().session?.host?.managed
-    ? 'Bundled backend connected. Use the engine controls to start or stop.'
-    : 'Local engine connection. Controls require explicit opt-in in the detector.';
+  const connectionNotice=()=>window.observerView.connectionNotice(window.previewShell.getObserver());
   const themes={
     sage:{name:'Sage',description:'Soft sage · follows system',preview:['#edf1ea','#fff','#247e69']},
     midnight:{name:'Midnight',description:'Matte charcoal & indigo',preview:['#111319','#242834','#6c7ce0']},
