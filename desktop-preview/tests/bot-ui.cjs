@@ -57,6 +57,10 @@ const root=path.resolve(__dirname,'..'),output=path.join(root,'test-results');fs
     await action('stop_bot').click();await page.waitForFunction(()=>window.previewShell.getObserver().session.control.bot.status==='stopped');
     assert.equal(alive(botPid),false);assert.equal(await page.evaluate(()=>window.previewShell.getObserver().session.control.state),'running');
     await nav('Live session');await action('stop').click();await page.waitForFunction(()=>window.previewShell.getObserver().session.control.state==='stopped');
+    await surface.locator('[data-backend-action="close"]').click();await page.waitForFunction(()=>window.previewShell.getBackend().status==='available');
+    await surface.locator('[data-backend-action="launch"]').click();await page.waitForFunction(()=>window.previewShell.getBackend().status==='ready');
+    childPid=await page.evaluate(()=>window.previewShell.getBackend().pid);
+    await page.waitForFunction(()=>window.previewShell.getObserver().session?.control?.recovery?.status==='available');
     await nav('Settings');await action('start_bot').click();
     await page.waitForFunction(()=>window.previewShell.getObserver().session.control.bot.events.some(e=>e.route==='/start'&&e.http_status===409));
     assert.equal(await page.evaluate(()=>window.previewShell.getObserver().session.control.state),'stopped');

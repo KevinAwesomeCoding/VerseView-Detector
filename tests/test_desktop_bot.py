@@ -116,6 +116,15 @@ class BotTests(unittest.TestCase):
                 while bot.snapshot()['status']=='starting' and time.monotonic()<deadline:time.sleep(.05)
                 snapshot=bot.snapshot();self.assertEqual(snapshot['status'],'online',snapshot)
                 self.assertFalse(snapshot['proof']['guiImported']);self.assertNotIn('SECRET',str(snapshot))
+                bot.child.terminate()
+                deadline=time.monotonic()+5
+                while bot.thread.is_alive() and time.monotonic()<deadline:time.sleep(.05)
+                self.assertEqual(bot.snapshot()['status'],'failed');self.assertIsNone(bot.child)
+                time.sleep(.1);self.assertFalse(bot.thread.is_alive())
+                bot.start()
+                deadline=time.monotonic()+10
+                while bot.snapshot()['status']=='starting' and time.monotonic()<deadline:time.sleep(.05)
+                self.assertEqual(bot.snapshot()['status'],'online')
                 self.assertTrue(bot.close());self.assertIsNone(bot.child);self.assertEqual(bot.snapshot()['status'],'stopped')
                 with self.assertRaises(BotError):bot.start()
             finally:bot.close();runtime.publisher.close()

@@ -15,6 +15,19 @@ from observer_feed import ObserverPublisher
 
 
 class BackendTests(unittest.TestCase):
+    def test_headless_session_files_write_without_gui_or_provider_calls(self):
+        from desktop_backend import EngineRuntime
+        with tempfile.TemporaryDirectory() as directory:
+            summary=Mock(return_value='Synthetic summary')
+            runtime=SimpleNamespace(profile=Path(directory),engine=SimpleNamespace(full_sermon_transcript='Synthetic speech '*12,generate_sermon_summary=summary))
+            EngineRuntime._save_session(runtime,{'auto_save_notes':False})
+            files=list((Path(directory)/'Sessions').glob('*.txt'))
+            self.assertEqual(len(files),1);self.assertEqual(files[0].read_text(),runtime.engine.full_sermon_transcript)
+            summary.assert_not_called()
+            EngineRuntime._save_session(runtime,{'auto_save_notes':True})
+            self.assertTrue(any(file.read_text()=='Synthetic summary' for file in (Path(directory)/'Sessions').glob('*.txt')))
+            if os.name!='nt':self.assertTrue(all(file.stat().st_mode & 0o777==0o600 for file in (Path(directory)/'Sessions').glob('*.txt')))
+
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)

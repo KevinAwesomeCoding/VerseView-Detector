@@ -62,6 +62,10 @@ with tempfile.TemporaryDirectory(prefix='vv-bot-smoke-') as temporary:
             command(value,'stop_bot');value=wait_for(lambda s:s['control']['bot']['status']=='stopped')
             assert value['control']['state']=='running' and not alive(bot_pid)
             command(value,'stop');value=wait_for(lambda s:s['control']['state']=='stopped')
+            child.stdin.close();child.wait(timeout=30);assert child.returncode==0
+            child=subprocess.Popen([str(executable),'--profile',str(profile),'--verify-isolated'],stdin=subprocess.PIPE,
+                stdout=log,stderr=log,text=True,env={**os.environ,'VV_PREVIEW_TEST_PROFILE':'1'})
+            value=wait_for(lambda s:s.get('control',{}).get('recovery',{}).get('status')=='available')
             # Restore/discard must still be chosen locally; bot Start cannot bypass recovery.
             command(value,'start_bot')
             value=wait_for(lambda s:s['control']['bot']['status']=='online')
@@ -74,6 +78,12 @@ with tempfile.TemporaryDirectory(prefix='vv-bot-smoke-') as temporary:
                 optIn=True,accepted=accepted,privateBridgeIDsMatched=True,stopBotLeavesEngineRunning=True,
                 recoveryStartRejected=True,parentEOFStopsBot=True,discord='SYNTHETIC CHILD — NO DISCORD SDK/NETWORK',
                 microphoneSTT='NOT USED',presentation='FAKE CONTROLLER')))
+        except Exception:
+            evidence=root/'test-results';evidence.mkdir(parents=True,exist_ok=True)
+            log.flush();(evidence/'bot-smoke-failure.log').write_bytes((directory/'backend.log').read_bytes())
+            try:(evidence/'bot-smoke-failure-state.json').write_text(json.dumps(snapshot(),indent=2),encoding='utf-8')
+            except (OSError,ValueError):pass
+            raise
         finally:
             if child and child.poll() is None:
                 try:

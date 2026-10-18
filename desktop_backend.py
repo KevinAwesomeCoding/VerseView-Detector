@@ -259,11 +259,11 @@ class EngineRuntime:
         directory.mkdir(mode=0o700, exist_ok=True)
         stamp = dt.datetime.now(dt.timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')
         target = directory / (stamp + '.txt')
-        with target.open('x', encoding='utf-8', opener=lambda path, flags: os.open(path, flags, 0o600)) as handle:
+        with open(target, 'x', encoding='utf-8', opener=lambda path, flags: os.open(path, flags, 0o600)) as handle:
             handle.write(transcript)
         if values.get('auto_save_notes') and len(transcript.strip()) > 100:
             summary = self.engine.generate_sermon_summary()
-            with (directory / (stamp + '-summary.txt')).open('x', encoding='utf-8', opener=lambda path, flags: os.open(path, flags, 0o600)) as handle:
+            with open(directory / (stamp + '-summary.txt'), 'x', encoding='utf-8', opener=lambda path, flags: os.open(path, flags, 0o600)) as handle:
                 handle.write(summary)
 
 
