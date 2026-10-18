@@ -3,7 +3,7 @@
 A separate Electron dashboard for macOS and Windows, with local engine events,
 **optional start/stop, candidate approval, and non-secret settings**, and a separate sample demo. The
 Python companion owns microphone/STT, settings, and guarded delivery. Version
-0.6.0 bundles the native backend and adds explicit session recovery; external-detector observation still works.
+0.7.0 bundles the native backend, explicit session recovery and opt-in local-model warmup; external-detector observation still works.
 The installed detector remains unchanged. This milestone is still in progress.
 
 ## Standalone companion (milestone 6 in progress)
@@ -33,10 +33,19 @@ restarted. Explicit relaunch selects the new owned PID and leaves recognition
 stopped. Closing an external detector feed remains outside this ownership.
 
 Compatibility is incomplete. Saved live-outline display, watcher suggestions,
-Discord bot, settings sync, or local-model warmup settings block
+Discord bot or settings sync settings block
 Start with a named migration message. Their values are retained; they are not
 silently disabled. Full legacy feature parity remains open. Session transcripts/optional summaries have a headless save path,
 but real cloud summary behavior has not been physically verified.
+
+The saved opt-in `local_llm_warm_at_start` now works on explicit Start, using
+configured local-role clients and production request parameters on one
+background worker. Dashboard status reports progress/success/failure without
+exposing endpoints, credentials or raw errors. Recognition does not wait for
+warmup. Stop cancels later roles/results; an in-flight synchronous request can
+finish under its existing transport timeout. A quick restart skips overlapping
+warmup. Routing and warmup settings remain in the private backend JSON. See
+[warmup verification](WARMUP_VERIFICATION.md) for exact packages and limits.
 
 Smart Schedule now shares the legacy local timetable: Saturday Malayalam;
 Sunday English from 09:10, Malayalam from 10:40 and Hindi from 16:40. In the

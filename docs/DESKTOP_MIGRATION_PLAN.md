@@ -23,10 +23,10 @@ They do not establish real speech transport, visible presentation, Windows
 runtime correctness, or the cause of the original intermittent incident.
 
 Milestone 6 work completed so far: native Mac companion, private profile copy,
-core start/stop and decisions, error/restart/shutdown handling, Smart Schedule, explicit session recovery,
+core start/stop and decisions, error/restart/shutdown handling, Smart Schedule, explicit session recovery, local-model warmup,
 and packaged isolated verification. Native Windows x64, Mac ARM64 and Intel Mac
-recovery/build/archive checks all passed for 0.6.0. Remaining feature migration covers local-model
-warmup, watcher suggestions, live outline display, Discord bot controls and
+warmup/recovery/build/archive checks all passed for 0.7.0. Remaining feature migration covers
+watcher suggestions, live outline display, Discord bot controls and
 settings sync. Keep these requirements visible rather than advancing the
 overall bar while they remain incomplete.
 

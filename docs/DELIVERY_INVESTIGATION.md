@@ -1,5 +1,24 @@
 # Verse delivery investigation
 
+## 2026-10-18: opt-in standalone local-model warmup
+
+Preview 0.7.0 reuses configured per-role local-model clients on a background
+worker, with typed progress/outcome status and private error details. It never
+warms on idle launch, blocks recognition on warmup, or changes delivery guards.
+Stop cancels later roles/results; an in-flight synchronous call can still
+finish under its existing transport timeout. Quick Start skips overlapping
+warmup and rejects stale results.
+
+Source `6242886cd2033ea074e1fdf5dc2c900019cf0fee`, local packaged build
+`2026-10-18T03-45-45-542Z-6242886c-darwin-arm64`: 109 Python tests, 34 Node
+tests, three packaged Mac suites and 72 layout cases passed. Actual frozen
+engine callback replay accepted John 3:16/17 while slow mocked local-model
+completions ran; a deliberate warmup failure left recognition running. Native
+CI `39094733176` passed Windows x64 and both Mac architectures, including frozen
+warmup/recovery and extracted-archive checks. No real model/STT/VerseVIEW
+request or physical output was exercised. The original delivery incident
+remains unresolved. Details: [warmup verification](../desktop-preview/WARMUP_VERIFICATION.md).
+
 ## 2026-10-17: explicit standalone session recovery
 
 Preview 0.6.0 adds private 15-second checkpoints and an explicit Restore/Discard
