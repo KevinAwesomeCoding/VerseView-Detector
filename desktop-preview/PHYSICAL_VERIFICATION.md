@@ -1,5 +1,15 @@
 # Mac physical acceptance checkpoint — October 18, 2026
 
+**Later user-spoken checkpoint:** normal packaged **0.11.2** now has actual real
+microphone/Deepgram recognition and accepted PRESENT commands for 3:16 and 3:17,
+23.564752 seconds apart. Two earlier phrases produced a chapter-only parse and a
+verification hold. Actual visible verse output and the within-ten-seconds condition
+remain unverified. Populated native Activity scrolling passed while stopped.
+See the [latest investigation entry](../docs/DELIVERY_INVESTIGATION.md) for the
+exact transcript/candidate/stage timeline. The earlier away-from-computer session
+below is retained as historical evidence, not the latest speech result.
+
+
 Progress: **[████████████░░░░] 75% — 6 of 8 milestones complete.**
 This is partial milestone 7 evidence. Human speech and Windows graphical acceptance
 remain open. The user is away and explicitly allowed skipping spoken cases.

@@ -73,3 +73,10 @@ preview settings were restored; all owned hosts are closed. Progress stays 75%.
 Final 0.11.2 native CI 39147884519 passed all three targets (149 Python / 50 Node,
 frozen features and extracted archives). This supports the status correction,
 without closing the human speech, visible verse or Windows graphical gates.
+
+Later October 18 user-spoken 0.11.2 checkpoint: real microphone/Deepgram recognition
+and PRESENT command execution for 3:16/3:17 passed, 23.564752 seconds apart.
+A colloquial spoken-number phrase parsed chapter-only, and a split 3:17 transcript
+was held by verification. Native populated Activity scrolling passed while stopped.
+Actual visible verse output, rapid timing and remaining physical gates stay open;
+see the latest investigation entry. No guard was disabled. Progress remains 75%.

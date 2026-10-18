@@ -1,5 +1,55 @@
 # Verse delivery investigation
 
+## 2026-10-18 14:36–14:38 CDT: actual user-spoken preview checkpoint
+
+The user launched the normal packaged 0.11.2 backend (PID **68579**, dashboard
+**62977**, exact source/build `e54b905fabe60ebfcf60f61916a15ab67079bb11` /
+`2026-10-18T17-04-40-349Z-e54b905f-darwin-arm64`) and supplied actual speech.
+MacBook Air Microphone opened **14:36:42.363**, configured English Deepgram Nova-3
+connected **14:36:42.645**. This now establishes **PASS for real microphone/STT
+recognition in this packaged artifact**, without transcript injection. It does
+not establish visible output. Secondary STT is disabled in the current settings.
+
+| Recognized input / CDT time | Candidate | Last confirmed result |
+| --- | --- | --- |
+| “Let us turn our attention to John three sixteen.” **14:37:03.237764** | `8bbcaac7b99a` | Parsed **John 3**, DETECTED .244329; SUPPRESSED .253875 at chapter_context, “Chapter-only reference updates context without display.” No PRESENT request. This exposes a spoken-number parsing gap for this phrase; the actual STT text includes “sixteen.” |
+| “John chapter three verse sixteen.” **14:37:15.498749** | `b37187defb15` | FAST-PATH DETECTED .499801, DELIVERY_REQUESTED .509284, COMMAND_ACCEPTED **14:37:15.531784**. |
+| “…John” **14:37:29.052247**, then separate final “chapter three verses seventeen.” **14:37:30.640065** | `c14a86963067` | PARSER DETECTED John 3:17 .640976; SUPPRESSED .642435, “Awaiting second detection.” Saved `verify=true` applies on this contextual parser path; no PRESENT request. The book and chapter/verse arrived in separate STT segments. |
+| “John chapter three verses seventeen.” **14:37:39.079409** | `bd9a05d83316` | FAST-PATH DETECTED .080526, DELIVERY_REQUESTED .086288, COMMAND_ACCEPTED **14:37:39.096536**. |
+
+The two accepted commands are **23.564752 seconds apart**. The requested
+within-ten-seconds transition remains **UNVERIFIED**. The final 3:17 is the first
+accepted 3:17 in this session; the earlier held detection does not make this a
+passing duplicate-suppression case. Manual approval and semantic release remain
+unverified. The verification guard is deliberately retained, not disabled to
+make the test pass. No runtime code or settings changed during this inspection.
+
+The user reported something did not go right. Logs explain the two no-command
+cases above, but **COMMAND_ACCEPTED means the browser executed a PRESENT click**,
+not that VerseVIEW rendered it. Current control-window recent references list
+John 3:17/3:16; the browse pane is Genesis 1. That browse pane is not the actual
+presentation output, and cannot establish what was displayed at the earlier
+acceptance times. Computer Use confirmed Main enabled on Screen 1 1920×1080,
+Stage/AUX disabled; routing was not changed. No new presentation command was sent.
+The user has been asked what the actual screen showed at those two times.
+
+The normal dashboard is connected with recognition **stopped** after an acknowledged
+Stop request `44e3ed9474b34779acd1d40eca4b09b9`. WebSocket warnings start at
+**14:37:52.714** during the stopped session; preserve them separately from the
+accepted references. Computer Use inspected and scrolled the populated native
+Activity view to the held chapter/verification outcomes: **PASS for access and
+scrolling while stopped**, not yet a simultaneous-transcription layout pass.
+The page is left on Activity for the user to inspect. VerseVIEW's original VERSES
+tab is restored. No engine start/stop was issued by this read-only inspection.
+
+Local snapshots, filtered timeline and screenshots are preserved at
+`desktop-preview/test-results/spoken-20261018-1937/`. Full raw logs are private
+at `/tmp/verseview-spoken-20261018-1937/verseview.log` (folder 700, file 600),
+not committed. Production settings remain at the earlier recorded hash. The
+installed app remains intact. Progress remains **6/8, 75%**. This explains two
+misses in the current run; the original intermittent incident is still unresolved.
+
+
 ## 2026-10-18: partial native microphone/UI checkpoint and status correction
 
 The user lifted the Mac physical deferral, confirmed VerseVIEW 11 #2 at localhost
