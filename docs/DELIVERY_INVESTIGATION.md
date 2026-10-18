@@ -1,5 +1,29 @@
 # Verse delivery investigation
 
+## 2026-10-17: authorized preview branch and schedule migration
+
+The migration was committed and pushed to `codex/desktop-backend` inside the
+existing `KevinAwesomeCoding/VerseView-Detector` repository after explicit user
+approval. `main`, production release publishing and the installed app remain
+unchanged. The preview-only native build matrix is running on GitHub Actions.
+Initial Windows tests exposed test-file CP1252 decoding and a test that cleared
+Windows home variables; their tracebacks were preserved and the test harness
+was corrected without changing delivery guards or provider logic.
+
+Preview 0.5.1 migrates Smart Schedule through a shared service timetable. It
+resolves at explicit Start, applies the legacy stream policy, retains saved
+settings, and rejects incompatible providers. The affected packaged Mac suite
+passed with a fixed isolated QA clock, fake services and a frozen companion;
+92 Python and 31 Node tests passed. Exact artifacts, commits, CI run and limits
+are in the [standalone report](../desktop-preview/STANDALONE_VERIFICATION.md).
+Native Windows x64, ARM64 Mac and Intel Mac CI build, frozen smoke, archive integrity and
+extracted-deliverable checks subsequently passed on run `39091168118` at
+`f8fba2e`. The final Windows verifier issue was native path separation in its
+ASAR lookup; required-file/license/hash checks remain in place. The complete
+three-platform run finished successfully. Milestone 6 is in progress because feature
+parity is incomplete; physical tests remain deferred and the original incident
+is unresolved.
+
 ## 2026-10-17: standalone companion preview; physical checks still deferred
 
 Preview 0.5.0 now packages a native frozen Python companion alongside the Mac

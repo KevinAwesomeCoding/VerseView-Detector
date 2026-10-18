@@ -3,7 +3,7 @@
 A separate Electron dashboard for macOS and Windows, with local engine events,
 **optional start/stop, candidate approval, and non-secret settings**, and a separate sample demo. The
 Python companion owns microphone/STT, settings, and guarded delivery. Version
-0.5.0 can bundle the native backend; external-detector observation still works.
+0.5.1 can bundle the native backend; external-detector observation still works.
 The installed detector remains unchanged. This milestone is still in progress.
 
 ## Standalone companion (milestone 6 in progress)
@@ -53,7 +53,9 @@ has unit checks; a rebuilt packaged schedule check is recorded separately.
 A native Windows companion must be built on Windows. The updated preview workflow
 builds through the existing `verseview.spec`, smoke-tests the frozen host without
 audio, packages it with Electron, and checks the resulting runtime archive. No
-native Windows companion was built or executed on this Mac. Milestone 6 is not
+native Windows companion was built or executed on this Mac. Native Windows and
+ARM64/Intel Mac CI build/smoke/archive checks now pass; graphical Windows execution is
+still unverified. Milestone 6 is not
 yet counted complete. See [standalone verification](STANDALONE_VERIFICATION.md).
 
 Native development build (using an approved environment with repository
@@ -63,6 +65,7 @@ requirements and PyInstaller already installed), from the repository root:
 python desktop-preview/scripts/build-backend.py
 python desktop-preview/scripts/smoke-backend.py
 node desktop-preview/scripts/package-native.cjs --platform=darwin --arch=arm64
+python desktop-preview/scripts/archive-latest.py
 ```
 
 Use `--platform=win32 --arch=x64` on a native Windows host. Builds with no backend
@@ -307,6 +310,6 @@ See [standalone verification](STANDALONE_VERIFICATION.md) for current results,
 [control verification](CONTROL_VERIFICATION.md) for stage three,
 [observer verification](OBSERVER_VERIFICATION.md) for stage two, and
 [the milestone-one report](VERIFICATION.md) for the original desktop preview.
-Current engineering milestone: finish standalone backend integration and native Windows packaging.
+Current engineering milestone: finish the remaining standalone backend feature migration.
 Physical end-to-end checks on both platforms remain deferred; the new settings
 have isolated automated verification only.
