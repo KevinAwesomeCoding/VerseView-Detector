@@ -134,6 +134,21 @@ test('bot decoder omits credentials and private log text and bounds command hist
   assert.equal(bot.events.length,32);assert.equal(bot.pid,456);assert.equal(JSON.stringify(bot).includes('SECRET'),false);
   assert.equal(bot.events.at(-1).outcome,'unknown');
 });
+test('credential pulls require current capability and carry no renderer URL or credential data',async t=>{
+  const f=setup(t);f.session.control.actions=['pull_settings'];
+  const result=await f.client.submit(f.sessionId,'pull_settings');
+  const request=JSON.parse(fs.readFileSync(path.join(f.inbox,`command-${result.id}.json`)));
+  assert.deepEqual(Object.keys(request).sort(),['id','control_id','session_id','action','created_at'].sort());
+  f.session.control.actions=[];await assert.rejects(f.client.submit(f.sessionId,'pull_settings'));
+});
+test('sync decoder exports bounded status without URLs, keys or downloaded payload',t=>{
+  const f=setup(t),fixture={...f.session,schema:1,revision:1,origin:'engine',started_at:new Date(f.now).toISOString(),
+    config:{streams:{primary:{enabled:true},secondary:{enabled:false}}},transcripts:[],delivery_events:[]};
+  fixture.control.sync={status:'applied',configured:true,busy:false,updated_count:999,message:'Credentials updated.',
+    url:'SECRET',credentials:{key:'SECRET'},raw_error:'SECRET',completed_at:new Date(f.now).toISOString()};
+  const value=decodeSnapshot(fixture).control.sync;
+  assert.equal(value.updated_count,13);assert.equal(JSON.stringify(value).includes('SECRET'),false);
+});
 test('suggestion sends target only an active available identity, not a renderer reference',async t=>{
   const f=setup(t),identity='d'.repeat(32);
   f.session.control.state='running';f.session.control.actions=['send_suggestion'];

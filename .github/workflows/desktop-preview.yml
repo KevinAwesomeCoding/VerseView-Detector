@@ -84,6 +84,9 @@ jobs:
       - name: Check frozen owned Discord bot with mocked services
         run: python desktop-preview/scripts/ci-run.py bot python desktop-preview/scripts/smoke-bot.py
         working-directory: .
+      - name: Check frozen private settings sync with mocked downloads
+        run: python desktop-preview/scripts/ci-run.py sync python desktop-preview/scripts/smoke-sync.py
+        working-directory: .
       - name: Package dashboard with the native companion
         run: python scripts/ci-run.py package node scripts/package-native.cjs --platform=${{ matrix.platform }} --arch=${{ matrix.arch }}
       - name: Verify final dashboard and backend package

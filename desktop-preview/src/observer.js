@@ -62,7 +62,8 @@
     const value = window.previewShell.getBackend();
     const busy = ['starting', 'closing'].includes(value.status);
     const session = window.previewShell.getObserver().session;
-    return `<section class="vv-backend-status" aria-label="Bundled backend status"><div><strong>${value.status === 'unavailable' ? 'External detector connection' : 'Standalone backend preview'}</strong><p class="vv-caption">${escape(value.status === 'unavailable' ? 'This build has no native companion. An updated external detector can still publish the feed.' : value.message)}${value.pid ? ` · PID ${value.pid}` : ''}</p>${session?.host?.notice ? `<p class="vv-caption">${escape(session.host.notice)}</p>` : ''}${warmupStatus(session?.host?.warmup)}</div><div class="vv-control-actions">${value.owned ? '<button type="button" class="vv-btn" data-backend-action="folder">Open backend settings folder</button><button type="button" class="vv-btn" data-backend-action="close">Close backend</button>' : value.status !== 'unavailable' ? '<button type="button" class="vv-btn" data-backend-action="launch">Launch bundled backend</button>' : ''}${busy ? '<span class="vv-caption">Please wait…</span>' : ''}</div></section>`;
+    const sync=session?.control?.sync;
+    return `<section class="vv-backend-status" aria-label="Bundled backend status"><div><strong>${value.status === 'unavailable' ? 'External detector connection' : 'Standalone backend preview'}</strong><p class="vv-caption">${escape(value.status === 'unavailable' ? 'This build has no native companion. An updated external detector can still publish the feed.' : value.message)}${value.pid ? ` · PID ${value.pid}` : ''}</p>${session?.host?.notice ? `<p class="vv-caption">${escape(session.host.notice)}</p>` : ''}${sync&&['pulling','failed','conflict'].includes(sync.status)?`<p class="vv-caption" data-backend-sync-notice>${escape(sync.message)}</p>`:''}${warmupStatus(session?.host?.warmup)}</div><div class="vv-control-actions">${value.owned ? '<button type="button" class="vv-btn" data-backend-action="folder">Open backend settings folder</button><button type="button" class="vv-btn" data-backend-action="close">Close backend</button>' : value.status !== 'unavailable' ? '<button type="button" class="vv-btn" data-backend-action="launch">Launch bundled backend</button>' : ''}${busy ? '<span class="vv-caption">Please wait…</span>' : ''}</div></section>`;
   }
 
   function warmupStatus(value) {
@@ -131,10 +132,20 @@
 
   function settings(snapshot) {
     const session = snapshot.session;
-    return status(snapshot) + botPanel(snapshot) + window.detectorSettings.render(snapshot) + `<section class="vv-panel preview-about" aria-label="Observer setup"><h2>Local detector connection</h2>
+    return status(snapshot) + syncPanel(snapshot) + botPanel(snapshot) + window.detectorSettings.render(snapshot) + `<section class="vv-panel preview-about" aria-label="Observer setup"><h2>Local detector connection</h2>
       <p class="vv-caption">${session?.host?.managed ? "This dashboard owns the bundled backend and its private preview profile. The installed detector has not been replaced." : "The preview reads structured snapshots from your local VerseView/Observer folder. The installed detector has not been replaced."}</p>
       <p class="vv-caption">An updated detector must be started with <code>VERSEVIEW_OBSERVER=1</code> to publish the feed. Also set <code>VERSEVIEW_DESKTOP_CONTROL=1</code> to enable start/stop and candidate decisions. Without that opt-in the connection stays read only. Speech and connection settings can be saved above while stopped; credentials and advanced options remain in the detector.</p>
       <p class="vv-caption">${session ? `Session ${escape(session.session_id)} · Bible setting: ${escape(session.config.bible_translation || 'not reported')}` : 'No observer session selected.'}</p></section>`;
+  }
+
+  function syncPanel(snapshot){
+    const session=snapshot.session,value=session?.control?.sync;
+    if(!value)return '';
+    return `<section class="vv-panel vv-bot-panel" data-sync-panel aria-label="Settings sync"><div class="vv-panel-head"><h2>Settings sync</h2><span class="vv-badge" data-sync-status>${escape(value.status)}</span></div>
+      <p class="vv-caption" role="status">${escape(value.message)}</p><p class="vv-caption">${value.configured?'Private sync URL configured.':'Add settings_sync_url to the private backend settings file.'} Only supported credential fields are pulled. Recognition, presentation and other settings stay as saved. Stop recognition and the bot before pulling.</p>
+      ${value.completed_at?`<p class="vv-caption">Last completed pull: ${time(value.completed_at)} · ${value.updated_count} credential field(s) changed.</p>`:''}
+      <button type="button" class="vv-btn" data-engine-action="pull_settings" data-engine-session="${session.session_id}" ${snapshot.connection!=='connected'||!session.control.actions.includes('pull_settings')||command?.outcome==='submitted'?'disabled':''}>Pull credentials now</button>
+      ${command?.action==='pull_settings'?`<p class="vv-caption">${escape(command.reason||'Waiting for acknowledgement.')}</p>`:''}</section>`;
   }
 
   function botPanel(snapshot){
@@ -155,7 +166,7 @@
   function updateRecoveryAvailability(snapshot) {
     reconcileCommand(snapshot);
     const session = snapshot.session, control = session?.control;
-    for(const button of document.querySelectorAll('[data-engine-action="start_bot"],[data-engine-action="stop_bot"]')){
+    for(const button of document.querySelectorAll('[data-engine-action="start_bot"],[data-engine-action="stop_bot"],[data-engine-action="pull_settings"]')){
       button.disabled=snapshot.connection!=='connected'||session?.session_id!==button.dataset.engineSession||!control?.actions.includes(button.dataset.engineAction)||command?.outcome==='submitted';
     }
     for (const button of document.querySelectorAll('[data-recovery-revision]')) {
@@ -195,6 +206,7 @@
         : action === 'stop' ? await window.verseviewDesktop.stopEngine(sessionId)
         : action === 'panic' ? await window.verseviewDesktop.clearOutput(sessionId)
         : ['start_bot','stop_bot'].includes(action) ? await window.verseviewDesktop.botControl(sessionId,action)
+        : action==='pull_settings' ? await window.verseviewDesktop.pullSettings(sessionId)
         : action === 'send_suggestion' ? await window.verseviewDesktop.sendSuggestion(sessionId, button.dataset.suggestionId)
         : ['restore_session', 'discard_session'].includes(action) ? await window.verseviewDesktop.recoverSession(sessionId, button.dataset.recoveryRevision, action === 'restore_session')
         : await window.verseviewDesktop.resolveCandidate(sessionId, button.dataset.candidate, action === 'approve');

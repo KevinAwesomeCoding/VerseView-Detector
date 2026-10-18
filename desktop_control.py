@@ -15,6 +15,7 @@ from desktop_settings import SettingsError
 from desktop_recovery import RecoveryError
 from desktop_outline import OutlineError
 from desktop_bot import BotError
+from desktop_sync import SyncError
 
 _HEX = re.compile(r"^[a-f0-9]{32}$")
 
@@ -24,7 +25,7 @@ def now_seconds():
 
 
 class DesktopControl:
-    def __init__(self, publisher, state, start, stop, *, enabled=False, clock=now_seconds, settings=None, panic=None, recovery=None, suggestions=None, outline=None, bot=None):
+    def __init__(self, publisher, state, start, stop, *, enabled=False, clock=now_seconds, settings=None, panic=None, recovery=None, suggestions=None, outline=None, bot=None, sync=None):
         self.publisher, self.state = publisher, state
         self.start, self.stop, self.enabled, self.clock = start, stop, enabled, clock
         self.settings, self.panic = settings, panic
@@ -32,6 +33,7 @@ class DesktopControl:
         self.suggestions = suggestions
         self.outline = outline
         self.bot = bot
+        self.sync = sync
         self.control_id = uuid.uuid4().hex
         self.directory = publisher.directory / f"control-{os.getpid()}-{self.control_id}"
         self.session_id = None
@@ -76,10 +78,15 @@ class DesktopControl:
             if state!='closed' and bot:
                 if bot['status'] in ('stopped','failed') and bot['configured']:actions.append('start_bot')
                 if bot['status'] in ('starting','online'):actions.append('stop_bot')
+            sync=self.sync.snapshot() if self.sync else None
+            if sync and sync['busy']:actions=[action for action in actions if action not in ('start','start_bot','save_settings')]
+            if sync and sync['configured'] and not sync['busy'] and state=='stopped' and (not bot or bot['status'] in ('stopped','failed')):
+                actions.append('pull_settings')
             self.publisher.emit('control', value={
                 'id': self.control_id, 'state': state, 'actions': actions, 'settings': settings, 'recovery': recovery, 'suggestions': suggestions,
                 'outline': self.outline.snapshot() if self.outline else None,
                 'bot': bot,
+                'sync': sync,
                 'pending': [{key: item[key] for key in ('candidate_id', 'reference', 'confidence', 'stream', 'source')}
                             for item in self.pending.values()], 'results': self.results[-32:]})
 
@@ -134,7 +141,9 @@ class DesktopControl:
             if valid:
                 try:
                     state = self.state()
-                    if action in ('start_bot','stop_bot') and self.bot and action in self.publisher.snapshot()['control']['actions']:
+                    if action=='pull_settings' and self.sync and action in self.publisher.snapshot()['control']['actions']:
+                        self.sync.start();outcome,reason='requested','Credential pull requested; observe settings sync status.'
+                    elif action in ('start_bot','stop_bot') and self.bot and action in self.publisher.snapshot()['control']['actions']:
                         (self.bot.start if action=='start_bot' else self.bot.stop)()
                         outcome,reason='requested','Bot lifecycle requested; observe its status. Recognition is unchanged.'
                     elif action == 'start' and state == 'stopped':
@@ -157,7 +166,7 @@ class DesktopControl:
                     elif action == 'edit_outline' and state in ('stopped', 'running') and self.outline:
                         self.outline.edit(request.get('outline_revision'), request.get('outline_text'))
                         outcome, reason = 'saved', 'Outline notes updated. Display output changes only in a window you explicitly opened.'
-                    elif action == 'save_settings' and state == 'stopped' and self.settings:
+                    elif action == 'save_settings' and state == 'stopped' and self.settings and action in self.publisher.snapshot()['control']['actions']:
                         self.settings.save(request.get('settings_revision'), request.get('changes'))
                         outcome, reason = 'saved', 'Settings saved. They apply when you next start the engine.'
                     elif action == 'stop' and state == 'running':
@@ -174,11 +183,11 @@ class DesktopControl:
                             reason = 'Candidate is no longer awaiting approval'
                     else:
                         reason = 'Action unavailable in the current engine state'
-                except (SettingsError, RecoveryError, OutlineError, BotError) as exc:
+                except (SettingsError, RecoveryError, OutlineError, BotError, SyncError) as exc:
                     outcome, reason = 'rejected', str(exc)
                 except Exception:
                     outcome, reason = 'failed', 'Detector control failed; inspect the detector log'
-            self.results.append(dict(id=command_id, action=action if action in ('start', 'stop', 'approve', 'reject', 'save_settings', 'panic', 'restore_session', 'discard_session', 'send_suggestion', 'edit_outline', 'start_bot', 'stop_bot') else 'unknown',
+            self.results.append(dict(id=command_id, action=action if action in ('start', 'stop', 'approve', 'reject', 'save_settings', 'panic', 'restore_session', 'discard_session', 'send_suggestion', 'edit_outline', 'start_bot', 'stop_bot', 'pull_settings') else 'unknown',
                                      outcome=outcome, reason=reason))
             self.results = self.results[-32:]
             self.refresh()

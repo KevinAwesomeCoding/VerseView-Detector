@@ -70,6 +70,8 @@ class ProfileStore:
         from desktop_settings import SettingsError
         if self.state() != 'stopped':
             raise SettingsError('Stop the engine before changing settings.')
+        if getattr(self,'blocked',lambda:False)():
+            raise SettingsError('Wait for settings sync before saving settings.')
         values, revision = self.load()
         if revision != expected_storage:
             raise SettingsError('Settings changed elsewhere. Reload before saving.')
@@ -77,6 +79,40 @@ class ProfileStore:
         values['bible_translation'] = values['bible_translation'].lower()
         if not self.config.save(values):
             raise SettingsError('Could not save backend settings; previous values retained.')
+
+    def apply_sync(self,changes,credential,expected_storage):
+        from desktop_sync import SyncError,SyncConflict
+        import tempfile
+        if self.state()!='stopped':raise SyncConflict('Engine state changed.')
+        try:values,revision=self.load()
+        except (OSError,ValueError):raise SyncConflict('Private settings are unavailable.') from None
+        if revision!=expected_storage:raise SyncConflict('Private settings changed.')
+        if not set(changes)<=self.config.SYNC_ALLOWED_KEYS:raise SyncError('Unsupported sync fields.')
+        merged={**values,**changes};created=None
+        try:
+            if credential is not None:
+                if not self.config.validate_service_account_text(credential):raise SyncError('Invalid Google credentials.')
+                data=credential.encode('utf-8');directory=self.config.get_managed_gcp_credentials_dir()
+                if directory.is_symlink():raise SyncError('Managed credential directory is unavailable.')
+                directory.mkdir(mode=0o700,parents=True,exist_ok=True)
+                target=directory/('sync-'+hashlib.sha256(data).hexdigest()+'.json')
+                if target.exists() or target.is_symlink():
+                    if target.is_symlink() or target.stat().st_size!=len(data) or target.read_bytes()!=data:raise SyncError('Managed credential file conflicts with downloaded content.')
+                else:
+                    temporary=None
+                    try:
+                        with tempfile.NamedTemporaryFile(dir=directory,prefix='.sync-',delete=False) as handle:
+                            temporary=handle.name;handle.write(data);handle.flush();os.fsync(handle.fileno())
+                        os.replace(temporary,target);created=target
+                    finally:
+                        if temporary:Path(temporary).unlink(missing_ok=True)
+                merged['gcp_credentials_path']=str(target)
+            count=sum(1 for key,value in merged.items() if values.get(key)!=value)
+            if count and not self.config.save(merged):raise SyncError('Private settings save failed.')
+            return count
+        except Exception:
+            if created:created.unlink(missing_ok=True)
+            raise
 
 
 def configuration(values, config, engine, confirm):
@@ -94,11 +130,6 @@ def configuration(values, config, engine, confirm):
 
 
 def start_problem(values):
-    # Keep unsupported settings intact and make their limitations explicit.
-    unsupported = [('settings_sync_url', 'settings sync')]
-    active = [name for key, name in unsupported if values.get(key)]
-    if active:
-        return 'Standalone migration still needs: ' + ', '.join(active) + '. Settings were retained; use the current detector for these features.'
     provider = values.get('stt_engine', 'deepgram')
     key = {'deepgram': 'deepgram_api_key', 'sarvam': 'sarvam_api_key', 'gladia': 'gladia_api_key',
            'assemblyai': 'assemblyai_api_key', 'assemblyai_pro': 'assemblyai_api_key',
@@ -282,15 +313,29 @@ class BackendHost:
         from desktop_bot import DesktopBot
         self.bot = DesktopBot(runtime,self.store.load)
         runtime.bot = self.bot
+        from desktop_sync import SettingsSync
+        sync_options={}
+        if runtime.verification:
+            from backend_verification import verification_download
+            sync_options['fetch']=verification_download
+        self.sync=SettingsSync(config,self.store.load,self.store.apply_sync,self.sync_ready,**sync_options)
+        self.store.blocked=lambda:self.sync.busy
+        self.sync.auto_start()
         self.publisher.begin({'streams': {}}, origin='callback-replay' if runtime.verification else 'engine')
         self.control = DesktopControl(publisher, self.state, self.start, runtime.stop, enabled=True, settings=self.settings,
                                       panic=runtime.panic, recovery=getattr(runtime, 'recovery', None),
-                                      suggestions=getattr(runtime, 'suggestions', None), outline=getattr(runtime, 'outline', None),bot=self.bot)
+                                      suggestions=getattr(runtime, 'suggestions', None), outline=getattr(runtime, 'outline', None),bot=self.bot,sync=self.sync)
+
+    def sync_ready(self):
+        return self.state()=='stopped' and self.bot.snapshot()['status'] in ('stopped','failed')
 
     def state(self):
         return 'closed' if self.closing else self.runtime.state()
 
     def start(self):
+        if self.sync.busy:
+            self.notice='Wait for settings sync before starting recognition.'
+            return False
         values, _ = self.store.load()
         values, scheduled = effective_start_settings(values, self.clock() if self.clock else None)
         schedule_notice = ('Smart Schedule selected ' + scheduled +
@@ -313,6 +358,7 @@ class BackendHost:
         return self.control.confirm(*args, cancelled=lambda: self.closing or self.runtime.stop_requested.is_set())
 
     def tick(self):
+        self.sync.tick()
         if hasattr(self.runtime, 'autosave'): self.runtime.autosave()
         self.control.tick()
         self.publisher.emit('host', value={'managed': True, 'notice': self.runtime.error or self.notice,
@@ -323,9 +369,10 @@ class BackendHost:
         self.closing = True
         self.runtime.stop()
         bot_closed=self.bot.close()
+        sync_closed=self.sync.close()
         self.control.close()
         if self.runtime.thread: self.runtime.thread.join(timeout=25)
-        if not bot_closed or self.runtime.thread and self.runtime.thread.is_alive(): return False
+        if not bot_closed or not sync_closed or self.runtime.thread and self.runtime.thread.is_alive(): return False
         self.publisher.close()
         return True
 

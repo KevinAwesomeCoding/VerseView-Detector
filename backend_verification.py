@@ -7,6 +7,21 @@ from contextlib import contextmanager, ExitStack
 from unittest.mock import Mock, patch
 
 
+def verification_download(url,cancelled):
+    """Every standalone QA sync uses this fake transport, never a real URL."""
+    from urllib.parse import urlsplit
+    path=urlsplit(url).path
+    time.sleep(3 if path.endswith('/slow') else 1)
+    if cancelled():raise ValueError('Synthetic sync cancelled')
+    if path.endswith('/failure'):raise ValueError('SECRET-SYNTHETIC-SYNC-ERROR')
+    if path.endswith('/invalid'):return []
+    account=dict(type='service_account',project_id='SECRET-SYNTHETIC-PROJECT',private_key='SECRET-SYNTHETIC-KEY',client_email='synthetic@example.invalid')
+    if path.endswith('/credential'):return account
+    return dict(deepgram_api_key='SECRET-SYNCED-STT',discord_bot_token='SECRET-SYNCED-BOT',
+                gcp_credentials_payload=__import__('base64').b64encode(json.dumps(account).encode()).decode(),
+                language='Hindi',remote_url='https://unsupported.invalid/should-not-apply',dedup_window=0,future='unsupported')
+
+
 def verification_time():
     """Fixed Sunday Malayalam service; selected only by the explicit QA host."""
     return dt.datetime(2026, 10, 18, 12)

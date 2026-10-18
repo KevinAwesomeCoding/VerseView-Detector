@@ -12,6 +12,14 @@ logger = logging.getLogger("VerseViewSTT")
 # Ollama's own default, so the machine that actually runs Ollama needs no setup.
 DEFAULT_LOCAL_LLM_ENDPOINT = "http://127.0.0.1:11434"
 
+# Shared by legacy and standalone sync. Remote files may update credentials,
+# never speech, presentation, timing or arbitrary local paths/settings.
+SYNC_ALLOWED_KEYS = frozenset({
+    "deepgram_api_key", "groq_api_key", "gemini_api_key", "cerebras_api_key",
+    "mistral_api_key", "sarvam_api_key", "sarvam_api_key_backup", "assemblyai_api_key",
+    "discord_webhook_url", "discord_log_webhook_url", "discord_notes_webhook_url", "discord_bot_token",
+})
+
 DEFAULTS = {
     # ── API Keys ──
     "deepgram_api_key":           "",

@@ -134,6 +134,9 @@ ipcMain.handle('preview:bot-control',(event,sessionId,action)=>{
   if(!trusted(event)||!['start_bot','stop_bot'].includes(action))throw new Error('Invalid bot control');
   return commands.submit(sessionId,action);
 });
+ipcMain.handle('preview:pull-settings',(event,sessionId)=>{
+  if(!trusted(event))throw new Error('Untrusted preview sender');return commands.submit(sessionId,'pull_settings');
+});
 ipcMain.handle('preview:outline-output-state',event=>{
   if(!trusted(event))throw new Error('Untrusted preview sender');return outlineOutput.state();
 });

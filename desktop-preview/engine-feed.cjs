@@ -17,11 +17,12 @@ function feedDirectory({ platform, appData, home }) {
 function decodeControl(value) {
   if (!value || !/^[a-f0-9]{32}$/.test(value.id) || !['stopped', 'starting', 'running', 'stopping', 'closed'].includes(value.state)) return null;
   return { id: value.id, state: value.state,
-    actions: Array.isArray(value.actions) ? value.actions.filter(action => ['start', 'stop', 'save_settings', 'panic', 'restore_session', 'discard_session', 'send_suggestion', 'edit_outline', 'start_bot', 'stop_bot'].includes(action)) : [],
+    actions: Array.isArray(value.actions) ? value.actions.filter(action => ['start', 'stop', 'save_settings', 'panic', 'restore_session', 'discard_session', 'send_suggestion', 'edit_outline', 'start_bot', 'stop_bot', 'pull_settings'].includes(action)) : [],
     recovery: decodeRecovery(value.recovery),
     suggestions: decodeSuggestions(value.suggestions),
     outline:decodeOutline(value.outline),
     bot:decodeBot(value.bot),
+    sync:decodeSync(value.sync),
     settings: settingsPolicy.decode(value.settings),
     pending: (Array.isArray(value.pending) ? value.pending : []).slice(0, 16)
       .filter(item => item && text(item.candidate_id, 128) && text(item.reference, 128))
@@ -31,6 +32,12 @@ function decodeControl(value) {
     results: (Array.isArray(value.results) ? value.results : []).slice(-32)
       .filter(item => item && /^[a-f0-9]{32}$/.test(item.id))
       .map(item => ({ id: item.id, action: text(item.action, 16), outcome: text(item.outcome, 24), reason: text(item.reason, 200) })) };
+}
+
+function decodeSync(value){
+  if(!value||!['idle','pulling','applied','unchanged','failed','conflict'].includes(value.status))return null;
+  return {status:value.status,message:text(value.message,400),configured:value.configured===true,busy:value.busy===true,
+    updated_count:Number.isInteger(value.updated_count)?Math.min(13,Math.max(0,value.updated_count)):0,completed_at:timestamp(value.completed_at)};
 }
 
 function decodeBot(value){

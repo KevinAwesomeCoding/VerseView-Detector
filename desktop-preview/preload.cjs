@@ -14,6 +14,7 @@ contextBridge.exposeInMainWorld('verseviewDesktop', Object.freeze({
   sendSuggestion: (sessionId, suggestionId) => ipcRenderer.invoke('preview:send-suggestion', sessionId, suggestionId),
   editOutline:(sessionId,revision,text)=>ipcRenderer.invoke('preview:edit-outline',sessionId,revision,text),
   botControl:(sessionId,action)=>ipcRenderer.invoke('preview:bot-control',sessionId,action),
+  pullSettings:sessionId=>ipcRenderer.invoke('preview:pull-settings',sessionId),
   outlineOutputState:()=>ipcRenderer.invoke('preview:outline-output-state'),
   openOutlineOutput:(sessionId,target)=>ipcRenderer.invoke('preview:open-outline-output',sessionId,target),
   closeOutlineOutput:()=>ipcRenderer.invoke('preview:close-outline-output'),

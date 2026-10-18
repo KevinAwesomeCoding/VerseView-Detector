@@ -107,13 +107,11 @@ class BackendTests(unittest.TestCase):
         self.assertEqual(configuration(values, settings, engine, callback)['language'], 'hi')
 
     def test_unsupported_features_and_missing_keys_are_explicit(self):
-        for key in ('settings_sync_url',):
-            value = {**settings.DEFAULTS, key: True}
-            self.assertIn('migration still needs', start_problem(value))
         self.assertIn('credentials are missing', start_problem(settings.DEFAULTS))
         values = {**settings.DEFAULTS, 'deepgram_api_key': 'present'}
         self.assertEqual(start_problem(values), '')
         self.assertEqual(start_problem({**values,'discord_bot_token':'private'}), '')
+        self.assertEqual(start_problem({**values,'settings_sync_url':'https://sync.invalid/file'}), '')
         self.assertEqual(start_problem({**values, 'local_llm_warm_at_start': True}), '')
         self.assertEqual(start_problem({**values, 'watcher_enabled': True}), '')
         self.assertEqual(start_problem({**values, 'live_points_llm_enabled': True}), '')

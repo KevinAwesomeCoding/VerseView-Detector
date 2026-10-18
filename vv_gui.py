@@ -2327,14 +2327,7 @@ class VerseViewApp(ctk.CTk):
     # ─────────────────────────────────────────────────
     # Keys that sync is allowed to update. Settings (language, mics, etc.)
     # are intentionally excluded — only credentials and webhooks are synced.
-    _SYNC_ALLOWED_KEYS = {
-        "deepgram_api_key", "groq_api_key", "gemini_api_key",
-        "cerebras_api_key", "mistral_api_key", "sarvam_api_key",
-        "sarvam_api_key_backup",
-        "assemblyai_api_key",
-        "discord_webhook_url", "discord_log_webhook_url", "discord_notes_webhook_url",
-        "discord_bot_token",
-    }
+    _SYNC_ALLOWED_KEYS = cfg.SYNC_ALLOWED_KEYS
 
     def _sync_settings_on_launch(self):
         """Silent sync on launch — only runs if a URL is configured."""
