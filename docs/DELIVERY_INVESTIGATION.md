@@ -1,5 +1,26 @@
 # Verse delivery investigation
 
+## 2026-10-18: standalone watcher suggestions
+
+Preview 0.8.0 adds six expiring, stream-attributed watcher suggestions and
+session-bound operator sends through the existing guarded manual-delivery
+path. Passive advice is separate from actual command acceptance. An automatic
+watcher candidate is never labeled accepted solely because it appears.
+
+Source `cb5b9c31c43ff25fa53aaf1ddfd392d70f1e7e78`, packaged build
+`2026-10-18T10-00-16-633Z-cb5b9c31-darwin-arm64`: 117 Python tests, 36 Node
+tests, four packaged Mac suites and 108 layout cases passed. With mocked speech,
+models and controller, actual frozen bilingual watcher processing produced
+passive advice; explicit John 3:19/20 sends reached COMMAND_ACCEPTED with exact
+candidate IDs and primary/secondary attribution. Physical output is unverified.
+
+The first packaged test found stale DETAILS expansion across a session change.
+Evidence was preserved; the focused identity fix and same-artifact regressions
+passed. This UI defect does not explain the original intermittent incident,
+which remains unresolved. Native CI run 39117499861 passed Windows x64 and both
+Mac architectures. Precise artifacts are recorded in
+[suggestions verification](../desktop-preview/SUGGESTIONS_VERIFICATION.md).
+
 ## 2026-10-18: opt-in standalone local-model warmup
 
 Preview 0.7.0 reuses configured per-role local-model clients on a background
