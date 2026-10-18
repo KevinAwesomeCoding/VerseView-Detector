@@ -217,8 +217,10 @@
     if(current.nodeType!==next.nodeType||current.nodeName!==next.nodeName){current.replaceWith(next.cloneNode(true));return}
     if(current.nodeType===Node.TEXT_NODE){if(current.data!==next.data)current.data=next.data;return}
     if(current.nodeType!==Node.ELEMENT_NODE||current.isEqualNode(next))return;
+    const sameDetailsIdentity=current.tagName==='DETAILS'&&
+      (current.dataset.suggestionSession||current.dataset.recoveryKey||'')===(next.dataset.suggestionSession||next.dataset.recoveryKey||'');
     for(const attribute of [...current.attributes]){
-      if(!next.hasAttribute(attribute.name)&&!(current.tagName==='DETAILS'&&attribute.name==='open'))current.removeAttribute(attribute.name);
+      if(!next.hasAttribute(attribute.name)&&!(sameDetailsIdentity&&attribute.name==='open'))current.removeAttribute(attribute.name);
     }
     for(const attribute of next.attributes)if(current.getAttribute(attribute.name)!==attribute.value)current.setAttribute(attribute.name,attribute.value);
     for(let index=0;index<next.childNodes.length;index++){

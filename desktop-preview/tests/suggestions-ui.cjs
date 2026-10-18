@@ -51,6 +51,7 @@ const root=path.resolve(__dirname,'..'),output=path.join(root,'test-results');fs
     await start();
     const current=await page.evaluate(()=>window.previewShell.getObserver().session);
     assert.notEqual(current.session_id,old.session);
+    assert.equal(await surface.locator('[data-suggestion-panel]').getAttribute('open'),null,'New sessions must not inherit an old expanded panel');
     await assert.rejects(page.evaluate(v=>window.verseviewDesktop.sendSuggestion(v.session,v.id),old));
     await assert.rejects(page.evaluate(v=>window.verseviewDesktop.sendSuggestion(v.session,v.id),{session:current.session_id,id:old.id}));
     await surface.locator('[data-suggestion-panel] summary').click();
@@ -95,7 +96,14 @@ const root=path.resolve(__dirname,'..'),output=path.join(root,'test-results');fs
       engine:'actual frozen bilingual watcher and manual-delivery path with mocked speech/model/browser services',
       expiry:'90-second TTL checked in focused unit tests',microphoneSTT:'DEFERRED',realModels:'NOT USED',visibleVerseVIEW:'DEFERRED',windowsGUI:'UNVERIFIED on this Mac'};
     fs.writeFileSync(path.join(output,'suggestions-ui-checks.json'),JSON.stringify(report,null,2)+'\n');console.log(JSON.stringify(report,null,2));
-  }catch(error){if(page)await page.screenshot({path:path.join(output,'suggestions-failure.png')}).catch(()=>{});throw error;}
+  }catch(error){
+    if(page){
+      await page.screenshot({path:path.join(output,'suggestions-failure.png')}).catch(()=>{});
+      const snapshot=await page.evaluate(()=>window.previewShell.getObserver()).catch(()=>null);
+      fs.writeFileSync(path.join(output,'suggestions-failure-state.json'),JSON.stringify(snapshot,null,2));
+    }
+    throw error;
+  }
   finally{
     if(application)await application.close().catch(()=>{});
     if(childPid&&alive(childPid))process.kill(childPid,'SIGTERM');
