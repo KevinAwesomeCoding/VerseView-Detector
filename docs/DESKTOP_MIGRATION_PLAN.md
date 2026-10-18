@@ -14,7 +14,7 @@ user's request. macOS and Windows remain required throughout.
 | 3 | Bilingual engine event connection | Complete with isolated checks: raw speech, translation, candidate IDs and delivery outcomes. |
 | 4 | Engine controls and manual decisions | Complete with isolated checks: start/stop requests, lifecycle status, exact-candidate approval/rejection. |
 | 5 | Non-secret settings in the dashboard | Complete with isolated checks: microphone, languages/providers, dual STT, Bible translation and VerseVIEW URL; stopped-engine saves, validation, conflict handling and package verification. |
-| 6 | Standalone backend integration and packaging | In progress: frozen companion, private profile migration, core lifecycle/settings/confirmation, Smart Schedule, recovery, warmup, watcher suggestions, outline notes/output implementation and isolated packaged checks. Native Windows x64, Mac ARM64 and Intel Mac outline/watcher/warmup/recovery/build/archive checks passed. Discord bot and settings sync remain; physical output is deferred. |
+| 6 | Standalone backend integration and packaging | In progress: frozen companion, private profile migration, core lifecycle/settings/confirmation, Smart Schedule, recovery, warmup, watcher suggestions, outline notes/output and Discord bot controls with isolated packaged checks. Windows x64 and both Mac native build/smoke/package/archive checks passed for 0.10.0. Settings sync remains; physical output is deferred. |
 | 7 | Physical end-to-end checks on macOS and Windows | Deferred: real microphones/configured STT, isolated visible VerseVIEW output, queue behavior, native appearance, recovery and platform-specific behavior. |
 | 8 | Installation and replacement readiness | Pending: distribution/install/update checks, migration and rollback instructions, final regressions and explicit approval before replacing the installed app. |
 
@@ -25,9 +25,11 @@ runtime correctness, or the cause of the original intermittent incident.
 Milestone 6 work completed so far: native Mac companion, private profile copy,
 core start/stop and decisions, error/restart/shutdown handling, Smart Schedule, explicit session recovery, local-model warmup, watcher suggestions, live outline notes/output implementation,
 and packaged isolated verification. Native Windows x64, Mac ARM64 and Intel Mac
-outline/watcher/warmup/recovery/build/archive checks all passed for 0.9.0. Remaining feature migration covers
-Discord bot controls and
-settings sync. Keep these requirements visible rather than advancing the
+outline/watcher/warmup/recovery/build/archive checks all passed for 0.9.0. The
+0.10.0 owned bot implementation passes 137 Python tests, 46 Node tests and seven
+packaged suites/216 layout cases; final three-platform native CI passed.
+See [bot verification](../desktop-preview/BOT_VERIFICATION.md). Remaining feature
+migration covers settings sync. Keep this requirement visible rather than advancing the
 overall bar while they remain incomplete.
 
 Update this file and include the bar in future progress updates and completion

@@ -3,7 +3,7 @@
 A separate Electron dashboard for macOS and Windows, with local engine events,
 **optional start/stop, candidate approval, and non-secret settings**, and a separate sample demo. The
 Python companion owns microphone/STT, settings, and guarded delivery. Version
-0.9.0 bundles the native backend, recovery, warmup, watcher suggestions and editable outline notes; external-detector observation still works.
+0.10.0 bundles the native backend, recovery, warmup, watcher suggestions, editable outline notes and owned Discord bot controls; external-detector observation still works.
 The installed detector remains unchanged. This milestone is still in progress.
 
 ## Standalone companion (milestone 6 in progress)
@@ -32,7 +32,7 @@ app open for cleanup. Unexpected exits are visible and are never automatically
 restarted. Explicit relaunch selects the new owned PID and leaves recognition
 stopped. Closing an external detector feed remains outside this ownership.
 
-Compatibility is incomplete. Saved Discord bot or settings sync settings block
+Compatibility is incomplete. Saved settings sync settings still block
 Start with a named migration message. Their values are retained; they are not
 silently disabled. Full legacy feature parity remains open. Session transcripts/optional summaries have a headless save path,
 but real cloud summary behavior has not been physically verified.
@@ -66,6 +66,18 @@ and closes if its feed/session/target disappears. It is separate from VerseVIEW
 verse output. Actual output-window/fullscreen routing remains physically
 unverified; only injected-window routing and packaged editor tests were run.
 See [outline verification](OUTLINE_VERIFICATION.md) for exact builds and limits.
+
+Settings now includes explicit Discord bot Start/Stop, lifecycle status and
+bounded recent command history. The bot runs through the bundled executable,
+using private `discord_bot_token` and optional `vv_guild_id`; it connects only
+when started. It controls this preview's owned backend through an authenticated
+ephemeral loopback bridge, while retaining legacy host/port settings untouched.
+Stopping the bot leaves recognition running. Bot Start/Stop uses current engine
+capabilities; recovery still requires a local decision. Explicit verse commands
+retain delivery guards and diagnostics, including duplicate suppression. Next
+and previous use known engine context; send an explicit reference after changing
+presentation elsewhere. See [bot verification](BOT_VERIFICATION.md) for mocks,
+actual artifacts and remaining real Discord/platform checks.
 
 Smart Schedule now shares the legacy local timetable: Saturday Malayalam;
 Sunday English from 09:10, Malayalam from 10:40 and Hindi from 16:40. In the

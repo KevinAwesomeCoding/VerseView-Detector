@@ -1,5 +1,22 @@
 # Verse delivery investigation
 
+## 2026-10-18: standalone Discord bot controls
+
+Preview 0.10.0 runs the existing Discord bot through the owned frozen backend,
+with explicit connection, a private ephemeral bridge and guarded manual verse
+delivery. Local regressions pass: 137 Python tests, 46 Node tests, seven packaged
+suites and 216 layout cases on source `a6c6146a6cb67635bd2d4dbf78d96614a95fff39`,
+build `2026-10-18T11-14-23-016Z-a6c6146a-darwin-arm64`. Final native CI
+39122401057 passed on Windows x64 and both Mac architectures. All presentation, Discord and speech inputs were mocked;
+real Discord login and physical microphone/STT/visible output remain unverified.
+
+Packaged checks found and repaired remote-Start session selection and Settings
+acknowledgement defects. Focused checks also cover private session file saving,
+incomplete settings JSON, shutdown draining and unknown late acknowledgements.
+Those findings do not explain the original intermittent delivery incident,
+which remains unresolved. Exact artifacts, evidence and limits:
+[bot verification](../desktop-preview/BOT_VERIFICATION.md).
+
 ## 2026-10-18: standalone outline notes and explicit display implementation
 
 Preview 0.9.0 connects the existing outline loop to revision-bound editable
