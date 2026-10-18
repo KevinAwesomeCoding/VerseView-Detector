@@ -146,6 +146,24 @@ class DesktopControlTests(unittest.TestCase):
         self.assertEqual(self.result()['outcome'], 'requested')
         self.start.assert_not_called()
 
+    def test_suggestion_sends_are_running_session_bound_and_never_acknowledge_acceptance(self):
+        suggestions=Mock()
+        suggestions.snapshot.return_value=dict(active=True,busy=False,rows=[])
+        self.broker.suggestions=suggestions
+        identity='d'*32
+        self.broker.execute(self.request('send_suggestion',suggestion_id=identity))
+        suggestions.send.assert_not_called()
+        self.state='running'
+        self.broker.execute(self.request('send_suggestion',suggestion_id='../../settings.json'))
+        suggestions.send.assert_not_called()
+        self.broker.execute(self.request('send_suggestion',suggestion_id=identity,reference='John 3:16'))
+        suggestions.send.assert_not_called()
+        request=self.request('send_suggestion',suggestion_id=identity)
+        self.broker.execute(request);self.broker.execute(request)
+        suggestions.send.assert_called_once_with(identity)
+        self.assertEqual(self.result()['outcome'],'requested')
+        self.assertIn('inspect delivery activity',self.result()['reason'])
+
     def test_recovery_decisions_require_current_revision_and_stopped_host(self):
         from desktop_recovery import SessionRecovery
         recovery = SessionRecovery(self.temporary.name)

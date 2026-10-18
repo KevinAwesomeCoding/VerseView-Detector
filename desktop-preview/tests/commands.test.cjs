@@ -101,3 +101,17 @@ test('control decoder exposes only bounded typed fields', t => {
   assert.deepEqual(decoded.control.actions, ['start']);
   assert.equal(JSON.stringify(decoded).includes('private'), false);
 });
+test('suggestion sends target only an active available identity, not a renderer reference',async t=>{
+  const f=setup(t),identity='d'.repeat(32);
+  f.session.control.state='running';f.session.control.actions=['send_suggestion'];
+  f.session.control.suggestions={active:true,busy:false,rows:[{id:identity,state:'available'}]};
+  await assert.rejects(f.client.submit(f.sessionId,'send_suggestion',undefined,undefined,undefined,'John 3:16'));
+  await assert.rejects(f.client.submit(f.sessionId,'send_suggestion',undefined,undefined,undefined,'e'.repeat(32)));
+  const result=await f.client.submit(f.sessionId,'send_suggestion',undefined,undefined,undefined,identity);
+  const request=JSON.parse(fs.readFileSync(path.join(f.inbox,`command-${result.id}.json`)));
+  assert.equal(request.suggestion_id,identity);assert.equal('reference' in request,false);
+  f.session.control.suggestions.rows[0].state='sending';
+  await assert.rejects(f.client.submit(f.sessionId,'send_suggestion',undefined,undefined,undefined,identity));
+  f.session.control.state='stopped';
+  await assert.rejects(f.client.submit(f.sessionId,'send_suggestion',undefined,undefined,undefined,identity));
+});

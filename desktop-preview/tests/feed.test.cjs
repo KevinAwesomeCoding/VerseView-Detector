@@ -121,3 +121,14 @@ test('warmup status is typed and drops model, endpoint and raw errors', () => {
   value.host.warmup.status='SECRET';
   assert.equal(decodeSnapshot(value,now).host.warmup,null);
 });
+test('watcher suggestions omit raw model payload and bound identities/text',()=>{
+  const value=fixture();
+  value.control={id:'b'.repeat(32),state:'running',actions:['send_suggestion'],suggestions:{enabled:true,active:true,
+    raw:'SECRET',rows:[{id:'d'.repeat(32),reference:'John 3:19',created_at:new Date(now).toISOString(),
+      kind:'passive_suggest',state:'available',stream:'secondary',language:'ml',confidence:.7,
+      reasoning:'a'.repeat(1000),window_text:'PRIVATE-WINDOW',raw:{key:'SECRET'}}]}};
+  const decoded=decodeSnapshot(value,now);
+  assert.equal(decoded.control.suggestions.rows[0].reasoning.length,400);
+  assert.equal(decoded.control.suggestions.rows[0].stream,'secondary');
+  assert.equal(JSON.stringify(decoded).includes('PRIVATE'),false);assert.equal(JSON.stringify(decoded).includes('SECRET'),false);
+});

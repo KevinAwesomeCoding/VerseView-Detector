@@ -27,7 +27,7 @@ for file in sorted(backend.rglob('*')):
         files[str(file.relative_to(backend)).replace('\\', '/')] = {'sha256': digest}
 sources = {}
 for name in ['desktop_backend.py', 'backend_verification.py', 'desktop_control.py', 'desktop_settings.py',
-             'observer_feed.py', 'settings.py', 'service_schedule.py', 'desktop_recovery.py', 'desktop_warmup.py', 'vv_streaming_master.py', 'verseview.spec', 'requirements.txt']:
+             'observer_feed.py', 'settings.py', 'service_schedule.py', 'desktop_recovery.py', 'desktop_warmup.py', 'desktop_suggestions.py', 'vv_streaming_master.py', 'verseview.spec', 'requirements.txt']:
     sources[name] = hashlib.sha256((root/name).read_bytes()).hexdigest()
 manifest = {'schema': 1, 'platform': platform_name, 'arch': arch, 'builtAt': stamp,
             'sourceRevision': subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=root, text=True).strip(),

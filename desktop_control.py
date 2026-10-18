@@ -22,11 +22,12 @@ def now_seconds():
 
 
 class DesktopControl:
-    def __init__(self, publisher, state, start, stop, *, enabled=False, clock=now_seconds, settings=None, panic=None, recovery=None):
+    def __init__(self, publisher, state, start, stop, *, enabled=False, clock=now_seconds, settings=None, panic=None, recovery=None, suggestions=None):
         self.publisher, self.state = publisher, state
         self.start, self.stop, self.enabled, self.clock = start, stop, enabled, clock
         self.settings, self.panic = settings, panic
         self.recovery = recovery
+        self.suggestions = suggestions
         self.control_id = uuid.uuid4().hex
         self.directory = publisher.directory / f"control-{os.getpid()}-{self.control_id}"
         self.session_id = None
@@ -59,11 +60,14 @@ class DesktopControl:
                 if recovery['status'] == 'available': actions.append('restore_session')
             if state == 'running' and self.panic:
                 actions.append('panic')
+            suggestions = self.suggestions.snapshot() if self.suggestions else None
+            if state == 'running' and suggestions and suggestions['active'] and not suggestions['busy']:
+                actions.append('send_suggestion')
             settings = self.settings.snapshot() if self.settings else None
             if state == 'stopped' and settings:
                 actions.append('save_settings')
             self.publisher.emit('control', value={
-                'id': self.control_id, 'state': state, 'actions': actions, 'settings': settings, 'recovery': recovery,
+                'id': self.control_id, 'state': state, 'actions': actions, 'settings': settings, 'recovery': recovery, 'suggestions': suggestions,
                 'pending': [{key: item[key] for key in ('candidate_id', 'reference', 'confidence', 'stream', 'source')}
                             for item in self.pending.values()], 'results': self.results[-32:]})
 
@@ -110,7 +114,7 @@ class DesktopControl:
             outcome = 'rejected'
             reason = 'Invalid, expired, or stale command'
             created = request.get('created_at')
-            valid = (set(request) <= {'id', 'control_id', 'session_id', 'created_at', 'action', 'candidate_id', 'settings_revision', 'changes', 'recovery_revision'}
+            valid = (set(request) <= {'id', 'control_id', 'session_id', 'created_at', 'action', 'candidate_id', 'settings_revision', 'changes', 'recovery_revision', 'suggestion_id'}
                      and request.get('control_id') == self.control_id
                      and request.get('session_id') == self.session_id
                      and isinstance(created, (float, int)) and not isinstance(created, bool)
@@ -129,6 +133,12 @@ class DesktopControl:
                     elif action == 'panic' and state == 'running' and self.panic:
                         self.panic()
                         outcome, reason = 'requested', 'Clear command requested; verify the visible output.'
+                    elif action == 'send_suggestion' and state == 'running' and self.suggestions:
+                        suggestion_id = request.get('suggestion_id')
+                        if not isinstance(suggestion_id, str) or not _HEX.fullmatch(suggestion_id):
+                            raise ValueError('Invalid suggestion identity')
+                        self.suggestions.send(suggestion_id)
+                        outcome, reason = 'requested', 'Suggestion send requested; inspect delivery activity for acceptance or guards.'
                     elif action == 'save_settings' and state == 'stopped' and self.settings:
                         self.settings.save(request.get('settings_revision'), request.get('changes'))
                         outcome, reason = 'saved', 'Settings saved. They apply when you next start the engine.'
@@ -150,7 +160,7 @@ class DesktopControl:
                     outcome, reason = 'rejected', str(exc)
                 except Exception:
                     outcome, reason = 'failed', 'Detector control failed; inspect the detector log'
-            self.results.append(dict(id=command_id, action=action if action in ('start', 'stop', 'approve', 'reject', 'save_settings', 'panic', 'restore_session', 'discard_session') else 'unknown',
+            self.results.append(dict(id=command_id, action=action if action in ('start', 'stop', 'approve', 'reject', 'save_settings', 'panic', 'restore_session', 'discard_session', 'send_suggestion') else 'unknown',
                                      outcome=outcome, reason=reason))
             self.results = self.results[-32:]
             self.refresh()

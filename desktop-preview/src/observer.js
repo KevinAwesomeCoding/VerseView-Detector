@@ -5,6 +5,7 @@
   })[character]);
   let command = null;
   let recoveryOpen = null;
+  let suggestionsOpen = null;
   const languageNames = { en: 'English', ml: 'Malayalam', hi: 'Hindi', multi: 'Multilingual' };
   const outcomeNames = { COMMAND_ACCEPTED: 'Command accepted', SUPPRESSED: 'Suppressed',
     MANUAL_CONFIRM_REQUIRED: 'Awaiting operator approval', QUEUED: 'Queued', CANCELLED: 'Cancelled',
@@ -27,7 +28,16 @@
     const notice = command ? `${commandLabels[command.outcome] || command.outcome}. ${command.reason || 'Waiting for the detector to acknowledge.'}` : 'Start uses the existing detector settings. Approval returns to the existing delivery checks.';
     return recoveryPanel(snapshot, disabled) + `<section class="vv-panel vv-engine-control" aria-label="Detector controls"><div class="vv-panel-head"><div><h2>Detector controls</h2><p class="vv-caption">${escape(control.state)} · PID ${session.pid}</p></div><div class="vv-control-actions">${['start', 'stop', ...(control.actions.includes('panic') ? ['panic'] : [])].map(action => `<button type="button" class="vv-btn ${action === 'start' ? 'vv-btn-primary' : ''}" data-engine-action="${action}" data-engine-session="${session.session_id}" ${disabled || !control.actions.includes(action) ? 'disabled' : ''}>${action === 'start' ? 'Start engine' : action === 'panic' ? 'Clear output' : 'Stop engine'}</button>`).join('')}</div></div>
       <p class="vv-caption" role="status" aria-live="polite" data-command-status>${escape(enabled ? notice : 'Connection unavailable. Commands disabled; showing the last snapshot.')}</p>
-      ${control.pending.length ? `<div class="vv-pending-list"><h3>Awaiting your decision</h3>${control.pending.map(item => `<div class="vv-pending-candidate"><div><strong>${escape(item.reference)}</strong><p class="vv-caption">${Math.round(item.confidence * 100)}% confidence · ${escape(streamName(session, item.stream))} · ${escape(item.source)}</p><code>${escape(item.candidate_id)}</code></div><div class="vv-control-actions">${['approve', 'reject'].map(action => `<button type="button" class="vv-btn ${action === 'approve' ? 'vv-btn-primary' : ''}" data-engine-action="${action}" data-engine-session="${session.session_id}" data-candidate="${escape(item.candidate_id)}" ${disabled ? 'disabled' : ''}>${action === 'approve' ? 'Approve' : 'Reject'} ${escape(item.reference)}</button>`).join('')}</div></div>`).join('')}</div>` : '<p class="vv-caption">No candidates awaiting approval.</p>'}</section>`;
+      ${control.pending.length ? `<div class="vv-pending-list"><h3>Awaiting your decision</h3>${control.pending.map(item => `<div class="vv-pending-candidate"><div><strong>${escape(item.reference)}</strong><p class="vv-caption">${Math.round(item.confidence * 100)}% confidence · ${escape(streamName(session, item.stream))} · ${escape(item.source)}</p><code>${escape(item.candidate_id)}</code></div><div class="vv-control-actions">${['approve', 'reject'].map(action => `<button type="button" class="vv-btn ${action === 'approve' ? 'vv-btn-primary' : ''}" data-engine-action="${action}" data-engine-session="${session.session_id}" data-candidate="${escape(item.candidate_id)}" ${disabled ? 'disabled' : ''}>${action === 'approve' ? 'Approve' : 'Reject'} ${escape(item.reference)}</button>`).join('')}</div></div>`).join('')}</div>` : '<p class="vv-caption">No candidates awaiting approval.</p>'}</section>` + suggestionPanel(snapshot, disabled);
+  }
+
+  function suggestionPanel(snapshot, disabled) {
+    const session=snapshot.session, control=session.control, value=control.suggestions;
+    if(!value?.enabled)return '';
+    const stateLabel={sending:'Send in progress',accepted:'Command accepted',review:'No acceptance confirmed · inspect delivery activity',unknown:'Outcome unknown after Stop · inspect delivery activity'};
+    return `<details class="vv-panel vv-suggestions" data-suggestion-panel data-suggestion-session="${session.session_id}" ${suggestionsOpen===session.session_id?'open':''}><summary>Verse suggestions · ${value.rows.length}</summary>
+      <div class="vv-suggestions-body"><p class="vv-caption">${value.active ? value.has_clients ? `Watcher active · ${value.cycles} cycles` : 'Watcher active · no provider client configured' : 'Watcher stopped'} · ${value.suggested} suggestions · ${value.discarded} discarded. Advice expires after 90 seconds. Sends use the existing delivery checks.</p>
+      ${value.rows.length ? value.rows.slice().reverse().map(row=>`<div class="vv-pending-candidate"><div><strong>${escape(row.reference)}</strong><p class="vv-caption">${Math.round(row.confidence*100)}% · ${escape(streamName(session,row.stream))} · ${time(row.created_at)}</p><p class="vv-caption">${escape(row.state==='available' ? row.kind==='auto_suggest' ? 'Automatic candidate · inspect delivery activity for its result' : 'Suggested passage · awaiting your choice' : stateLabel[row.state])}</p>${row.reasoning?`<p class="vv-caption">${escape(row.reasoning)}</p>`:''}${row.candidate_id?`<code>${escape(row.candidate_id)}</code>`:''}</div><button type="button" class="vv-btn" data-engine-action="send_suggestion" data-engine-session="${session.session_id}" data-suggestion-id="${row.id}" ${disabled||!control.actions.includes('send_suggestion')||!value.active||value.busy||row.state!=='available'?'disabled':''}>Send ${escape(row.reference)}</button></div>`).join('') : '<p class="vv-caption">No current suggestions.</p>'}</div></details>`;
   }
 
   function recoveryPanel(snapshot, disabled) {
@@ -129,10 +139,20 @@
         control?.state !== 'stopped' || control?.recovery?.revision !== button.dataset.recoveryRevision ||
         !control?.actions.includes(button.dataset.engineAction) || command?.outcome === 'submitted';
     }
+    for(const button of document.querySelectorAll('[data-suggestion-id]')){
+      button.disabled=snapshot.connection!=='connected'||session?.session_id!==button.dataset.engineSession||
+        control?.state!=='running'||!control?.actions.includes('send_suggestion')||!control?.suggestions?.active||
+        control.suggestions.busy||!control.suggestions.rows.some(row=>row.id===button.dataset.suggestionId&&row.state==='available')||command?.outcome==='submitted';
+    }
   }
   window.observerView = Object.freeze({ session: sessionView, activity, settings, testGate, controls: controlPanel, updateRecoveryAvailability });
   const root = document.getElementById('verseview-prototype');
   root.addEventListener('toggle', event => {
+    if(event.target.matches('[data-suggestion-panel]')){
+      const key=event.target.dataset.suggestionSession;
+      if(event.target.open)suggestionsOpen=key;else if(suggestionsOpen===key)suggestionsOpen=null;
+      return;
+    }
     if (!event.target.matches('[data-recovery-preview]')) return;
     const key = event.target.dataset.recoveryKey;
     if (event.target.open) recoveryOpen = key;
@@ -150,6 +170,7 @@
       const submitted = action === 'start' ? await window.verseviewDesktop.startEngine(sessionId)
         : action === 'stop' ? await window.verseviewDesktop.stopEngine(sessionId)
         : action === 'panic' ? await window.verseviewDesktop.clearOutput(sessionId)
+        : action === 'send_suggestion' ? await window.verseviewDesktop.sendSuggestion(sessionId, button.dataset.suggestionId)
         : ['restore_session', 'discard_session'].includes(action) ? await window.verseviewDesktop.recoverSession(sessionId, button.dataset.recoveryRevision, action === 'restore_session')
         : await window.verseviewDesktop.resolveCandidate(sessionId, button.dataset.candidate, action === 'approve');
       command = { ...submitted, hostId };

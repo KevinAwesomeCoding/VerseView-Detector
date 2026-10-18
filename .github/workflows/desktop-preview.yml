@@ -75,6 +75,9 @@ jobs:
       - name: Check frozen recovery with mocked services
         run: python desktop-preview/scripts/ci-run.py recovery python desktop-preview/scripts/smoke-recovery.py
         working-directory: .
+      - name: Check frozen watcher suggestions with mocked services
+        run: python desktop-preview/scripts/ci-run.py suggestions python desktop-preview/scripts/smoke-suggestions.py
+        working-directory: .
       - name: Package dashboard with the native companion
         run: python scripts/ci-run.py package node scripts/package-native.cjs --platform=${{ matrix.platform }} --arch=${{ matrix.arch }}
       - name: Verify final dashboard and backend package

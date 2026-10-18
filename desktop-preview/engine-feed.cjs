@@ -17,8 +17,9 @@ function feedDirectory({ platform, appData, home }) {
 function decodeControl(value) {
   if (!value || !/^[a-f0-9]{32}$/.test(value.id) || !['stopped', 'starting', 'running', 'stopping', 'closed'].includes(value.state)) return null;
   return { id: value.id, state: value.state,
-    actions: Array.isArray(value.actions) ? value.actions.filter(action => ['start', 'stop', 'save_settings', 'panic', 'restore_session', 'discard_session'].includes(action)) : [],
+    actions: Array.isArray(value.actions) ? value.actions.filter(action => ['start', 'stop', 'save_settings', 'panic', 'restore_session', 'discard_session', 'send_suggestion'].includes(action)) : [],
     recovery: decodeRecovery(value.recovery),
+    suggestions: decodeSuggestions(value.suggestions),
     settings: settingsPolicy.decode(value.settings),
     pending: (Array.isArray(value.pending) ? value.pending : []).slice(0, 16)
       .filter(item => item && text(item.candidate_id, 128) && text(item.reference, 128))
@@ -28,6 +29,21 @@ function decodeControl(value) {
     results: (Array.isArray(value.results) ? value.results : []).slice(-32)
       .filter(item => item && /^[a-f0-9]{32}$/.test(item.id))
       .map(item => ({ id: item.id, action: text(item.action, 16), outcome: text(item.outcome, 24), reason: text(item.reason, 200) })) };
+}
+
+function decodeSuggestions(value) {
+  if (!value || typeof value.enabled !== 'boolean') return null;
+  const count = key => Number.isSafeInteger(value[key]) ? Math.max(0, Math.min(1000000, value[key])) : 0;
+  return {enabled:value.enabled,active:value.active === true,has_clients:value.has_clients === true,busy:value.busy === true,
+    cycles:count('cycles'),suggested:count('suggested'),discarded:count('discarded'),
+    rows:(Array.isArray(value.rows) ? value.rows : []).slice(-6)
+      .filter(row => row && /^[a-f0-9]{32}$/.test(row.id || '') && text(row.reference,128) && timestamp(row.created_at)
+        && ['auto_suggest','passive_suggest'].includes(row.kind) && ['available','sending','accepted','review','unknown'].includes(row.state))
+      .map(row => ({id:row.id,reference:text(row.reference,128),created_at:row.created_at,kind:row.kind,state:row.state,
+        confidence:Number.isFinite(row.confidence) ? Math.min(1,Math.max(0,row.confidence)) : 0,
+        candidate_id:/^[a-f0-9]{32}$/.test(row.candidate_id || '') ? row.candidate_id : null,
+        stream:role(row.stream),language:['en','ml','hi','multi'].includes(row.language) ? row.language : 'und',
+        reasoning:text(row.reasoning,400)}))};
 }
 
 function decodeRecovery(value) {

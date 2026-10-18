@@ -21,6 +21,7 @@ import time
 from service_schedule import effective_start_settings
 from desktop_recovery import SessionRecovery, RecoveryError
 from desktop_warmup import SessionWarmup
+from desktop_suggestions import WatcherInbox
 
 
 class BackendError(ValueError):
@@ -94,7 +95,7 @@ def configuration(values, config, engine, confirm):
 def start_problem(values):
     # Keep unsupported settings intact and make their limitations explicit.
     unsupported = [('live_points_llm_enabled', 'live outline display'),
-                   ('watcher_enabled', 'watcher suggestions'), ('discord_bot_token', 'Discord bot'),
+                   ('discord_bot_token', 'Discord bot'),
                    ('settings_sync_url', 'settings sync')]
     active = [name for key, name in unsupported if values.get(key)]
     if active:
@@ -123,6 +124,7 @@ class EngineRuntime:
         self.checkpoint_due = 0
         self.has_started = False
         self.warmup = SessionWarmup()
+        self.suggestions = WatcherInbox(engine, lambda: self.state() == 'running')
 
     def state(self):
         if not self.thread or not self.thread.is_alive(): return 'stopped'
@@ -140,7 +142,10 @@ class EngineRuntime:
         if self.recovery.fresh_start:
             self.engine.clear_sermon_buffer()
             self.engine.full_sermon_transcript_secondary = ''
-        self.engine.configure(**configuration(values, config, self.engine, confirm))
+        mapped = configuration(values, config, self.engine, confirm)
+        if hasattr(self, 'suggestions'):
+            mapped['watcher_suggestion_callback'] = self.suggestions.prepare(values.get('watcher_enabled'))
+        self.engine.configure(**mapped)
         if restored:
             # configure resets anchor/quarantine and the secondary buffer.
             # Restore after it, before any recognition tasks can be launched.
@@ -159,6 +164,7 @@ class EngineRuntime:
     def stop(self):
         self.stop_requested.set()
         self.warmup.cancel()
+        self.suggestions.cancel()
         if self.loop and self.loop.is_running():
             self.loop.call_soon_threadsafe(self._signal_stop)
 
@@ -188,17 +194,22 @@ class EngineRuntime:
             else:
                 self.loop.run_until_complete(self._main(values))
             self.warmup.cancel()
+            self.suggestions.cancel()
             self.stop_requested.set()
             self.checkpoint('stopped')
             if not self.verification:
                 self._save_session(values)
         except Exception:
             self.warmup.cancel()
+            self.suggestions.cancel()
             self.checkpoint('error')
             logging.getLogger(__name__).exception('Backend engine or session processing failed')
             self.error = 'Engine or session processing failed. Inspect the private backend log.'
             self.publisher.emit('state', state='error')
         finally:
+            self.stop_requested.set()
+            self.suggestions.cancel()
+            self.suggestions.join()
             pending = asyncio.all_tasks(self.loop)
             for task in pending: task.cancel()
             if pending: self.loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
@@ -254,7 +265,8 @@ class BackendHost:
         self.settings = DesktopSettings(self.store.read, self.store.apply)
         self.publisher.begin({'streams': {}}, origin='callback-replay' if runtime.verification else 'engine')
         self.control = DesktopControl(publisher, self.state, self.start, runtime.stop, enabled=True, settings=self.settings,
-                                      panic=runtime.panic, recovery=getattr(runtime, 'recovery', None))
+                                      panic=runtime.panic, recovery=getattr(runtime, 'recovery', None),
+                                      suggestions=getattr(runtime, 'suggestions', None))
 
     def state(self):
         return 'closed' if self.closing else self.runtime.state()

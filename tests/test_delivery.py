@@ -111,6 +111,33 @@ class DeliveryTests(unittest.TestCase):
             self.assertTrue(self.send('John 3:17'))
         self.assertEqual(self.ctrl.driver.execute_script.call_count, 4)
 
+    def test_desktop_watcher_manual_send_reaches_actual_delivery_and_keeps_worship_guard(self):
+        from types import SimpleNamespace
+        from desktop_suggestions import WatcherInbox
+        inbox=WatcherInbox(engine,lambda:True)
+        receive=inbox.prepare(True)
+        def suggestion(ref):
+            return SimpleNamespace(suggested_reference=ref,status='passive_suggest',confidence=.7,
+                stream='secondary',language='ml',reasoning='Synthetic advice')
+        with patch.object(engine,'_controller',self.ctrl):
+            receive(suggestion('John 3:19'))
+            identity=inbox.snapshot()['rows'][0]['id']
+            engine.WORSHIP_MODE=True
+            inbox.send(identity);inbox.join()
+            row=inbox.snapshot()['rows'][0]
+            self.assertEqual(row['state'],'review')
+            self.assertTrue(any(e['candidate_id']==row['candidate_id'] and e['stage']=='worship' and e['outcome']=='SUPPRESSED' for e in self.events()))
+            self.assertFalse(self.events('COMMAND_ACCEPTED'))
+            engine.WORSHIP_MODE=False
+            receive(suggestion('John 3:20'))
+            identity=inbox.snapshot()['rows'][-1]['id']
+            inbox.send(identity);inbox.join()
+            row=inbox.snapshot()['rows'][-1]
+            self.assertEqual(row['state'],'accepted')
+            event=self.events('COMMAND_ACCEPTED')[-1]
+            self.assertEqual((event['candidate_id'],event['source'],event['stream']),
+                             (row['candidate_id'],'WATCHER-MANUAL','secondary'))
+
     def test_failed_connection_does_not_poison_retry(self):
         self.ctrl.driver = None
         self.ctrl.connect = Mock(return_value=False)
