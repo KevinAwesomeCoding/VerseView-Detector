@@ -1,0 +1,183 @@
+"""Opt-in, same-user command inbox for the desktop dashboard (no network server).
+
+Only the GUI thread calls tick(). Confirmation workers wait for an exact candidate
+answer; existing engine guards still own delivery. No command is retried.
+"""
+import datetime as dt
+import json
+from itertools import islice
+import os
+from pathlib import Path
+import re
+import threading
+import uuid
+from desktop_settings import SettingsError
+
+_HEX = re.compile(r"^[a-f0-9]{32}$")
+
+
+def now_seconds():
+    return dt.datetime.now(dt.timezone.utc).timestamp()
+
+
+class DesktopControl:
+    def __init__(self, publisher, state, start, stop, *, enabled=False, clock=now_seconds, settings=None, panic=None):
+        self.publisher, self.state = publisher, state
+        self.start, self.stop, self.enabled, self.clock = start, stop, enabled, clock
+        self.settings, self.panic = settings, panic
+        self.control_id = uuid.uuid4().hex
+        self.directory = publisher.directory / f"control-{os.getpid()}-{self.control_id}"
+        self.session_id = None
+        self.results, self.pending, self.seen = [], {}, set()
+        self.lock = threading.RLock()
+        self.closed = False
+        if enabled:
+            if not publisher.enabled:
+                raise ValueError("Desktop control requires the observer export")
+            self.directory.mkdir(mode=0o700, parents=True, exist_ok=False)
+            self.refresh()
+
+    def refresh(self):
+        if not self.enabled:
+            return
+        with self.lock:
+            snapshot = self.publisher.snapshot()
+            if not snapshot:
+                return
+            session_id = snapshot['session_id']
+            if self.session_id != session_id:
+                self._cancel_pending()
+                self.session_id = session_id
+            state = 'closed' if self.closed else self.state()
+            actions = ['start'] if state == 'stopped' else ['stop'] if state == 'running' else []
+            if state == 'running' and self.panic:
+                actions.append('panic')
+            settings = self.settings.snapshot() if self.settings else None
+            if state == 'stopped' and settings:
+                actions.append('save_settings')
+            self.publisher.emit('control', value={
+                'id': self.control_id, 'state': state, 'actions': actions, 'settings': settings,
+                'pending': [{key: item[key] for key in ('candidate_id', 'reference', 'confidence', 'stream', 'source')}
+                            for item in self.pending.values()], 'results': self.results[-32:]})
+
+    def _cancel_pending(self):
+        for item in self.pending.values():
+            item['answer'] = False
+            item['event'].set()
+        self.pending.clear()
+
+    def confirm(self, ref, confidence, candidate_id, source, stream, cancelled=lambda: False):
+        with self.lock:
+            self.refresh()
+            if not self.enabled or self.closed or self.state() != 'running' or len(self.pending) >= 16 or candidate_id in self.pending:
+                return False
+            item = dict(candidate_id=candidate_id, reference=ref, confidence=confidence,
+                        source=source, stream=stream, event=threading.Event(), answer=False)
+            self.pending[candidate_id] = item
+            self.refresh()
+        try:
+            while not item['event'].wait(.1):
+                if cancelled():
+                    return False
+            return item['answer'] and not cancelled()
+        finally:
+            with self.lock:
+                if self.pending.get(candidate_id) is item:
+                    self.pending.pop(candidate_id)
+                self.refresh()
+
+    def execute(self, request):
+        """Validate at execution time, on the GUI thread. Return a scheduling result."""
+        with self.lock:
+            self.refresh()
+            command_id = request.get('id')
+            if not isinstance(command_id, str) or not _HEX.fullmatch(command_id):
+                return
+            if command_id in self.seen:
+                return
+            # Bounded session ledger. Once full, reject new work until app restart.
+            if len(self.seen) >= 4096:
+                return
+            self.seen.add(command_id)
+            action = request.get('action')
+            outcome = 'rejected'
+            reason = 'Invalid, expired, or stale command'
+            created = request.get('created_at')
+            valid = (set(request) <= {'id', 'control_id', 'session_id', 'created_at', 'action', 'candidate_id', 'settings_revision', 'changes'}
+                     and request.get('control_id') == self.control_id
+                     and request.get('session_id') == self.session_id
+                     and isinstance(created, (float, int)) and not isinstance(created, bool)
+                     and 0 <= self.clock() - created <= 10 and self.enabled and not self.closed)
+            if valid:
+                try:
+                    state = self.state()
+                    if action == 'start' and state == 'stopped':
+                        outcome = 'requested' if self.start() else 'failed'
+                        reason = 'Start requested; observe engine status' if outcome == 'requested' else 'Start did not begin; check the detector'
+                    elif action == 'panic' and state == 'running' and self.panic:
+                        self.panic()
+                        outcome, reason = 'requested', 'Clear command requested; verify the visible output.'
+                    elif action == 'save_settings' and state == 'stopped' and self.settings:
+                        self.settings.save(request.get('settings_revision'), request.get('changes'))
+                        outcome, reason = 'saved', 'Settings saved. They apply when you next start the engine.'
+                    elif action == 'stop' and state == 'running':
+                        self._cancel_pending()
+                        self.stop()
+                        outcome, reason = 'requested', 'Stop requested; observe engine status'
+                    elif action in ('approve', 'reject') and state == 'running':
+                        item = self.pending.pop(request.get('candidate_id'), None)
+                        if item and not item['event'].is_set():
+                            item['answer'] = action == 'approve'
+                            item['event'].set()
+                            outcome, reason = 'answered', 'Decision returned to the existing engine confirmation gate'
+                        else:
+                            reason = 'Candidate is no longer awaiting approval'
+                    else:
+                        reason = 'Action unavailable in the current engine state'
+                except SettingsError as exc:
+                    outcome, reason = 'rejected', str(exc)
+                except Exception:
+                    outcome, reason = 'failed', 'Detector control failed; inspect the detector log'
+            self.results.append(dict(id=command_id, action=action if action in ('start', 'stop', 'approve', 'reject', 'save_settings', 'panic') else 'unknown',
+                                     outcome=outcome, reason=reason))
+            self.results = self.results[-32:]
+            self.refresh()
+
+    def tick(self):
+        if not self.enabled or self.closed:
+            return
+        if self.settings:
+            self.settings.refresh()
+        self.refresh()
+        for path in islice(self.directory.glob('command-*.json'), 16):
+            try:
+                if path.is_symlink() or not re.fullmatch(r'command-[a-f0-9]{32}\.json', path.name):
+                    continue
+                with path.open('rb') as handle:
+                    data = handle.read(16385)
+                if len(data) <= 16384:
+                    request = json.loads(data)
+                    if isinstance(request, dict) and path.name == f"command-{request.get('id')}.json":
+                        self.execute(request)
+            except (OSError, ValueError, TypeError):
+                pass
+            finally:
+                path.unlink(missing_ok=True)
+
+    def close(self):
+        with self.lock:
+            self.closed = True
+            self._cancel_pending()
+            self.refresh()
+        # Remove only this host's private inbox, never another process's files.
+        if self.enabled:
+            for path in self.directory.glob('*'):
+                if path.is_file() or path.is_symlink():
+                    try:
+                        path.unlink(missing_ok=True)
+                    except OSError:
+                        pass
+            try:
+                self.directory.rmdir()
+            except OSError:
+                pass

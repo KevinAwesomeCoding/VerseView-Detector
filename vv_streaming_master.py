@@ -21,6 +21,7 @@ import threading
 import datetime as _dt
 import json
 import uuid
+from observer_feed import begin as _observer_begin, emit as _observer_emit
 from collections import deque
 import subprocess
 import shutil
@@ -815,7 +816,9 @@ session_log_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)-5s 
 # app ~1s after launch. Reuse the same per-user app-data dir as settings.py.
 def _log_file_path() -> str:
     try:
-        if sys.platform == "darwin":
+        if os.getenv("VERSEVIEW_PROFILE_DIRECTORY"):
+            base = os.environ["VERSEVIEW_PROFILE_DIRECTORY"]
+        elif sys.platform == "darwin":
             base = os.path.join(os.path.expanduser("~"), "Library",
                                 "Application Support", "VerseView")
         elif os.name == "nt":
@@ -862,6 +865,7 @@ def _delivery_event(candidate_id, ref, source, stream, stage, outcome, reason, *
     }
     with _delivery_events_lock:
         _delivery_events.append(event)
+    _observer_emit("delivery", event=event)
     logger.info("VERSE_DELIVERY %s", json.dumps(event, ensure_ascii=False),
                 extra={"vv_delivery_event": True})
 
@@ -1263,6 +1267,7 @@ GCP_INTERIM_FLUSH_SEC = 4            # GCP Malayalam soft-final flush interval (
 CONFIDENCE_THRESHOLD   = 0.75
 REQUIRE_MANUAL_CONFIRM = True
 CONFIRM_CALLBACK       = None
+CONFIRM_REQUEST_CALLBACK = None
 REQUIRE_VERIFY         = True
 _vtc_pending_ref     = None
 _vtc_trigger_words   = []
@@ -2745,6 +2750,8 @@ def configure(
     local_llm_keep_alive_verse="",   # blank → LOCAL_LLM_KEEP_ALIVE_DEFAULTS["verse"]   ("30m")
     local_llm_keep_alive_outline="", # blank → LOCAL_LLM_KEEP_ALIVE_DEFAULTS["outline"] ("15m")
     local_llm_keep_alive_summary="", # blank → LOCAL_LLM_KEEP_ALIVE_DEFAULTS["summary"] ("10m")
+    confirm_request_callback=None,
+    bot_bridge_enabled=True,
 ):
     global DEEPGRAM_API_KEY, GROQ_API_KEY, GEMINI_API_KEY, CEREBRAS_API_KEY, MISTRAL_API_KEY, SARVAM_API_KEY
     global SARVAM_API_KEY_BACKUP, _sarvam_using_backup
@@ -2759,7 +2766,7 @@ def configure(
     global LOCAL_LLM_HOST, LOCAL_LLM_PORT
     global LOCAL_LLM_MODEL, LOCAL_LLM_TIMEOUT, LOCAL_LLM_ON_FAILURE, LOCAL_LLM_ROLES
     global LOCAL_LLM_MODELS, LOCAL_LLM_KEEP_ALIVE
-    global CONFIDENCE_THRESHOLD, REQUIRE_MANUAL_CONFIRM, CONFIRM_CALLBACK, REQUIRE_VERIFY, PANIC_KEY, SMART_AMEN_ENABLED
+    global CONFIDENCE_THRESHOLD, REQUIRE_MANUAL_CONFIRM, CONFIRM_CALLBACK, CONFIRM_REQUEST_CALLBACK, REQUIRE_VERIFY, PANIC_KEY, SMART_AMEN_ENABLED
     global full_sermon_transcript, verses_cited
     global LIVE_POINTS_PROMPT, LIVE_POINTS_CALLBACK, LIVE_POINTS_GET_CURRENT_CB
     global LIVE_POINTS_ENABLED, SILENCE_TIMEOUT
@@ -2767,7 +2774,7 @@ def configure(
     global VERSE_INTERRUPT_ENABLED, SPOKEN_NUMERAL_MODE, WORSHIP_MODE, _verse_history
     global ATEM_ENABLED, ATEM_IP, ATEM_KEY_DURATION
     global current_book, current_chapter, current_verse, _gui_app
-    global BRIDGE_READY_CALLBACK
+    global BRIDGE_READY_CALLBACK, BOT_BRIDGE_ENABLED
     global _sermon_anchor_book, _sermon_anchor_chapter, _sermon_anchor_verse
     global _xref_anchor_book, _xref_anchor_chapter, _xref_anchor_verse, _xref_anchor_time
     global DUAL_STT_ENABLED, SECONDARY_LANGUAGE, SECONDARY_PARSER
@@ -2794,6 +2801,7 @@ def configure(
     _xref_anchor_time    = 0.0
     _gui_app               = gui_app
     BRIDGE_READY_CALLBACK  = bridge_ready_callback
+    BOT_BRIDGE_ENABLED = bool(bot_bridge_enabled)
     logger.info("📌 Context reset for new session")
     _cancel_vtc()
 
@@ -3080,6 +3088,7 @@ def configure(
     CONFIDENCE_THRESHOLD   = confidence
     REQUIRE_MANUAL_CONFIRM = manual_confirm
     CONFIRM_CALLBACK       = confirm_callback
+    CONFIRM_REQUEST_CALLBACK = confirm_request_callback
     REQUIRE_VERIFY         = verify
     PANIC_KEY              = panic_key
     SMART_AMEN_ENABLED     = smart_amen
@@ -3233,6 +3242,12 @@ def configure(
     else:
         logger.info("🔭 Contextual Verse Watcher : OFF (disabled in settings)")
 
+    _observer_begin({"streams": {
+        "primary": {"language": PRIMARY_LANGUAGE, "provider": _stream_engine(False), "enabled": True},
+        "secondary": {"language": SECONDARY_LANGUAGE, "provider": _stream_engine(True),
+                      "enabled": bool(DUAL_STT_ENABLED and SECONDARY_LANGUAGE)}},
+        "bible_translation": BIBLE_TRANSLATION})
+
 
 # ── CONTEXT TRACKING ─────────────────────────────────────────────────────────
 current_book    = None
@@ -3264,6 +3279,7 @@ _xref_anchor_verse:   str   = None
 _xref_anchor_time:    float = 0.0   # time.time() when xref anchor was last set
 
 _gui_app               = None   # injected by configure(); used by bot bridge for GUI refresh
+BOT_BRIDGE_ENABLED = True
 BRIDGE_READY_CALLBACK  = None   # called once the bot bridge starts successfully
 
 
@@ -4898,7 +4914,7 @@ class VerseController:
 
             # ── MANUAL CONFIRMATION ──
             if confidence < CONFIDENCE_THRESHOLD and not bypass_cooldown:
-                if REQUIRE_MANUAL_CONFIRM and CONFIRM_CALLBACK:
+                if REQUIRE_MANUAL_CONFIRM and (CONFIRM_REQUEST_CALLBACK or CONFIRM_CALLBACK):
                     if ref in self._confirm_pending:
                         event("manual_confirm", "SUPPRESSED", "Confirmation already pending",
                               guard="REQUIRE_MANUAL_CONFIRM")
@@ -4914,7 +4930,8 @@ class VerseController:
                             f"(Confidence: {int(confidence*100)}%)"
                         )
                         try:
-                            approved = CONFIRM_CALLBACK(ref, confidence)
+                            approved = (CONFIRM_REQUEST_CALLBACK(ref, confidence, candidate_id, source, stream)
+                                        if CONFIRM_REQUEST_CALLBACK else CONFIRM_CALLBACK(ref, confidence))
                             with self._send_lock:
                                 if ref not in self._confirm_pending:
                                     return  # cleanup already recorded cancellation
@@ -7112,6 +7129,8 @@ def create_transcript_handler(controller, is_secondary: bool, tag: str, parser):
         if not sentence or not sentence.strip():
             return
 
+        _observer_emit("transcript", stream="secondary" if is_secondary else "primary",
+                       text=sentence, is_final=is_final)
         # Partial transcripts: feed verse-queue hints only.
         check_verse_queue(sentence, controller)
 
@@ -7169,8 +7188,14 @@ def create_sarvam_transcript_handler(controller, is_secondary: bool, tag: str, p
         mode            = (metadata or {}).get("mode", "transcribe")
         transliteration = (mode == "translit")
 
+        _observer_transcript_id = _observer_emit(
+            "transcript", stream="secondary" if is_secondary else "primary",
+            text=sentence, is_final=is_final)
+
         # Translate raw Malayalam/Manglish → English for verse detection.
         english_text = translate_to_english(sentence)
+
+        _observer_emit("translation", transcript_id=_observer_transcript_id, translation=english_text)
 
         if transliteration:
             logger.info(f"📝 {tag} [Manglish] {sentence}", extra=_tx_extra)
@@ -7218,6 +7243,7 @@ def launch_stt_task(controller, is_secondary: bool = False):
         provider = build_stt_provider(engine_name, controller, is_secondary=is_secondary)
     except ValueError as exc:
         logger.error(f"❌ Cannot start {'secondary' if is_secondary else 'primary'} STT: {exc}")
+        _observer_emit("stream", stream="secondary" if is_secondary else "primary", state="error")
         async def _noop():
             pass
         return asyncio.create_task(_noop())
@@ -7241,7 +7267,17 @@ def launch_stt_task(controller, is_secondary: bool = False):
         # (handler transcript lines + provider status/reconnect lines) is
         # attributed to the correct pane via STT_STREAM_ROLE.
         STT_STREAM_ROLE.set(role)
-        await provider.stream_audio(MIC_INDEX, stop_event, handler)
+        _observer_emit("stream", stream=role, state="starting")
+        try:
+            await provider.stream_audio(MIC_INDEX, stop_event, handler)
+        except asyncio.CancelledError:
+            _observer_emit("stream", stream=role, state="stopped")
+            raise
+        except Exception:
+            _observer_emit("stream", stream=role, state="error")
+            raise
+        else:
+            _observer_emit("stream", stream=role, state="stopped")
 
     return asyncio.create_task(_run_stream())
 
@@ -7462,6 +7498,7 @@ def build_stt_provider(engine_name: str, controller, is_secondary: bool = False)
 # ── MAIN ──────────────────────────────────────────────────────────────────────
 async def main():
     global stop_event, engine_loop, _controller
+    _observer_emit("state", state="starting")
     stop_event  = asyncio.Event()
     engine_loop = asyncio.get_event_loop()
 
@@ -7499,11 +7536,13 @@ async def main():
         logger.info(f"Connection attempt {attempt}/5...")
         if stop_event.is_set():  # type: ignore
             logger.info("Stop requested — aborting connection.")
+            _observer_emit("state", state="stopped")
             return
         if _controller.connect():
             connected = True
             break
         if stop_event.is_set():  # type: ignore
+            _observer_emit("state", state="stopped")
             return
         if attempt < 5:
             logger.warning("Retrying in 5s...")
@@ -7511,10 +7550,11 @@ async def main():
 
     if not connected:
         logger.error("Could not connect to VerseView after 5 attempts.")
+        _observer_emit("state", state="connection_failed")
         return
 
     # ── Start Discord-bot bridge (port 50011) ─────────────────────────────────
-    if _start_bot_bridge is not None:
+    if BOT_BRIDGE_ENABLED and _start_bot_bridge is not None:
         try:
             _start_bot_bridge(_controller, port=50011, gui_app=_gui_app)
             logger.info("Bot bridge started — controller injected")
@@ -7576,6 +7616,7 @@ async def main():
             )
 
         # Wait for stop signal, then cancel all stream tasks
+        _observer_emit("state", state="running")
         await stop_event.wait()
         primary_task.cancel()
         if secondary_task:
@@ -7631,6 +7672,7 @@ async def main():
         _controller = None
         logger.info(f"📊 LLM calls: {LLM_CALL_COUNT}")
         logger.info("Shutdown complete")
+        _observer_emit("state", state="stopped")
         _discord_live_log.stop()
 
 

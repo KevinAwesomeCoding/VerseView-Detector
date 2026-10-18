@@ -1,0 +1,10 @@
+'use strict';
+const fs = require('node:fs');
+const path = require('node:path');
+const root = path.resolve(__dirname, '..');
+const vendor = path.join(root, 'src', 'vendor');
+fs.mkdirSync(vendor, { recursive: true });
+const lucide = path.dirname(require.resolve('lucide/package.json'));
+fs.copyFileSync(path.join(lucide, 'dist', 'umd', 'lucide.min.js'), path.join(vendor, 'lucide.min.js'));
+fs.copyFileSync(path.join(lucide, 'LICENSE'), path.join(vendor, 'lucide.LICENSE'));
+console.log('Prepared local icons; the dashboard needs no CDN.');

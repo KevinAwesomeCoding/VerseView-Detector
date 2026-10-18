@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>VerseView Desktop Preview</title>
+  <link rel="stylesheet" href="dashboard.css">
+  <link rel="stylesheet" href="desktop.css">
+  <script defer src="vendor/lucide.min.js"></script>
+  <script defer src="desktop.js"></script>
+  <script defer src="settings-policy.js"></script>
+  <script defer src="settings.js"></script>
+  <script defer src="observer.js"></script>
+  <script defer src="dashboard.js"></script>
+</head>
+<body>
+  <div id="verseview-prototype" data-theme="glass" data-backdrop="solid">
+    <header id="preview-titlebar">
+      <span class="preview-app-name">VerseView <span>Desktop Preview</span></span>
+      <div class="preview-window-tools">
+        <label for="preview-mode">Source</label>
+        <select id="preview-mode"><option value="observer">Live observer</option><option value="samples">Sample demo</option></select>
+        <label for="preview-layout">Layout</label>
+        <select id="preview-layout"><option value="studio">Studio</option><option value="focus">Focus</option></select>
+        <button type="button" id="preview-reset">Reset samples</button>
+      </div>
+    </header>
+    <div id="preview-surface" class="vv-window" data-layout="studio" aria-label="VerseView dashboard"></div>
+    <noscript>This preview needs JavaScript to display the sample dashboard.</noscript>
+  </div>
+</body>
+</html>

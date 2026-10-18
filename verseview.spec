@@ -4,10 +4,11 @@ import glob
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules, copy_metadata
 
 block_cipher = None
+headless = os.getenv("VERSEVIEW_BUILD_HEADLESS") == "1"
 
 # collect_data_files() returns proper 2-tuples (src, dest) that Analysis() expects.
 # Tree() returns 3-tuple TOC objects which cause "too many values to unpack".
-datas = collect_data_files('customtkinter')
+datas = [] if headless else collect_data_files('customtkinter')
 datas += collect_data_files('certifi')
 
 datas += [
@@ -78,7 +79,7 @@ for _gmeta in (
     except Exception:
         pass
 
-if sys.platform == 'win32':
+if sys.platform == 'win32' and not headless:
     # Safety net for tkinter on Windows. PyInstaller's tkinter hook already
     # collects these for CPython 3.11, but this covers edge setups where the
     # DLLs / Tcl scripts live outside the default search path.
@@ -105,7 +106,7 @@ if sys.platform == 'win32':
 # causing the app to crash on launch on Apple Silicon.
 
 a = Analysis(
-    ['vv_gui.py'],
+    ['desktop_backend.py' if headless else 'vv_gui.py'],
     pathex=[],
     binaries=[],
     datas=datas,
@@ -169,7 +170,7 @@ a = Analysis(
     ] + _google_hiddenimports,
     hookspath=[],
     runtime_hooks=[],
-    excludes=[],
+    excludes=['tkinter', '_tkinter', 'customtkinter', 'live_points_app', 'vv_gui'] if headless else [],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
     cipher=block_cipher,
@@ -179,15 +180,16 @@ a = Analysis(
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
 is_mac = (sys.platform == 'darwin')
+onedir = is_mac or headless
 
 exe = EXE(
     pyz,
     a.scripts,
-    [] if is_mac else a.binaries,
-    [] if is_mac else a.zipfiles,
-    [] if is_mac else a.datas,
-    exclude_binaries=is_mac,
-    name='VerseView_Detector',
+    [] if onedir else a.binaries,
+    [] if onedir else a.zipfiles,
+    [] if onedir else a.datas,
+    exclude_binaries=onedir,
+    name='VerseViewBackend' if headless else 'VerseView_Detector',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -199,7 +201,7 @@ exe = EXE(
     upx=False,
     upx_exclude=[],
     runtime_tmpdir=None,
-    console=False,
+    console=headless,
     disable_windowed_traceback=False,
     argv_emulation=False,
     # Host architecture. Each runner builds its own native slice
@@ -211,7 +213,9 @@ exe = EXE(
     icon='app_icon.icns' if is_mac else 'app_icon.ico',
 )
 
-if is_mac:
+if headless:
+    coll = COLLECT(exe, a.binaries, a.zipfiles, a.datas, strip=False, upx=False, name="backend")
+elif is_mac:
     coll = COLLECT(
         exe,
         a.binaries,

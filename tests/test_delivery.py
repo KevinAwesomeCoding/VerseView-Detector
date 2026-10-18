@@ -31,6 +31,7 @@ class DeliveryTests(unittest.TestCase):
         engine.REQUIRE_VERIFY = False
         engine.REQUIRE_MANUAL_CONFIRM = True
         engine.CONFIRM_CALLBACK = None
+        engine.CONFIRM_REQUEST_CALLBACK = None
         engine.CONFIDENCE_THRESHOLD = .75
         engine.WORSHIP_MODE = False
         engine.VERSE_INTERRUPT_ENABLED = False
@@ -203,6 +204,38 @@ class DeliveryTests(unittest.TestCase):
         pending_id = self.events('MANUAL_CONFIRM_REQUIRED')[0]['candidate_id']
         self.assertEqual(self.events('COMMAND_ACCEPTED')[0]['candidate_id'], pending_id)
         self.assertEqual(len(workers), 1)
+
+    def test_contextual_confirmation_retains_candidate_identity_and_guards(self):
+        for worship in (False, True):
+            with self.subTest(worship=worship):
+                self.ctrl = self.controller()
+                engine._delivery_events.clear()
+                engine._last_presented_time = 0
+                engine._last_presented_book_chapter = None
+                engine.WORSHIP_MODE = False
+                calls, workers = [], []
+                real_thread = threading.Thread
+                def confirm(*args):
+                    calls.append(args)
+                    engine.WORSHIP_MODE = worship
+                    return True
+                def make_thread(*args, **kwargs):
+                    worker = real_thread(*args, **kwargs)
+                    workers.append(worker)
+                    return worker
+                engine.CONFIRM_REQUEST_CALLBACK = confirm
+                with patch.object(engine.threading, 'Thread', side_effect=make_thread):
+                    engine.deliver_verse('John 3:18', self.ctrl, confidence=.2, source='PARSER', stream='secondary')
+                workers[0].join(2)
+                self.assertFalse(workers[0].is_alive())
+                held_id = self.events('MANUAL_CONFIRM_REQUIRED')[0]['candidate_id']
+                self.assertEqual(calls, [('John 3:18', .2, held_id, 'PARSER', 'secondary')])
+                if worship:
+                    self.assertFalse(self.events('COMMAND_ACCEPTED'))
+                    self.assertEqual(self.events('SUPPRESSED')[-1]['guard'], 'WORSHIP_MODE')
+                else:
+                    self.assertEqual(self.events('COMMAND_ACCEPTED')[0]['candidate_id'], held_id)
+                engine.WORSHIP_MODE = False
 
     def test_manual_rejection_and_callback_exception(self):
         for result in (False, RuntimeError('private callback content')):
@@ -489,6 +522,18 @@ class DeliveryTests(unittest.TestCase):
         self.assertEqual(accepted['source'], 'FAST-PATH')
         self.assertEqual(accepted['stream'], 'secondary')
         self.assertEqual(len({event['candidate_id'] for event in self.events()}), 1)
+
+    def test_observer_keeps_raw_sarvam_text_when_translation_raises(self):
+        handler = engine.create_sarvam_transcript_handler(self.ctrl, True, '[SEC-TEST]', engine.parse_ml)
+        with patch.object(engine, '_observer_emit') as observe, patch.object(
+                engine, 'translate_to_english', side_effect=RuntimeError('translation unavailable')):
+            with self.assertRaises(RuntimeError):
+                handler('യോഹന്നാൻ 3:16', True)
+        self.assertEqual(observe.call_args_list[0].args, ('transcript',))
+        self.assertEqual(observe.call_args_list[0].kwargs['stream'], 'secondary')
+        self.assertEqual(observe.call_args_list[0].kwargs['text'], 'യോഹന്നാൻ 3:16')
+        self.assertEqual(self.events('ERROR')[-1]['stage'], 'transcript_callback')
+        self.ctrl.driver.execute_script.assert_not_called()
 
     def test_false_positive_and_translation_guards_remain_explainable(self):
         engine.PRIMARY_PARSER = engine.parse_eng

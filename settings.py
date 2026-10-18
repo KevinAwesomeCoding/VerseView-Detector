@@ -3,9 +3,8 @@ import sys
 import os
 import base64
 import logging
+import tempfile
 from pathlib import Path
-import tkinter.filedialog as fd
-import tkinter.messagebox as mb
 
 logger = logging.getLogger("VerseViewSTT")
 
@@ -176,7 +175,9 @@ _GCP_SA_REQUIRED_KEYS = ("type", "project_id", "private_key", "client_email")
 #   Other (sane fallback):
 #       ~/.verseview/
 def _app_data_dir() -> Path:
-    if sys.platform == "darwin":
+    if os.getenv("VERSEVIEW_PROFILE_DIRECTORY"):
+        base = Path(os.environ["VERSEVIEW_PROFILE_DIRECTORY"])
+    elif sys.platform == "darwin":
         base = Path.home() / "Library" / "Application Support" / "VerseView"
     elif os.name == "nt":
         base = Path(os.getenv("APPDATA", str(Path.home()))) / "VerseView"
@@ -434,19 +435,35 @@ def load() -> dict:
 
 
 def save(data: dict):
-    path = _settings_path()
+    """Atomically replace settings; callers may check False without losing the old file."""
+    temporary = None
     try:
-        # Defensive: never persist the transport-only fields in the local file.
+        path = _settings_path()
         to_write = dict(data)
         to_write.pop(GCP_CREDENTIALS_PAYLOAD_KEY, None)
         to_write.pop(GCP_CREDENTIALS_URL_KEY, None)
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(to_write, f, indent=2)
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent,
+                                         prefix=".settings-", delete=False) as handle:
+            temporary = handle.name
+            json.dump(to_write, handle, indent=2)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+        return True
     except Exception as e:
         print(f"Could not save settings: {e}")
+        return False
+    finally:
+        if temporary:
+            try:
+                os.unlink(temporary)
+            except OSError:
+                pass
 
 
 def export_settings(data: dict, include_gcp_credentials: bool = False):
+    import tkinter.filedialog as fd
+    import tkinter.messagebox as mb
     path = fd.asksaveasfilename(
         title="Export VerseView Settings",
         defaultextension=".json",
@@ -475,6 +492,8 @@ def export_settings(data: dict, include_gcp_credentials: bool = False):
 
 
 def import_settings() -> dict | None:
+    import tkinter.filedialog as fd
+    import tkinter.messagebox as mb
     path = fd.askopenfilename(
         title="Import VerseView Settings",
         filetypes=[("JSON file", "*.json")],

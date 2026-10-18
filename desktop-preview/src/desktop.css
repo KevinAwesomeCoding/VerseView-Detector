@@ -1,0 +1,56 @@
+html,body{margin:0;min-height:100%;background:transparent}
+#verseview-prototype{min-height:100vh;color:var(--vv-ink);background:var(--vv-scene)}
+#verseview-prototype button{cursor:pointer}
+#preview-titlebar{position:relative;z-index:10;height:44px;display:flex;align-items:center;justify-content:space-between;gap:16px;padding:0 18px;background:var(--vv-panel);border-bottom:1px solid var(--vv-border);-webkit-app-region:drag;app-region:drag;user-select:none;font-size:12px;backdrop-filter:var(--vv-blur)}
+#verseview-prototype[data-platform="darwin"] #preview-titlebar{padding-left:90px}
+.preview-app-name{font-weight:600;white-space:nowrap}
+.preview-app-name span{font-weight:400;color:var(--vv-muted);margin-left:7px}
+.preview-window-tools{display:flex;align-items:center;gap:8px;-webkit-app-region:no-drag;app-region:no-drag}
+.preview-window-tools label{color:var(--vv-muted);font-size:11px}
+#verseview-prototype .preview-window-tools select,#verseview-prototype .preview-window-tools button{background:var(--vv-panel);color:var(--vv-ink);border:1px solid var(--vv-border);border-radius:6px;padding:4px 8px;font-size:11px}
+#verseview-prototype .vv-window{border:0;border-radius:0;height:calc(100vh - 44px);min-height:0;overflow:auto;background:transparent;scroll-padding-top:16px}
+#verseview-prototype .vv-shell{min-height:calc(100vh - 44px)}
+#verseview-prototype .vv-chrome{display:none}
+#verseview-prototype .vv-main{padding:26px 30px 18px}
+#verseview-prototype .vv-sidebar{padding-top:27px}
+#verseview-prototype .vv-foot{margin-top:22px}
+#verseview-prototype .preview-about{margin-top:20px;padding:16px 17px}
+#verseview-prototype .preview-about p+p{margin-top:5px}
+/* Native vibrancy/acrylic is behind this entire page. Leave the scene open;
+   keep the actual reading surfaces high-opacity for dependable contrast. */
+#verseview-prototype[data-theme="glass"][data-backdrop="native"]{--vv-scene:light-dark(rgba(215,229,244,.18),rgba(15,27,43,.18));--vv-panel:light-dark(rgba(255,255,255,.92),rgba(20,30,45,.95));--vv-hero:light-dark(rgba(241,249,255,.94),rgba(35,55,76,.96));--vv-blur:none}
+#verseview-prototype[data-theme="glass"][data-backdrop="native"] .vv-sidebar,
+#verseview-prototype[data-theme="glass"][data-backdrop="native"] #preview-titlebar{background:light-dark(rgba(246,250,255,.45),rgba(21,34,50,.5))}
+#verseview-prototype[data-theme="glass"][data-backdrop="solid"]{--vv-scene:var(--vv-bg);--vv-panel:light-dark(#f5f8fc,#172435);--vv-soft:light-dark(#eaf0f6,#263446);--vv-hero:light-dark(#eef5fb,#23374c);--vv-blur:none;--vv-panel-shadow:none}
+@media(max-width:880px){#verseview-prototype .vv-main,#verseview-prototype .vv-focus .vv-main{padding:22px 20px 18px}}
+@media(max-width:680px){#verseview-prototype .vv-main,#verseview-prototype .vv-focus .vv-main{padding:20px 16px}#verseview-prototype .vv-narrow-nav{flex-wrap:wrap}#verseview-prototype .vv-main{min-height:calc(100vh - 44px)}.preview-app-name span{display:none}}
+@media(prefers-reduced-transparency:reduce){#verseview-prototype[data-theme="glass"]{--vv-scene:var(--vv-bg)!important}#verseview-prototype[data-theme="glass"] .vv-sidebar,#verseview-prototype[data-theme="glass"] #preview-titlebar{background:var(--vv-panel)!important}}
+@media(forced-colors:active){#verseview-prototype{--vv-scene:Canvas;--vv-panel:Canvas;--vv-soft:Canvas;--vv-hero:Canvas;--vv-ink:CanvasText;--vv-muted:CanvasText;--vv-hero-ink:CanvasText;--vv-hero-muted:CanvasText;--vv-border:ButtonBorder;--vv-tint:Canvas;--vv-accent:Highlight;--vv-on-accent:HighlightText}#verseview-prototype .vv-sidebar,#verseview-prototype #preview-titlebar{background:Canvas!important}}
+#verseview-prototype .vv-observer-status{display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap;margin-bottom:20px;padding:14px 16px;border:1px solid var(--vv-border);border-radius:12px;background:var(--vv-panel);font-size:13px}
+#verseview-prototype .vv-observer-status strong{font-weight:500}
+#verseview-prototype .vv-observer-status .vv-caption{margin-top:3px}
+#verseview-prototype .vv-observer-status label{display:flex;flex-direction:column;gap:5px;font-size:11px;color:var(--vv-muted);max-width:100%}
+#verseview-prototype .vv-observer-status select{background:var(--vv-panel);color:var(--vv-ink);border:1px solid var(--vv-border);border-radius:6px;padding:7px;max-width:100%}
+#verseview-prototype .vv-observer-empty{padding:18px;font-size:13px;color:var(--vv-muted)}
+#verseview-prototype .vv-observer-output-note{margin:14px 0 18px}
+#verseview-prototype .vv-observer-note{margin-top:16px}
+#verseview-prototype .vv-observer-unknown{margin-top:18px;padding:18px}
+#verseview-prototype .vv-activity-meta,#verseview-prototype .vv-output-foot{overflow-wrap:anywhere}
+#verseview-prototype .vv-observed-stream details{margin-top:8px}
+#verseview-prototype .vv-observed-stream summary{cursor:pointer}
+@media(max-width:880px){.preview-app-name span,.preview-window-tools label{display:none}}
+@media(max-width:680px){#verseview-prototype[data-platform="darwin"] #preview-titlebar{padding-left:80px}.preview-app-name{font-size:11px}.preview-window-tools{gap:5px}#verseview-prototype .preview-window-tools select{padding:4px;max-width:115px}#verseview-prototype .vv-observer-status{padding:12px}}
+
+#verseview-prototype .vv-detector-settings{padding:18px;margin-top:20px}
+#verseview-prototype .vv-detector-settings .vv-panel-head{padding:0 0 12px}
+#verseview-prototype .vv-settings-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin:20px 0}
+#verseview-prototype .vv-settings-grid label{display:flex;flex-direction:column;gap:7px;font-size:12px;min-width:0}
+#verseview-prototype .vv-settings-grid select,#verseview-prototype .vv-settings-grid input[type=url]{width:100%;min-width:0;padding:10px;border:1px solid var(--vv-border);border-radius:8px;background:var(--vv-panel);color:var(--vv-ink);font-size:12px}
+#verseview-prototype .vv-settings-grid .vv-settings-dual{flex-direction:row;align-items:center}
+#verseview-prototype .vv-settings-url{grid-column:1/-1}
+#verseview-prototype .vv-settings-message{margin:16px 0;min-height:22px}
+#verseview-prototype .vv-settings-grid :disabled{opacity:.6}
+@media(max-width:680px){#verseview-prototype .vv-settings-grid{grid-template-columns:minmax(0,1fr)}#verseview-prototype .vv-settings-grid>span{display:none}}
+
+#verseview-prototype .vv-backend-status{display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap;margin-bottom:18px;padding:14px 16px;border:1px solid var(--vv-border);border-radius:12px;background:var(--vv-panel);font-size:13px}
+#verseview-prototype .vv-backend-status .vv-caption{margin-top:5px}

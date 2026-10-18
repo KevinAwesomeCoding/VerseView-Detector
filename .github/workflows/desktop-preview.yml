@@ -1,0 +1,83 @@
+name: Build desktop preview
+
+# Deliberately separate from production builds/releases. No publishing or signing credentials.
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - codex/desktop-backend
+
+permissions:
+  contents: read
+
+jobs:
+  preview:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: win32
+            arch: x64
+          - os: macos-latest
+            platform: darwin
+            arch: arm64
+          - os: macos-15-intel
+            platform: darwin
+            arch: x64
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: desktop-preview
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: desktop-preview/package-lock.json
+      - run: npm ci --no-fund --no-audit
+      - run: npm test
+      - run: npm run check
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install PortAudio for native Mac builds
+        if: runner.os == 'macOS'
+        run: brew install portaudio
+      - name: Install native backend build dependencies
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            export CFLAGS="-I$(brew --prefix portaudio)/include"
+            export LDFLAGS="-L$(brew --prefix portaudio)/lib"
+          fi
+          python -m pip install -r requirements.txt pyinstaller
+        working-directory: .
+      - name: Check the standard-library desktop adapters
+        run: python -m unittest discover -s tests -p test_observer_feed.py
+        working-directory: .
+      - name: Check the standard-library command broker
+        run: python -m unittest discover -s tests -p test_desktop_control.py
+        working-directory: .
+      - name: Check the settings adapter
+        run: python -m unittest discover -s tests -p test_desktop_settings.py
+        working-directory: .
+      - name: Check backend and engine regressions
+        run: python -m unittest discover -s tests -q
+        working-directory: .
+      - name: Build native companion with the existing spec
+        run: python desktop-preview/scripts/build-backend.py
+        working-directory: .
+      - name: Smoke-test the frozen companion without devices
+        run: python desktop-preview/scripts/smoke-backend.py
+        working-directory: .
+      - name: Package dashboard with the native companion
+        run: node scripts/package-native.cjs --platform=${{ matrix.platform }} --arch=${{ matrix.arch }}
+      - name: Verify final dashboard and backend package
+        run: node scripts/verify-latest.cjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: VerseView-Desktop-Preview-${{ matrix.platform }}-${{ matrix.arch }}
+          path: desktop-preview/out/
+          retention-days: 14

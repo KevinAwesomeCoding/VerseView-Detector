@@ -1,5 +1,97 @@
 # Verse delivery investigation
 
+## 2026-10-17: standalone companion preview; physical checks still deferred
+
+Preview 0.5.0 now packages a native frozen Python companion alongside the Mac
+dashboard, using the existing PyInstaller spec with an optional headless entry.
+The packaged dashboard launched its included companion with no legacy GUI or
+external Python command. Its verification report identified `frozen: true`,
+`guiImported: false`, and PID 23124; the native build input was temporarily
+hidden to check independence from that source directory.
+
+The final Mac artifact is build
+`2026-10-18T02-17-35-299Z-3a4349be-darwin-arm64`, based on revision
+`3a4349be57099c0c130800300b335d98f611d11a` plus the uncommitted migration work.
+85 Python and 31 desktop unit tests passed, as did all five packaged suites,
+120 layout cases, archive/runtime inventory and ad-hoc signature checks.
+Mocked speech/controller interactions exercised real engine callbacks,
+bilingual events, exact-candidate approval, clear-output requests, settings,
+crash reporting, explicit relaunch and owned-child shutdown. These checks did
+not use actual microphone/STT transport or visible VerseVIEW output.
+
+The preview copies settings into its own private profile, never auto-starts
+recognition, and preserves stored credentials/unknown values. Advanced feature
+migration and native Windows packaging remain incomplete; named compatibility
+gates block Start when unsupported saved features are enabled. Milestone 6
+remains in progress, with 5 of 8 milestones complete. Physical tests and live
+semantic queue release remain deferred; the original incident is unresolved.
+The installed app and production settings were left intact.
+
+See the [standalone verification report](../desktop-preview/STANDALONE_VERIFICATION.md)
+for exact commands, artifacts, evidence, fixes, cleanup and remaining limits.
+
+## 2026-10-17: non-secret dashboard settings; physical checks deferred
+
+Preview 0.4.0 adds microphone selection, primary/secondary language and provider,
+dual STT, detector Bible translation and VerseVIEW URL settings. Saves require
+a stopped, fresh backend and a current revision; external edits cause a
+conflict. The settings writer now replaces files atomically. Stored credentials,
+unknown fields and unrelated GUI drafts are preserved; credentials are not
+exported to the renderer.
+
+The actual packaged Mac preview passed the settings workflow against production
+binding/store code with fake widgets, synthetic devices and temporary files.
+75 Python tests and 25 desktop unit tests passed, plus 120 packaged layout cases
+across settings, controls, observer and samples. Both package archives were
+verified. Windows execution, microphone/STT, visible VerseVIEW output and live
+semantic queue release remain deferred/unverified. The installed detector and
+production settings remain unchanged; the original incident is unresolved.
+
+See the [settings verification report](../desktop-preview/SETTINGS_VERIFICATION.md)
+for exact artifacts and limits, and the
+[migration progress plan](DESKTOP_MIGRATION_PLAN.md) for overall milestones.
+
+## 2026-10-17: opt-in desktop controls; physical tests deferred
+
+Desktop preview 0.3.0 now has a local command adapter for start/stop and exact
+manual-candidate decisions. It delegates to the existing Python GUI/engine;
+credentials, provider configuration and delivery guards remain there. Control
+requires both observer export and an explicit desktop-control opt-in. The
+installed detector remains unchanged.
+
+The actual packaged Mac preview passed command round trips against mocked
+lifecycle callbacks and real confirmation/delivery code with a fake browser.
+Candidate IDs survived approval; rejection, stale/session/replay checks,
+sample separation, and command availability while copying transcripts passed.
+62 Python tests and 19 desktop unit tests passed, plus 36 packaged control,
+24 observer, and 24 sample layout cases. Both Mac and Windows archives were
+verified; Windows was not executed.
+
+At the user's request, real GUI/device lifecycle, microphone/STT, physical
+VerseVIEW output, and live semantic queue checks are deferred. These results
+do not explain the original intermittent incident. See the
+[control verification report](../desktop-preview/CONTROL_VERIFICATION.md) for
+exact artifacts, provenance, evidence, setup and limits.
+
+## 2026-10-17: read-only dashboard observer
+
+The separate desktop preview now reads an opt-in, local snapshot feed from the
+updated Python source. The actual engine transcript/parser/delivery callbacks
+were exercised with isolated replay and mocked services through the packaged
+Mac preview. Candidate IDs, stream/language, timestamps and outcomes survive the
+boundary. Raw Sarvam text is exported before translation, and a focused test
+confirms a translation exception does not hide that received text. Delivery and
+exception behavior remain unchanged.
+
+All 50 Python tests and 13 desktop unit tests passed, plus 24 packaged observer
+layout cases and 24 packaged sample cases. The Windows package built and its
+archive was verified, but it was not executed on Windows. This stage did not
+start microphone/STT transport, verify a visible VerseVIEW screen, replace the
+installed detector, or explain the original intermittent incident. The installed
+detector does not publish the new feed until an observer-enabled build/source
+is run. See [the observer report](../desktop-preview/OBSERVER_VERIFICATION.md)
+for artifact provenance, replay evidence, setup, and remaining checks.
+
 Investigated the working tree at `/Users/kevinanil/VerseView-Detector`, branch
 `main`, starting commit `0d3bd38`. The only pre-existing change was untracked
 `.DS_Store`; it was preserved. The initial code investigation sent no live

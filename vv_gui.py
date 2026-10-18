@@ -26,6 +26,9 @@ import signal
 import settings as cfg  # type: ignore
 import vv_streaming_master as engine  # type: ignore
 import session_state as _session  # type: ignore
+from desktop_control import DesktopControl
+from desktop_settings import DesktopSettings, GuiSettings
+import observer_feed
 from live_points_app import LivePointsController  # type: ignore
 try:
     import updater as _updater  # type: ignore
@@ -175,10 +178,23 @@ class VerseViewApp(ctk.CTk):
         self.pinned               = False
 
 
+        self._desktop_control = None
+        self._desktop_stopping = False
         self._build_ui()
         self._populate_mics()
         self._attach_log_handler()
         self._load_into_ui()
+        if os.getenv("VERSEVIEW_DESKTOP_CONTROL") == "1" and observer_feed._publisher.enabled:
+            observer_feed.begin({"streams": {}})
+            try:
+                binding = GuiSettings(self, cfg)
+                desktop_settings = DesktopSettings(binding.read, binding.apply)
+                self._desktop_control = DesktopControl(
+                    observer_feed._publisher, self._desktop_state, self._desktop_start, self._stop,
+                    enabled=True, settings=desktop_settings)
+                self.after(250, self._desktop_tick)
+            except Exception:
+                self._append_log("⚠️ Desktop control unavailable; using detector controls.")
         # Shift+Escape panic binding — no pynput, no permissions needed
         self.bind("<Shift-Escape>", lambda e: self._panic_shortcut())
         # Trigger auto-start / smart schedule after window is ready
@@ -2753,6 +2769,41 @@ class VerseViewApp(ctk.CTk):
     # ─────────────────────────────────────────────────
     # ENGINE CONTROL & CALLBACKS
     # ─────────────────────────────────────────────────
+    def _desktop_state(self):
+        if self._closing:
+            return "closed"
+        if not self._running:
+            return "stopped"
+        if self._desktop_stopping:
+            return "stopping"
+        loop = engine.engine_loop
+        observed = observer_feed._publisher.snapshot() or {}
+        if (observed.get("engine_state") == "running" and loop and loop.is_running()
+                and engine.stop_event and not engine.stop_event.is_set()):
+            return "running"
+        return "starting"
+
+    def _desktop_start(self):
+        self._start()
+        return self._running
+
+    def _desktop_tick(self):
+        if self._desktop_control and not self._closing:
+            try:
+                self._desktop_control.tick()
+            except Exception:
+                self._append_log("⚠️ Desktop control unavailable; use detector controls.")
+                self._desktop_control.close()
+                self._desktop_control = None
+                engine.CONFIRM_REQUEST_CALLBACK = None
+                return
+            self.after(250, self._desktop_tick)
+
+    def _desktop_confirm(self, ref, confidence, candidate_id, source, stream):
+        return self._desktop_control.confirm(
+            ref, confidence, candidate_id, source, stream,
+            cancelled=lambda: engine._shutdown_flag.is_set() or self._closing or self._desktop_stopping)
+
     def _user_confirm_callback(self, ref: str, confidence: float) -> bool:
         """ Thread-safe popup to ask the user if they want to send a low-confidence verse. """
         result = [False]
@@ -3067,6 +3118,7 @@ class VerseViewApp(ctk.CTk):
                 confidence                = s["confidence"],
                 manual_confirm            = s["manual_confirm"],
                 confirm_callback          = self._user_confirm_callback,
+                confirm_request_callback  = self._desktop_confirm if self._desktop_control else None,
                 verify                    = s["verify"],
                 verse_interrupt           = s["verse_interrupt"],
                 spoken_numeral_mode       = s.get("spoken_numeral_mode", False),
@@ -3164,12 +3216,14 @@ class VerseViewApp(ctk.CTk):
 
 
     def _stop(self):
+        self._desktop_stopping = True
         self.btn_stop.configure(state="disabled")
         self.lbl_status.configure(text="● Stopping...", text_color=COL_WARN)
         engine.request_stop()
 
 
     def _on_stopped(self):
+        self._desktop_stopping = False
         self._running = False
         # Keep the Discord bot ALIVE after the engine stops. The bridge now runs
         # independently, so the bot can still receive /start and power the engine
@@ -4436,6 +4490,8 @@ class VerseViewApp(ctk.CTk):
 
     def on_closing(self):
         cfg.save(self._collect_settings())
+        if self._desktop_control:
+            self._desktop_control.close()
 
         if self._running:
             # Engine is still live — stop it first, then finish closing once it settles

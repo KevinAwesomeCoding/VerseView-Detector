@@ -24,6 +24,24 @@ scratch.py
 
 # Keep the focused delivery regression suite; scratch test scripts stay ignored.
 !tests/test_delivery.py
+!tests/test_observer_feed.py
 
 # Aider files
 .aider*
+
+# Standalone desktop preview (keep these two dependency manifests versioned).
+!desktop-preview/package.json
+!desktop-preview/package-lock.json
+desktop-preview/node_modules/
+desktop-preview/out/
+desktop-preview/src/vendor/
+desktop-preview/build-info.json
+desktop-preview/test-results/
+
+!tests/test_desktop_control.py
+
+!tests/test_desktop_settings.py
+
+!verseview.spec
+!tests/test_desktop_backend.py
+desktop-preview/backend-build/

@@ -1,0 +1,26 @@
+{
+  "name": "verseview-desktop-preview",
+  "productName": "VerseView Desktop Preview",
+  "version": "0.5.0",
+  "private": true,
+  "description": "Desktop dashboard with opt-in local detector controls and a separate sample demo",
+  "author": "VerseView Detector contributors",
+  "main": "main.cjs",
+  "scripts": {
+    "prepare:assets": "node scripts/prepare.cjs",
+    "start": "npm run prepare:assets && electron .",
+    "test": "node --test tests/*.test.cjs",
+    "check": "node scripts/check.cjs",
+    "package": "npm run prepare:assets && node scripts/package.cjs",
+    "package:mac": "npm run package -- --platform=darwin",
+    "package:windows": "npm run package -- --platform=win32 --arch=x64"
+  },
+  "devDependencies": {
+    "@electron/packager": "20.3.0",
+    "electron": "44.9.0",
+    "lucide": "1.59.0"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  }
+}
