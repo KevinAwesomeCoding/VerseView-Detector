@@ -1,5 +1,32 @@
 # Verse delivery investigation
 
+## 2026-10-18: isolated preview install, update and rollback
+
+Preview 0.11.1 source `af3334529cdfbb543b0083ab7949cbfa26bd204b`, Mac build
+`2026-10-18T15-13-24-202Z-af333452-darwin-arm64`, passes an actual packaged
+0.10.0-to-0.11.1 lifecycle check: copy-once private migration, relocation into
+a path with spaces, preservation through update/app-only uninstall/reinstall,
+previous-version reading and complete Backend-backup rollback. The copied app
+and QA profile were disposable. Both original test artifacts retain their
+file/link inventories and all owned children exited.
+
+The check exposed obsolete external-detector setup guidance and a footer that
+did not refresh when bundled ownership arrived. A focused view test, explicit
+packaged message assertions and the corrected run pass. Core backend and sync
+regressions pass on the same artifact, as do extracted inventory/signature and
+frozen no-input startup. Python runtime hashes match verified 0.11.0. Final
+native CI 39139494109 passed Windows x64, Mac ARM64 and Intel Mac, including
+149 Python and 49 Node tests, frozen feature checks and extracted archives.
+
+The new guide covers equivalent Mac/Windows installation and rollback; Windows
+graphical execution and OS trust prompts are unverified. Real microphone/STT,
+visible output and semantic queue acceptance remain deferred. Production
+identity/signing/distribution and explicit replacement approval remain open;
+the installed detector and production profile were not modified. Progress stays
+**6 of 8, 75%**. The original intermittent incident remains unresolved.
+Final native CI, exact artifacts, preserved failure evidence and limits:
+[installation report](../desktop-preview/INSTALLATION_VERIFICATION.md).
+
 ## 2026-10-18: standalone credential sync and integration milestone complete
 
 Preview 0.11.0 performs opt-in saved-URL credential sync through a bounded

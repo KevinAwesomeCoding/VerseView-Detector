@@ -3,7 +3,7 @@
 A separate Electron dashboard for macOS and Windows, with local engine events,
 **optional start/stop, candidate approval, and non-secret settings**, and a separate sample demo. The
 Python companion owns microphone/STT, settings, and guarded delivery. Version
-0.11.0 bundles the native backend, recovery, warmup, watcher suggestions, editable outline notes, owned Discord bot controls and private credential sync; external-detector observation still works.
+0.11.1 bundles the native backend, recovery, warmup, watcher suggestions, editable outline notes, owned Discord bot controls and private credential sync; external-detector observation still works.
 The installed detector remains unchanged. Physical acceptance and installation readiness remain open.
 
 ## Standalone companion (milestone 6 in progress)
@@ -354,6 +354,12 @@ Open the Mac `.app` directly. On Windows keep the entire output directory
 together and run `VerseView Desktop Preview.exe` with its DLLs/resources. Do not
 replace the installed detector with this preview.
 
+See the [installation and rollback guide](INSTALLATION_AND_ROLLBACK.md) for
+profile locations, one-time settings/managed-credential import, private backups,
+manual updates and uninstall/reinstall. The preview has no automatic updater.
+The [installation verification report](INSTALLATION_VERIFICATION.md) records
+actual packaged Mac upgrade/rollback results and unverified Windows/security gates.
+
 ```sh
 node scripts/verify-package.cjs '/path/to/VerseView Desktop Preview.app'
 node scripts/verify-package.cjs '/path/to/VerseView Desktop Preview-win32-x64'
@@ -392,7 +398,9 @@ See [standalone verification](STANDALONE_VERIFICATION.md) for current results,
 [control verification](CONTROL_VERIFICATION.md) for stage three,
 [observer verification](OBSERVER_VERIFICATION.md) for stage two, and
 [the milestone-one report](VERIFICATION.md) for the original desktop preview.
-Current engineering work covers installation, update and rollback readiness.
+Isolated Mac installation, update, uninstall/reinstall and rollback checks now
+pass. Windows graphical lifecycle and production signing/distribution acceptance
+remain open. See [installation verification](INSTALLATION_VERIFICATION.md).
 Physical end-to-end checks on both platforms remain deferred; the new interface
 has isolated automated verification only. The progress plan records completion
 criteria and the remaining release gates.
