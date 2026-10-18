@@ -4,6 +4,7 @@
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
   })[character]);
   let command = null;
+  let recoveryOpen = null;
   const languageNames = { en: 'English', ml: 'Malayalam', hi: 'Hindi', multi: 'Multilingual' };
   const outcomeNames = { COMMAND_ACCEPTED: 'Command accepted', SUPPRESSED: 'Suppressed',
     MANUAL_CONFIRM_REQUIRED: 'Awaiting operator approval', QUEUED: 'Queued', CANCELLED: 'Cancelled',
@@ -22,11 +23,24 @@
     const result = control.results.find(item => item.id === command?.id);
     if (result) command = { ...result, hostId: control.id };
     const disabled = !enabled || command?.outcome === 'submitted';
-    const commandLabels = { submitted: 'Request sent', requested: 'Request acknowledged', answered: 'Decision acknowledged', rejected: 'Request rejected', failed: 'Request failed', unknown: 'Outcome unknown' };
+    const commandLabels = { submitted: 'Request sent', requested: 'Request acknowledged', answered: 'Decision acknowledged', prepared: 'Recovery prepared', discarded: 'Recovery discarded', rejected: 'Request rejected', failed: 'Request failed', unknown: 'Outcome unknown' };
     const notice = command ? `${commandLabels[command.outcome] || command.outcome}. ${command.reason || 'Waiting for the detector to acknowledge.'}` : 'Start uses the existing detector settings. Approval returns to the existing delivery checks.';
-    return `<section class="vv-panel vv-engine-control" aria-label="Detector controls"><div class="vv-panel-head"><div><h2>Detector controls</h2><p class="vv-caption">${escape(control.state)} · PID ${session.pid}</p></div><div class="vv-control-actions">${['start', 'stop', ...(control.actions.includes('panic') ? ['panic'] : [])].map(action => `<button type="button" class="vv-btn ${action === 'start' ? 'vv-btn-primary' : ''}" data-engine-action="${action}" data-engine-session="${session.session_id}" ${disabled || !control.actions.includes(action) ? 'disabled' : ''}>${action === 'start' ? 'Start engine' : action === 'panic' ? 'Clear output' : 'Stop engine'}</button>`).join('')}</div></div>
+    return recoveryPanel(snapshot, disabled) + `<section class="vv-panel vv-engine-control" aria-label="Detector controls"><div class="vv-panel-head"><div><h2>Detector controls</h2><p class="vv-caption">${escape(control.state)} · PID ${session.pid}</p></div><div class="vv-control-actions">${['start', 'stop', ...(control.actions.includes('panic') ? ['panic'] : [])].map(action => `<button type="button" class="vv-btn ${action === 'start' ? 'vv-btn-primary' : ''}" data-engine-action="${action}" data-engine-session="${session.session_id}" ${disabled || !control.actions.includes(action) ? 'disabled' : ''}>${action === 'start' ? 'Start engine' : action === 'panic' ? 'Clear output' : 'Stop engine'}</button>`).join('')}</div></div>
       <p class="vv-caption" role="status" aria-live="polite" data-command-status>${escape(enabled ? notice : 'Connection unavailable. Commands disabled; showing the last snapshot.')}</p>
       ${control.pending.length ? `<div class="vv-pending-list"><h3>Awaiting your decision</h3>${control.pending.map(item => `<div class="vv-pending-candidate"><div><strong>${escape(item.reference)}</strong><p class="vv-caption">${Math.round(item.confidence * 100)}% confidence · ${escape(streamName(session, item.stream))} · ${escape(item.source)}</p><code>${escape(item.candidate_id)}</code></div><div class="vv-control-actions">${['approve', 'reject'].map(action => `<button type="button" class="vv-btn ${action === 'approve' ? 'vv-btn-primary' : ''}" data-engine-action="${action}" data-engine-session="${session.session_id}" data-candidate="${escape(item.candidate_id)}" ${disabled ? 'disabled' : ''}>${action === 'approve' ? 'Approve' : 'Reject'} ${escape(item.reference)}</button>`).join('')}</div></div>`).join('')}</div>` : '<p class="vv-caption">No candidates awaiting approval.</p>'}</section>`;
+  }
+
+  function recoveryPanel(snapshot, disabled) {
+    const session = snapshot.session, control = session.control, value = control.recovery;
+    if (!value || !['available', 'staged', 'invalid'].includes(value.status)) {
+      return value?.message ? `<p class="vv-caption" role="status">${escape(value.message)}</p>` : '';
+    }
+    const preview = value.preview;
+    return `<section class="vv-panel vv-recovery" aria-label="Saved session recovery"><div class="vv-panel-head"><h2>${value.status === 'staged' ? 'Session ready to resume' : value.status === 'invalid' ? 'Saved session needs attention' : 'Saved session available'}</h2></div>
+      <div class="vv-recovery-body"><p class="vv-caption">${value.status === 'staged' ? 'Saved context is prepared. Press Start to resume recognition.' : value.status === 'invalid' ? escape(value.message) : 'Restore saved sermon context or discard it to start fresh. Recognition is stopped.'} Nothing is presented by this choice.</p>
+      ${value.saved_at ? `<p class="vv-caption">Saved ${time(value.saved_at)} · ${escape(value.reason)} · ${value.verse_count} history entries</p>` : ''}
+      ${preview ? `<details data-recovery-preview data-recovery-key="${control.id}-${value.revision}" ${recoveryOpen === `${control.id}-${value.revision}` ? 'open' : ''}><summary>Saved content preview</summary><p class="vv-caption">Historical preview · up to 2,000 characters per stream. Full engine context is kept in the private recovery file.</p><div class="vv-dual-grid">${['primary', 'secondary'].map(role => `<div><h3>${role === 'primary' ? 'Primary' : 'Secondary'} · ${escape(languageNames[preview.languages[role]] || 'Language not recorded')}</h3><p class="vv-caption">${preview.sources[role] === 'speech' ? 'Saved final speech' : 'Saved engine context · may be translated'}</p><p class="vv-recovery-text" lang="${preview.sources[role] === 'speech' ? escape(preview.languages[role]) : 'und'}">${escape(preview[role] || 'No saved text for this stream.')}</p></div>`).join('')}</div>${preview.references.length ? `<p class="vv-caption">Recent history: ${preview.references.map(escape).join(' · ')}</p>` : ''}</details>` : ''}
+      <div class="vv-control-actions">${['restore_session', 'discard_session'].filter(action => value.status !== 'invalid' || action === 'discard_session').map(action => `<button type="button" class="vv-btn ${action === 'restore_session' ? 'vv-btn-primary' : ''}" data-engine-action="${action}" data-engine-session="${session.session_id}" data-recovery-revision="${escape(value.revision)}" ${disabled || !control.actions.includes(action) ? 'disabled' : ''}>${action === 'restore_session' ? 'Restore saved session' : 'Discard saved session'}</button>`).join('')}</div></div></section>`;
   }
 
   function backendPanel() {
@@ -97,8 +111,22 @@
   }
 
   const testGate = () => '<section class="vv-panel preview-about" aria-label="Sample mode separation"><h2>Sample demo</h2><p class="vv-caption">Sample controls are separate from the detector feed. Switch to Sample demo to run them; the detector feed and its controls remain separate.</p><button type="button" class="vv-btn" data-action="sample-mode">Open sample demo</button></section>';
-  window.observerView = Object.freeze({ session: sessionView, activity, settings, testGate, controls: controlPanel });
+  function updateRecoveryAvailability(snapshot) {
+    const session = snapshot.session, control = session?.control;
+    for (const button of document.querySelectorAll('[data-recovery-revision]')) {
+      button.disabled = snapshot.connection !== 'connected' || session?.session_id !== button.dataset.engineSession ||
+        control?.state !== 'stopped' || control?.recovery?.revision !== button.dataset.recoveryRevision ||
+        !control?.actions.includes(button.dataset.engineAction) || command?.outcome === 'submitted';
+    }
+  }
+  window.observerView = Object.freeze({ session: sessionView, activity, settings, testGate, controls: controlPanel, updateRecoveryAvailability });
   const root = document.getElementById('verseview-prototype');
+  root.addEventListener('toggle', event => {
+    if (!event.target.matches('[data-recovery-preview]')) return;
+    const key = event.target.dataset.recoveryKey;
+    if (event.target.open) recoveryOpen = key;
+    else if (recoveryOpen === key) recoveryOpen = null;
+  }, true);
   root.addEventListener('click', async event => {
     const button = event.target.closest('[data-engine-action]');
     if (!button || button.disabled || window.previewShell.getMode() !== 'observer' || command?.outcome === 'submitted') return;
@@ -111,6 +139,7 @@
       const submitted = action === 'start' ? await window.verseviewDesktop.startEngine(sessionId)
         : action === 'stop' ? await window.verseviewDesktop.stopEngine(sessionId)
         : action === 'panic' ? await window.verseviewDesktop.clearOutput(sessionId)
+        : ['restore_session', 'discard_session'].includes(action) ? await window.verseviewDesktop.recoverSession(sessionId, button.dataset.recoveryRevision, action === 'restore_session')
         : await window.verseviewDesktop.resolveCandidate(sessionId, button.dataset.candidate, action === 'approve');
       command = { ...submitted, hostId };
       const id = command.id;

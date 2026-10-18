@@ -61,6 +61,19 @@ test('missing inbox fails without retry or creating a new backend', async t => {
   await assert.rejects(f.client.submit(f.sessionId, 'start'));
   assert.equal(fs.readdirSync(f.directory).length, 0);
 });
+test('recovery decisions carry only an exact revision and never start recognition', async t => {
+  const f = setup(t), revision = 'd'.repeat(32);
+  f.session.control.actions = ['restore_session', 'discard_session'];
+  f.session.control.recovery = { status: 'available', revision };
+  await assert.rejects(f.client.submit(f.sessionId, 'restore_session', undefined, undefined, 'e'.repeat(32)));
+  const result = await f.client.submit(f.sessionId, 'restore_session', undefined, undefined, revision);
+  const request = JSON.parse(fs.readFileSync(path.join(f.inbox, `command-${result.id}.json`)));
+  assert.equal(request.recovery_revision, revision);
+  assert.equal(request.action, 'restore_session');
+  assert.equal(f.reader.commandTransition, undefined);
+  f.session.control.state = 'running';
+  await assert.rejects(f.client.submit(f.sessionId, 'discard_session', undefined, undefined, revision));
+});
 test('explicit process selection follows only our acknowledged start across session rotation', async t => {
   const f = setup(t), reader = new EngineFeedReader({ directory: f.directory, clock: () => f.now });
   const fixture = { ...f.session, schema: 1, revision: 1, origin: 'engine', started_at: new Date(f.now).toISOString(),

@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld('verseviewDesktop', Object.freeze({
   resolveCandidate: (sessionId, candidateId, approved) => ipcRenderer.invoke('preview:resolve-candidate', sessionId, candidateId, approved),
   saveSettings: (sessionId, revision, changes) => ipcRenderer.invoke('preview:save-settings', sessionId, revision, changes),
   clearOutput: sessionId => ipcRenderer.invoke('preview:clear-output', sessionId),
+  recoverSession: (sessionId, revision, restore) => ipcRenderer.invoke('preview:recover-session', sessionId, revision, restore),
   backendState: () => ipcRenderer.invoke('preview:backend-state'),
   launchBackend: () => ipcRenderer.invoke('preview:launch-backend'),
   closeBackend: () => ipcRenderer.invoke('preview:close-backend'),

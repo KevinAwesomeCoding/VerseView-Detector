@@ -93,3 +93,17 @@ test('old process files do not prevent a new detector from connecting', async ()
     assert.equal(snapshot.sources.length, 32);
   } finally { fs.rmSync(directory, { recursive: true, force: true }); }
 });
+test('recovery preview is bounded, attributed and excludes arbitrary saved settings', () => {
+  const value = fixture();
+  value.control = { id:'c'.repeat(32), state:'stopped', actions:['restore_session', 'discard_session', 'arbitrary'],
+    recovery: { status:'available', revision:'d'.repeat(32), verse_count:1, saved_at:new Date(now).toISOString(),
+      preview:{primary:'a'.repeat(3000), secondary:'യോഹന്നാൻ', languages:{primary:'en',secondary:'ml'},
+        references:['John 3:16'], settings:{api_key:'SECRET'}}, settings:{api_key:'SECRET'} } };
+  const decoded = decodeSnapshot(value, now);
+  assert.equal(decoded.control.recovery.preview.primary.length,2000);
+  assert.equal(decoded.control.recovery.preview.languages.secondary,'ml');
+  assert.deepEqual(decoded.control.actions,['restore_session','discard_session']);
+  assert.equal(JSON.stringify(decoded).includes('SECRET'),false);
+  assert.deepEqual(decoded.transcripts,[]);
+  assert.deepEqual(decoded.delivery_events,[]);
+});

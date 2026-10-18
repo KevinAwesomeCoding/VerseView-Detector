@@ -3620,6 +3620,7 @@ def get_session_snapshot() -> dict:
     """
     return {
         "transcript":       full_sermon_transcript or "",
+        "transcript_secondary": full_sermon_transcript_secondary or "",
         "verses_cited":     list(verses_cited),
         "verse_history":    list(_verse_history),
         "current_book":     current_book,
@@ -3648,11 +3649,12 @@ def restore_session_snapshot(data: dict) -> None:
         _discord_live_log.resume(data["discord_msg_id"]) once the engine is
         started so the flush loop actually picks up the restored ID.
     """
-    global full_sermon_transcript, verses_cited, _verse_history
+    global full_sermon_transcript, full_sermon_transcript_secondary, verses_cited, _verse_history
     global current_book, current_chapter, current_verse
     global _sermon_anchor_book, _sermon_anchor_chapter, _sermon_anchor_verse
 
     full_sermon_transcript = data.get("transcript", "")
+    full_sermon_transcript_secondary = data.get("transcript_secondary", "")
     verses_cited           = list(data.get("verses_cited", []))
     _verse_history         = list(data.get("verse_history", []))
 

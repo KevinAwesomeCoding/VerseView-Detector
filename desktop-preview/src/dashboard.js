@@ -230,6 +230,7 @@
   function observerRefresh(){
     if(!observing())return;
     window.detectorSettings?.updateAvailability(window.previewShell.getObserver());
+    window.observerView.updateRecoveryAvailability(window.previewShell.getObserver());
     const selection=window.getSelection();
     if(selection&&!selection.isCollapsed&&root.contains(selection.anchorNode)){
       // A copied transcript must not freeze Stop or leave stale approvals enabled.

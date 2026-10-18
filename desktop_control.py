@@ -12,6 +12,7 @@ import re
 import threading
 import uuid
 from desktop_settings import SettingsError
+from desktop_recovery import RecoveryError
 
 _HEX = re.compile(r"^[a-f0-9]{32}$")
 
@@ -21,10 +22,11 @@ def now_seconds():
 
 
 class DesktopControl:
-    def __init__(self, publisher, state, start, stop, *, enabled=False, clock=now_seconds, settings=None, panic=None):
+    def __init__(self, publisher, state, start, stop, *, enabled=False, clock=now_seconds, settings=None, panic=None, recovery=None):
         self.publisher, self.state = publisher, state
         self.start, self.stop, self.enabled, self.clock = start, stop, enabled, clock
         self.settings, self.panic = settings, panic
+        self.recovery = recovery
         self.control_id = uuid.uuid4().hex
         self.directory = publisher.directory / f"control-{os.getpid()}-{self.control_id}"
         self.session_id = None
@@ -50,13 +52,18 @@ class DesktopControl:
                 self.session_id = session_id
             state = 'closed' if self.closed else self.state()
             actions = ['start'] if state == 'stopped' else ['stop'] if state == 'running' else []
+            recovery = self.recovery.snapshot() if self.recovery else None
+            if state == 'stopped' and recovery and recovery['status'] in ('available', 'staged', 'invalid'):
+                if recovery['status'] != 'staged': actions.remove('start')
+                actions.append('discard_session')
+                if recovery['status'] == 'available': actions.append('restore_session')
             if state == 'running' and self.panic:
                 actions.append('panic')
             settings = self.settings.snapshot() if self.settings else None
             if state == 'stopped' and settings:
                 actions.append('save_settings')
             self.publisher.emit('control', value={
-                'id': self.control_id, 'state': state, 'actions': actions, 'settings': settings,
+                'id': self.control_id, 'state': state, 'actions': actions, 'settings': settings, 'recovery': recovery,
                 'pending': [{key: item[key] for key in ('candidate_id', 'reference', 'confidence', 'stream', 'source')}
                             for item in self.pending.values()], 'results': self.results[-32:]})
 
@@ -103,7 +110,7 @@ class DesktopControl:
             outcome = 'rejected'
             reason = 'Invalid, expired, or stale command'
             created = request.get('created_at')
-            valid = (set(request) <= {'id', 'control_id', 'session_id', 'created_at', 'action', 'candidate_id', 'settings_revision', 'changes'}
+            valid = (set(request) <= {'id', 'control_id', 'session_id', 'created_at', 'action', 'candidate_id', 'settings_revision', 'changes', 'recovery_revision'}
                      and request.get('control_id') == self.control_id
                      and request.get('session_id') == self.session_id
                      and isinstance(created, (float, int)) and not isinstance(created, bool)
@@ -112,8 +119,13 @@ class DesktopControl:
                 try:
                     state = self.state()
                     if action == 'start' and state == 'stopped':
-                        outcome = 'requested' if self.start() else 'failed'
+                        outcome = 'requested' if 'start' in self.publisher.snapshot()['control']['actions'] and self.start() else 'failed'
                         reason = 'Start requested; observe engine status' if outcome == 'requested' else 'Start did not begin; check the detector'
+                    elif (action in ('restore_session', 'discard_session') and state == 'stopped' and self.recovery
+                          and action in self.publisher.snapshot()['control']['actions']):
+                        self.recovery.choose(request.get('recovery_revision'), action == 'restore_session')
+                        outcome = 'prepared' if action == 'restore_session' else 'discarded'
+                        reason = 'Saved context prepared. Press Start to resume; nothing was presented.' if action == 'restore_session' else 'Recovery checkpoint discarded. Recognition remains stopped.'
                     elif action == 'panic' and state == 'running' and self.panic:
                         self.panic()
                         outcome, reason = 'requested', 'Clear command requested; verify the visible output.'
@@ -134,11 +146,11 @@ class DesktopControl:
                             reason = 'Candidate is no longer awaiting approval'
                     else:
                         reason = 'Action unavailable in the current engine state'
-                except SettingsError as exc:
+                except (SettingsError, RecoveryError) as exc:
                     outcome, reason = 'rejected', str(exc)
                 except Exception:
                     outcome, reason = 'failed', 'Detector control failed; inspect the detector log'
-            self.results.append(dict(id=command_id, action=action if action in ('start', 'stop', 'approve', 'reject', 'save_settings', 'panic') else 'unknown',
+            self.results.append(dict(id=command_id, action=action if action in ('start', 'stop', 'approve', 'reject', 'save_settings', 'panic', 'restore_session', 'discard_session') else 'unknown',
                                      outcome=outcome, reason=reason))
             self.results = self.results[-32:]
             self.refresh()

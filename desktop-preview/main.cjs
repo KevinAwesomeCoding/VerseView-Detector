@@ -112,6 +112,10 @@ ipcMain.handle('preview:save-settings', (event, sessionId, revision, changes) =>
   if (!trusted(event)) throw new Error('Untrusted preview sender');
   return commands.submit(sessionId, 'save_settings', undefined, { revision, changes });
 });
+ipcMain.handle('preview:recover-session', (event, sessionId, revision, restore) => {
+  if (!trusted(event) || typeof restore !== 'boolean') throw new Error('Invalid recovery request');
+  return commands.submit(sessionId, restore ? 'restore_session' : 'discard_session', undefined, undefined, revision);
+});
 
 ipcMain.handle('preview:backend-state', event => {
   if (!trusted(event)) throw new Error('Untrusted preview sender');

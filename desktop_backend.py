@@ -19,6 +19,7 @@ import sys
 import threading
 import time
 from service_schedule import effective_start_settings
+from desktop_recovery import SessionRecovery, RecoveryError
 
 
 class BackendError(ValueError):
@@ -118,6 +119,9 @@ class EngineRuntime:
         self.thread = self.loop = None
         self.stop_requested = threading.Event()
         self.error = ''
+        self.recovery = SessionRecovery(profile)
+        self.checkpoint_due = 0
+        self.has_started = False
 
     def state(self):
         if not self.thread or not self.thread.is_alive(): return 'stopped'
@@ -127,11 +131,22 @@ class EngineRuntime:
 
     def start(self, values, config, confirm):
         if self.state() != 'stopped': return False
+        restored = self.recovery.for_start()
         problem = start_problem(values)
         if problem: raise BackendError(problem)
         self.error = ''
         self.stop_requested.clear()
+        if self.recovery.fresh_start:
+            self.engine.clear_sermon_buffer()
+            self.engine.full_sermon_transcript_secondary = ''
         self.engine.configure(**configuration(values, config, self.engine, confirm))
+        if restored:
+            # configure resets anchor/quarantine and the secondary buffer.
+            # Restore after it, before any recognition tasks can be launched.
+            self.engine.restore_session_snapshot(restored)
+        self.recovery.started()
+        self.has_started = True
+        self.checkpoint_due = time.monotonic() + 15
         self.engine.show_malayalam_raw = bool(values.get('show_malayalam_raw'))
         if self.verification:
             snapshot = self.publisher.snapshot()
@@ -168,9 +183,12 @@ class EngineRuntime:
                 with isolated_engine(self.engine): self.loop.run_until_complete(self._main())
             else:
                 self.loop.run_until_complete(self._main())
-                self.stop_requested.set()
+            self.stop_requested.set()
+            self.checkpoint('stopped')
+            if not self.verification:
                 self._save_session(values)
         except Exception:
+            self.checkpoint('error')
             logging.getLogger(__name__).exception('Backend engine or session processing failed')
             self.error = 'Engine or session processing failed. Inspect the private backend log.'
             self.publisher.emit('state', state='error')
@@ -180,6 +198,27 @@ class EngineRuntime:
             if pending: self.loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
             self.loop.close()
             self.loop = None
+
+    def checkpoint(self, reason):
+        if not self.has_started: return
+        try:
+            with self.recovery.lock:
+                if reason == 'autosave' and self.stop_requested.is_set(): return
+                snapshot = self.engine.get_session_snapshot()
+                snapshot['stream_languages'] = {'primary': self.engine.PRIMARY_LANGUAGE,
+                                                'secondary': self.engine.SECONDARY_LANGUAGE}
+                feed = self.publisher.snapshot() or {}
+                snapshot['raw_preview'] = {role: '\n'.join(row['text'] for row in feed.get('transcripts', [])
+                    if row['stream'] == role and row['is_final'])[-2000:] for role in ('primary', 'secondary')}
+                self.recovery.save(snapshot, reason)
+        except Exception:
+            logging.getLogger(__name__).exception('Session recovery checkpoint failed')
+            self.recovery.error = 'Session checkpoint could not be saved. Inspect the private backend log.'
+
+    def autosave(self):
+        if self.state() in ('starting', 'running') and time.monotonic() >= self.checkpoint_due:
+            self.checkpoint_due = time.monotonic() + 15
+            self.checkpoint('autosave')
 
     def _save_session(self, values):
         transcript = self.engine.full_sermon_transcript or ''
@@ -208,7 +247,8 @@ class BackendHost:
         self.store = ProfileStore(config, self.state, lambda: self.devices)
         self.settings = DesktopSettings(self.store.read, self.store.apply)
         self.publisher.begin({'streams': {}}, origin='callback-replay' if runtime.verification else 'engine')
-        self.control = DesktopControl(publisher, self.state, self.start, runtime.stop, enabled=True, settings=self.settings, panic=runtime.panic)
+        self.control = DesktopControl(publisher, self.state, self.start, runtime.stop, enabled=True, settings=self.settings,
+                                      panic=runtime.panic, recovery=getattr(runtime, 'recovery', None))
 
     def state(self):
         return 'closed' if self.closing else self.runtime.state()
@@ -224,7 +264,7 @@ class BackendHost:
             result = self.runtime.start(values, self.config, self.confirm)
             self.notice = schedule_notice + 'Engine start requested; device/provider readiness is reported separately.'
             return result
-        except (BackendError, SettingsError) as exc:
+        except (BackendError, SettingsError, RecoveryError) as exc:
             self.notice = schedule_notice + str(exc)
             return False
         except Exception:
@@ -236,6 +276,7 @@ class BackendHost:
         return self.control.confirm(*args, cancelled=lambda: self.closing or self.runtime.stop_requested.is_set())
 
     def tick(self):
+        if hasattr(self.runtime, 'autosave'): self.runtime.autosave()
         self.control.tick()
         self.publisher.emit('host', value={'managed': True, 'notice': self.runtime.error or self.notice,
                                            'verification': self.runtime.verification})

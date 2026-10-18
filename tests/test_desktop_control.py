@@ -146,6 +146,33 @@ class DesktopControlTests(unittest.TestCase):
         self.assertEqual(self.result()['outcome'], 'requested')
         self.start.assert_not_called()
 
+    def test_recovery_decisions_require_current_revision_and_stopped_host(self):
+        from desktop_recovery import SessionRecovery
+        recovery = SessionRecovery(self.temporary.name)
+        recovery.save({'transcript': 'Saved sermon'}, 'autosave')
+        self.broker.recovery = SessionRecovery(self.temporary.name)
+        self.broker.refresh()
+        revision = self.publisher.snapshot()['control']['recovery']['revision']
+        self.broker.execute(self.request('start'))
+        self.start.assert_not_called()
+        self.broker.execute(self.request('restore_session', recovery_revision='f'*32))
+        self.assertEqual(self.result()['outcome'], 'rejected')
+        self.broker.execute(self.request('restore_session', recovery_revision=revision))
+        self.assertEqual(self.result()['outcome'], 'prepared')
+        self.assertEqual(self.publisher.snapshot()['control']['state'], 'stopped')
+        self.start.assert_not_called()
+        self.broker.execute(self.request('restore_session', recovery_revision=revision))
+        self.assertEqual(self.result()['outcome'], 'rejected')
+        self.state = 'running'
+        self.broker.execute(self.request('discard_session', recovery_revision=revision))
+        self.assertEqual(self.result()['outcome'], 'rejected')
+        self.assertTrue(recovery.path.exists())
+        self.state = 'stopped'
+        self.broker.execute(self.request('discard_session', recovery_revision=revision))
+        self.assertEqual(self.result()['outcome'], 'discarded')
+        self.assertFalse(recovery.path.exists())
+        self.start.assert_not_called()
+
     def test_no_side_effects_without_explicit_opt_in(self):
         disabled = DesktopControl(self.publisher, lambda: 'stopped', self.start, self.stop)
         disabled.tick()

@@ -17,7 +17,8 @@ function feedDirectory({ platform, appData, home }) {
 function decodeControl(value) {
   if (!value || !/^[a-f0-9]{32}$/.test(value.id) || !['stopped', 'starting', 'running', 'stopping', 'closed'].includes(value.state)) return null;
   return { id: value.id, state: value.state,
-    actions: Array.isArray(value.actions) ? value.actions.filter(action => ['start', 'stop', 'save_settings', 'panic'].includes(action)) : [],
+    actions: Array.isArray(value.actions) ? value.actions.filter(action => ['start', 'stop', 'save_settings', 'panic', 'restore_session', 'discard_session'].includes(action)) : [],
+    recovery: decodeRecovery(value.recovery),
     settings: settingsPolicy.decode(value.settings),
     pending: (Array.isArray(value.pending) ? value.pending : []).slice(0, 16)
       .filter(item => item && text(item.candidate_id, 128) && text(item.reference, 128))
@@ -27,6 +28,21 @@ function decodeControl(value) {
     results: (Array.isArray(value.results) ? value.results : []).slice(-32)
       .filter(item => item && /^[a-f0-9]{32}$/.test(item.id))
       .map(item => ({ id: item.id, action: text(item.action, 16), outcome: text(item.outcome, 24), reason: text(item.reason, 200) })) };
+}
+
+function decodeRecovery(value) {
+  if (!value || !['none', 'available', 'staged', 'invalid', 'saved'].includes(value.status)) return null;
+  const preview = value.preview;
+  const language = role => ['en', 'ml', 'hi', 'multi'].includes(preview?.languages?.[role]) ? preview.languages[role] : 'und';
+  return { status: value.status, revision: /^[a-f0-9]{32}$/.test(value.revision || '') ? value.revision : null,
+    message: text(value.message, 400), saved_at: timestamp(value.saved_at), reason: text(value.reason, 32),
+    verse_count: Number.isSafeInteger(value.verse_count) ? Math.max(0, Math.min(4096, value.verse_count)) : 0,
+    preview: preview && ['available', 'staged'].includes(value.status) ? {
+      primary: text(preview.primary, 2000), secondary: text(preview.secondary, 2000),
+      languages: { primary: language('primary'), secondary: language('secondary') },
+      sources: { primary: preview.sources?.primary === 'speech' ? 'speech' : 'context',
+        secondary: preview.sources?.secondary === 'speech' ? 'speech' : 'context' },
+      references: Array.isArray(preview.references) ? preview.references.slice(-10).map(ref => text(ref, 128)) : [] } : null };
 }
 
 function decodeSnapshot(value, now = Date.now()) {

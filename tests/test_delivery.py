@@ -644,6 +644,24 @@ class DeliveryTests(unittest.TestCase):
         view._update_delivery_diagnostics()
         box.insert.assert_not_called()
 
+    def test_restore_keeps_both_buffers_as_metadata_without_delivery(self):
+        previous = engine.get_session_snapshot()
+        quarantine = (engine._manual_context_set_time, engine._quarantine_transcript_offset)
+        try:
+            engine.restore_session_snapshot({'transcript': 'Saved English', 'transcript_secondary': 'യോഹന്നാൻ',
+                'verse_history': [{'ref': 'John 3:16', 'time': '10:00', 'layer': 'PARSER'}],
+                'sermon_anchor': {'book': 'John', 'chapter': 3, 'verse': 16}})
+            self.assertEqual(engine.full_sermon_transcript_secondary, 'യോഹന്നാൻ')
+            self.assertEqual(engine.get_session_snapshot()['transcript_secondary'], 'യോഹന്നാൻ')
+            self.assertEqual(engine.current_verse, 16)
+            self.assertGreater(engine._manual_context_set_time, 0)
+            self.ctrl.driver.execute_script.assert_not_called()
+            engine.send_to_discord.assert_not_called()
+            self.assertFalse(self.events('COMMAND_ACCEPTED'))
+        finally:
+            engine.restore_session_snapshot(previous)
+            engine._manual_context_set_time, engine._quarantine_transcript_offset = quarantine
+
     def test_compact_layout_keeps_transcript_and_history_room(self):
         # Exercise Tk's geometry allocation with the actual row configuration.
         # The old weighted rows shrink the transcript below both history headers
