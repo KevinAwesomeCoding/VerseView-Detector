@@ -3,7 +3,7 @@
 A separate Electron dashboard for macOS and Windows, with local engine events,
 **optional start/stop, candidate approval, and non-secret settings**, and a separate sample demo. The
 Python companion owns microphone/STT, settings, and guarded delivery. Version
-0.5.1 can bundle the native backend; external-detector observation still works.
+0.6.0 bundles the native backend and adds explicit session recovery; external-detector observation still works.
 The installed detector remains unchanged. This milestone is still in progress.
 
 ## Standalone companion (milestone 6 in progress)
@@ -35,8 +35,7 @@ stopped. Closing an external detector feed remains outside this ownership.
 Compatibility is incomplete. Saved live-outline display, watcher suggestions,
 Discord bot, settings sync, or local-model warmup settings block
 Start with a named migration message. Their values are retained; they are not
-silently disabled. Session restoration and full legacy feature parity also
-remain open. Session transcripts/optional summaries have a headless save path,
+silently disabled. Full legacy feature parity remains open. Session transcripts/optional summaries have a headless save path,
 but real cloud summary behavior has not been physically verified.
 
 Smart Schedule now shares the legacy local timetable: Saturday Malayalam;
@@ -58,12 +57,40 @@ ARM64/Intel Mac CI build/smoke/archive checks now pass; graphical Windows execut
 still unverified. Milestone 6 is not
 yet counted complete. See [standalone verification](STANDALONE_VERIFICATION.md).
 
+### Session recovery
+
+The owned companion writes a private `Backend/Recovery/session.json` checkpoint
+every 15 seconds while running and on Stop/shutdown, before optional summary
+processing. A crash can lose speech since the last checkpoint. Empty idle
+launches do not create a checkpoint or overwrite a previous one.
+
+On the next launch, choose **Restore saved session** or **Discard saved session**
+before Start becomes available. Restore prepares the content while recognition
+stays stopped. The next explicit Start configures the engine, restores context
+and its existing quarantine, then starts recognition. Restore itself sends no
+presentation command. Closing before Start retains the checkpoint for another
+decision on the next launch. Discard removes only the preview's checkpoint.
+
+Saved content includes both engine transcript buffers, verse history/anchor,
+stream languages and bounded recent raw-speech previews. The historical preview
+is separate from live STT and accepted commands. Full engine context stays in
+the private file. Credentials/settings, provider logs, Discord message IDs,
+pending approvals, queued references and browser commands are excluded.
+Recovery does not change the saved microphone/provider configuration. Legacy
+GUI checkpoint files remain untouched and are not automatically imported.
+
+Stale decisions are rejected; corrupt files remain until explicitly discarded.
+Write failures leave the previous checkpoint intact and display a generic
+notice, with details in the private log. See [recovery verification](RECOVERY_VERIFICATION.md)
+for tested artifacts, fault cases, native CI and remaining physical checks.
+
 Native development build (using an approved environment with repository
 requirements and PyInstaller already installed), from the repository root:
 
 ```sh
 python desktop-preview/scripts/build-backend.py
 python desktop-preview/scripts/smoke-backend.py
+python desktop-preview/scripts/smoke-recovery.py
 node desktop-preview/scripts/package-native.cjs --platform=darwin --arch=arm64
 python desktop-preview/scripts/archive-latest.py
 ```

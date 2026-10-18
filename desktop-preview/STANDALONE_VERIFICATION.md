@@ -1,5 +1,9 @@
 # Standalone companion verification — 2026-10-17 CDT
 
+For preview 0.6.0 and the latest native/packaged results, see
+[session recovery verification](RECOVERY_VERIFICATION.md). This report preserves
+the earlier companion and Smart Schedule checkpoints.
+
 Latest checkpoint: **0.5.1 native Windows x64, Mac ARM64 and Intel Mac build,
 frozen startup, package integrity and extracted-archive checks all passed** in
 run `39091168118`. The local packaged schedule workflow also passed with mocks.

@@ -1,5 +1,33 @@
 # Verse delivery investigation
 
+## 2026-10-17: explicit standalone session recovery
+
+Preview 0.6.0 adds private 15-second checkpoints and an explicit Restore/Discard
+decision on companion relaunch. Both engine buffers, recent raw-speech previews
+and verse context survive a killed verification child. Restore prepares context
+while stopped; the next explicit Start configures then restores with the engine's
+existing quarantine. Pending approvals, queues, commands, settings/credentials,
+provider logs and Discord message IDs are excluded. Historical text stays separate
+from live STT and accepted commands. Legacy GUI checkpoint files are untouched.
+
+An initial packaged autosave failed because validation expected integer context,
+while the real engine stores digit strings. The evidence was preserved, the
+validator corrected, and focused unit/native frozen regressions added. The final
+Mac artifact is `2026-10-18T03-22-21-039Z-6dc51858-darwin-arm64`, source
+`6dc51858eaf90f6d9d209224e22a371f0d64bc2d`. All 105 Python tests, 33 desktop tests,
+six packaged suites and 156 layout cases passed. Native CI run `39093309837`
+passed on Windows x64, Mac ARM64 and Intel Mac, including actual frozen-host
+autosave, deliberate QA-child termination, explicit restore, and extracted
+archive verification with mocked services.
+
+This does not establish real microphone/STT, visible VerseVIEW output, live
+semantic queue release, graphical Windows behavior, or the original incident's
+cause. Those physical checks remain deferred. The installed app, production
+settings and system preferences were not changed. Project progress remains
+5/8 milestones because other backend features still need migration. See the
+[recovery report](../desktop-preview/RECOVERY_VERIFICATION.md) for artifacts,
+limits, failure evidence and cleanup.
+
 ## 2026-10-17: authorized preview branch and schedule migration
 
 The migration was committed and pushed to `codex/desktop-backend` inside the
