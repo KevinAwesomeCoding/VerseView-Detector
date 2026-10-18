@@ -76,11 +76,13 @@ jobs:
         run: node scripts/package-native.cjs --platform=${{ matrix.platform }} --arch=${{ matrix.arch }}
       - name: Verify final dashboard and backend package
         run: node scripts/verify-latest.cjs
+      - name: Archive and verify extracted native deliverable
+        run: python scripts/archive-latest.py
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: VerseView-Desktop-Preview-${{ matrix.platform }}-${{ matrix.arch }}
           path: |
-            desktop-preview/out/
+            desktop-preview/out/deliverables/
             desktop-preview/test-results/python-checks.txt
           retention-days: 14

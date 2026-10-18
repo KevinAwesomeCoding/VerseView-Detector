@@ -1,4 +1,5 @@
 """Native CI startup smoke: frozen host, no GUI/audio/network/start command."""
+import argparse
 import json
 import os
 from pathlib import Path
@@ -6,7 +7,10 @@ import subprocess
 import tempfile
 
 root = Path(__file__).resolve().parents[1]
-backend = Path((root/'backend-build/latest.txt').read_text().strip())
+parser = argparse.ArgumentParser()
+parser.add_argument('--backend', type=Path)
+args = parser.parse_args()
+backend = args.backend or Path((root/'backend-build/latest.txt').read_text().strip())
 executable = backend / ('VerseViewBackend.exe' if os.name == 'nt' else 'VerseViewBackend')
 with tempfile.TemporaryDirectory(prefix='vv-native-smoke-') as directory:
     profile = Path(directory)/'QA'/'Backend'

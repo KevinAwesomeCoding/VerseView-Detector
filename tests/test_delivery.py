@@ -680,6 +680,9 @@ class DeliveryTests(unittest.TestCase):
         tk.Frame(mid, height=20).grid(row=1, column=0, sticky='ew')
         tk.Frame(mid, height=300).grid(row=2, column=0, sticky='nsew')
         tk.Frame(mid, height=122).grid(row=3, column=0, sticky='ew')
+        # Windows maps the native window via Configure events, not just Tk's
+        # idle geometry queue. Process those events before measuring frames.
+        root.update()
         root.update_idletasks()
         self.assertEqual(mid.winfo_height(), 470)
         # Two headers, manual entry and a few visible history/transcript lines.
