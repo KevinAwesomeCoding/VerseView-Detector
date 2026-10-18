@@ -1,5 +1,29 @@
 # Verse delivery investigation
 
+## 2026-10-18: standalone credential sync and integration milestone complete
+
+Preview 0.11.0 performs opt-in saved-URL credential sync through a bounded
+worker, with a stopped-state commit, storage-conflict checks, atomic settings
+save and private content-addressed Google credential files. Only the shared
+legacy credential whitelist is accepted. The renderer receives fixed status,
+count/time and an explicit Pull action; credentials/URLs remain private.
+
+Final runtime source `b2555dd5228d08930e5f5448aa922c9429eb7699`, Mac build
+`2026-10-18T15-00-34-620Z-b2555dd5-darwin-arm64`, passes 149 Python and
+48 Node tests, eight packaged suites/252 layout cases and extracted archive
+inventory/signature/frozen startup checks. Native CI 39124243081 passes Windows
+x64 and both Mac architectures. Initial CI 39123891275 failed an uncanonicalized
+credential-path assertion in the test harness; the corrected path comparison
+passes and original evidence is retained.
+
+The standalone integration milestone is complete within this isolated scope:
+**6 of 8 milestones, 75%**. Sync downloads were fake; recognition, provider,
+Discord and presentation services were not contacted. Physical microphone/STT,
+visible output, semantic queue and graphical Windows acceptance stay deferred.
+Installation/update/rollback readiness is next, using a separate target/profile.
+The original intermittent incident remains unresolved. Exact artifacts, secret
+handling, cleanup and limits: [sync verification](../desktop-preview/SYNC_VERIFICATION.md).
+
 ## 2026-10-18: standalone Discord bot controls
 
 Preview 0.10.0 runs the existing Discord bot through the owned frozen backend,

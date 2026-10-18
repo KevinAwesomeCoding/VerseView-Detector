@@ -3,8 +3,8 @@
 A separate Electron dashboard for macOS and Windows, with local engine events,
 **optional start/stop, candidate approval, and non-secret settings**, and a separate sample demo. The
 Python companion owns microphone/STT, settings, and guarded delivery. Version
-0.10.0 bundles the native backend, recovery, warmup, watcher suggestions, editable outline notes and owned Discord bot controls; external-detector observation still works.
-The installed detector remains unchanged. This milestone is still in progress.
+0.11.0 bundles the native backend, recovery, warmup, watcher suggestions, editable outline notes, owned Discord bot controls and private credential sync; external-detector observation still works.
+The installed detector remains unchanged. Physical acceptance and installation readiness remain open.
 
 ## Standalone companion (milestone 6 in progress)
 
@@ -32,10 +32,20 @@ app open for cleanup. Unexpected exits are visible and are never automatically
 restarted. Explicit relaunch selects the new owned PID and leaves recognition
 stopped. Closing an external detector feed remains outside this ownership.
 
-Compatibility is incomplete. Saved settings sync settings still block
-Start with a named migration message. Their values are retained; they are not
-silently disabled. Full legacy feature parity remains open. Session transcripts/optional summaries have a headless save path,
+Session transcripts/optional summaries have a headless save path,
 but real cloud summary behavior has not been physically verified.
+
+A saved private `settings_sync_url` opts into a credential pull when the bundled
+host launches. Recognition stays stopped. Settings also provides **Pull
+credentials now** while recognition and the bot are stopped. The pull accepts
+the existing credential whitelist and portable Google service-account formats;
+speech, presentation and other settings retain their saved values. Credentials
+and URLs stay in the private profile. During a pull, Start and settings saves
+are unavailable. A download failure or intervening operator edit retains the
+previous settings. Quitting discards an unfinished pull. Configure or remove
+the URL only in the private backend settings file while the host is closed.
+See [settings sync verification](SYNC_VERIFICATION.md) for exact artifacts,
+fake-download coverage and remaining live-service checks.
 
 The saved opt-in `local_llm_warm_at_start` now works on explicit Start, using
 configured local-role clients and production request parameters on one
@@ -95,8 +105,9 @@ builds through the existing `verseview.spec`, smoke-tests the frozen host withou
 audio, packages it with Electron, and checks the resulting runtime archive. No
 native Windows companion was built or executed on this Mac. Native Windows and
 ARM64/Intel Mac CI build/smoke/archive checks now pass; graphical Windows execution is
-still unverified. Milestone 6 is not
-yet counted complete. See [standalone verification](STANDALONE_VERIFICATION.md).
+still unverified. See [settings sync verification](SYNC_VERIFICATION.md) for
+the latest complete native integration build, and [standalone verification](STANDALONE_VERIFICATION.md)
+for the earlier core implementation.
 
 ### Session recovery
 
@@ -262,8 +273,9 @@ controls and passive watcher suggestions remain in the legacy detector.
 
 With desktop controls enabled, Settings contains microphone selection, primary
 language/provider, dual STT and secondary language/provider, the detector Bible
-translation, and the VerseVIEW control URL. Devices come from the existing
-GUI's cached inventory; refresh microphones in that window if hardware changes.
+translation, and the VerseVIEW control URL. The bundled host enumerates devices
+on normal launch; close and relaunch the host after hardware changes. An external
+legacy GUI feed uses that GUI's cached inventory.
 No device enumeration, microphone capture, provider check or connection probe
 is triggered by editing or saving this form.
 
@@ -287,10 +299,11 @@ atomically, so a write failure retains the prior file. Failed application of a
 change restores the legacy widgets and leaves the dashboard draft available.
 The form locks when the backend is running, closed, stale, or unavailable.
 
-The packaged Electron app still needs the separately running updated Python
-backend. Credentials, audio format/timing, safety settings, integrations,
-advanced provider options, and passive watcher suggestions remain in the
-legacy window until a later milestone.
+Native standalone packages include their Python backend. Frontend-only packages
+still need an updated external detector. Credentials, audio format/timing,
+safety settings and advanced provider options remain in the private backend
+settings file; secrets are not editable in the dashboard. Watcher suggestions,
+outline notes and bot controls have dedicated dashboard panels.
 
 ## Platforms and glass
 
@@ -330,9 +343,10 @@ npm run package -- --platform=win32 --arch=arm64
 ```
 
 The official packager creates uniquely named output directories under `out/`,
-with source provenance beside the app and inside `app.asar`. Only the shell,
+with source provenance beside the app and inside `app.asar`. The shell,
 frontend, local icons/licenses, runtime manifest, and build record are packaged;
-the Python engine, credentials, production settings, and tests are excluded.
+native builds additionally include the frozen companion outside `app.asar`.
+Credentials, production settings and test files are excluded from the runtime.
 Mac builds made on Mac receive verified local ad-hoc test signatures. Windows
 builds are unsigned. These are development applications, not public installers.
 
@@ -378,6 +392,7 @@ See [standalone verification](STANDALONE_VERIFICATION.md) for current results,
 [control verification](CONTROL_VERIFICATION.md) for stage three,
 [observer verification](OBSERVER_VERIFICATION.md) for stage two, and
 [the milestone-one report](VERIFICATION.md) for the original desktop preview.
-Current engineering milestone: finish the remaining standalone backend feature migration.
-Physical end-to-end checks on both platforms remain deferred; the new settings
-have isolated automated verification only.
+Current engineering work covers installation, update and rollback readiness.
+Physical end-to-end checks on both platforms remain deferred; the new interface
+has isolated automated verification only. The progress plan records completion
+criteria and the remaining release gates.
