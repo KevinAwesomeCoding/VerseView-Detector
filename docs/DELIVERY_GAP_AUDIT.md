@@ -99,14 +99,27 @@ overwrite the whole current profile just because the hashes differ. The user's
 2-minute battery / 10-minute adapter display preferences are permanent choices,
 not detector-test settings to revert.
 
+## Later checkpoint: partial Mac access, not a full acceptance pass
+
+The user subsequently approved the resolved Mac target (VerseVIEW 11 #2, localhost
+50010, Main Screen 1 1920×1080, isolated) and granted microphone permission.
+Packaged 0.11.1 connected real hardware/Deepgram on a fresh process. No recognized
+text was obtained while the user was away; synthetic acoustic playback also
+produced none. Current human speech/visible verse/manual/queue/bilingual and Windows
+physical gates remain open. Native Mac scrolling/zoom and windowed bilingual outline
+checks passed. A proven misleading closed-feed status was corrected and verified in
+packaged 0.11.2. See the [checkpoint](../desktop-preview/PHYSICAL_VERIFICATION.md).
+Current production settings stayed unchanged; preview-only changes were restored.
+This does not close the older production-profile restoration question.
+
 ## Exact remaining user-action gates
 
-1. **Resume physical acceptance (milestone 7).** The user must lift the physical
-   test deferral and provide access to an unlocked Mac and an interactive Windows
-   machine, their actual microphones/configured providers and VerseVIEW output.
-   Resolve the current instance, URL, monitor and audience isolation. Obtain one
-   scoped approval covering the resolved presentation target/test set before
-   issuing commands; the old port/display description is historical evidence.
+1. **Resume physical acceptance (milestone 7).** Arrange coordinated spoken input
+   on the already approved isolated Mac target and access to an interactive Windows
+   machine, actual microphones/configured providers and VerseVIEW output. Existing
+   Mac approval covers the planned tests while routing remains the same. Resolve
+   Windows instance, URL, monitor and isolation, and obtain scoped approval for that
+   target before presentation commands. Reconfirm either target if routing changes.
 2. **One coordinated acceptance session on each OS.** Launch an identified
    native packaged artifact, record non-secret settings and process/build ID,
    and use actual spoken input. Speak John 3:16, then John 3:17 about four seconds

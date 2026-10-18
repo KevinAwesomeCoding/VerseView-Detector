@@ -1,5 +1,33 @@
 # Verse delivery investigation
 
+## 2026-10-18: partial native microphone/UI checkpoint and status correction
+
+The user lifted the Mac physical deferral, confirmed VerseVIEW 11 #2 at localhost
+50010 / Main Screen 1 1920×1080 isolated, and accepted microphone permission.
+Actual packaged 0.11.1 opened the physical MacBook microphone and connected its
+configured Deepgram Nova-3 provider on a fresh process. An earlier permission-time
+PortAudio open failed; both outcomes are retained. With the user away, a single
+OS-generated speaker playback attempt produced zero recognized text/candidates.
+Speech, within-ten-second delivery, duplicates, manual approval, bilingual STT,
+semantic release and actual VerseVIEW verse output therefore remain unverified.
+This is not evidence of a downstream delivery failure or an explanation of the
+original intermittent incident.
+
+Computer Use verified settings scrolling, native window zoom/restore and a real
+windowed outline child showing English/Malayalam operator-entered notes. Glass
+selected native mode, but see-through comparison is unverified. It reproduced a
+closed/stale backend announcement that incorrectly claimed connection. The minimal
+0.11.2 frontend correction passes 149 Python / 50 Node checks, packaged crash/close/
+relaunch tests, package/archive verification and a normal packaged Computer Use
+close check. Native CI 39147884519 passes Windows x64, Mac ARM64 and Intel Mac,
+including extracted archives; Windows graphical acceptance stays open. No
+recognition was started in that final check. Production settings
+are unchanged, temporary preview settings restored byte-for-byte, all owned hosts
+closed, installed detector intact. The earlier Oct 4 cleanup question is separate.
+Progress remains **6/8, 75%**. See the [physical checkpoint report](../desktop-preview/PHYSICAL_VERIFICATION.md)
+for exact artifacts, times, failures, screenshots, cleanup and remaining gates.
+
+
 ## 2026-10-18: final read-only incident and acceptance gap audit
 
 The [consolidated gap audit](DELIVERY_GAP_AUDIT.md) rechecked historical/current

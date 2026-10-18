@@ -3,7 +3,7 @@
 A separate Electron dashboard for macOS and Windows, with local engine events,
 **optional start/stop, candidate approval, and non-secret settings**, and a separate sample demo. The
 Python companion owns microphone/STT, settings, and guarded delivery. Version
-0.11.1 bundles the native backend, recovery, warmup, watcher suggestions, editable outline notes, owned Discord bot controls and private credential sync; external-detector observation still works.
+0.11.2 bundles the native backend, recovery, warmup, watcher suggestions, editable outline notes, owned Discord bot controls and private credential sync; external-detector observation still works.
 The installed detector remains unchanged. Physical acceptance and installation readiness remain open.
 
 ## Standalone companion (milestone 6 in progress)
@@ -401,6 +401,7 @@ See [standalone verification](STANDALONE_VERIFICATION.md) for current results,
 Isolated Mac installation, update, uninstall/reinstall and rollback checks now
 pass. Windows graphical lifecycle and production signing/distribution acceptance
 remain open. See [installation verification](INSTALLATION_VERIFICATION.md).
-Physical end-to-end checks on both platforms remain deferred; the new interface
-has isolated automated verification only. The progress plan records completion
-criteria and the remaining release gates.
+Mac physical acceptance is partial: a real microphone/provider connection and
+native window/outline checks are recorded in [the physical checkpoint](PHYSICAL_VERIFICATION.md).
+Human speech, actual verse output and Windows graphical acceptance remain open.
+The progress plan records completion criteria and the remaining release gates.
