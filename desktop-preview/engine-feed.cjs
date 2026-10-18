@@ -130,6 +130,7 @@ class EngineFeedReader {
     this.clock = clock;
     this.interval = interval;
     this.selected = null;
+    this.selectedOwner = null;
     this.snapshot = { connection: 'waiting', message: 'Waiting for an observer-enabled detector', sources: [], session: null };
     this.signature = '';
     this.cache = new Map();
@@ -203,12 +204,18 @@ class EngineFeedReader {
     // A remote Start may rotate the owned backend's session too. Follow only
     // the same process/control with a matching acknowledged bot request.
     const previous=this.snapshot?.session;
+    if(this.selectedOwner?.session_id!==this.selected)this.selectedOwner=null;
     if(this.selected&&previous?.session_id===this.selected&&previous.host?.managed){
-      const replacement=active.find(item=>item.session_id!==this.selected&&item.pid===previous.pid
-        &&item.control?.id===previous.control?.id&&item.host?.managed&&item.control.results.some(result=>
+      this.selectedOwner={session_id:this.selected,pid:previous.pid,controlId:previous.control?.id};
+    }
+    const owner=this.selectedOwner;
+    if(this.selected&&owner){
+      const replacement=active.find(item=>item.session_id!==this.selected&&item.pid===owner.pid
+        &&item.control?.id===owner.controlId&&item.host?.managed&&item.control.results.some(result=>
           result.action==='start'&&result.outcome==='requested'&&item.control.bot?.events.some(event=>
-            event.id===result.id&&event.route==='/start'&&event.http_status===200)));
-      if(replacement)this.selected=replacement.session_id;
+            event.id===result.id&&event.route==='/start'&&event.http_status===200
+            &&Date.parse(event.timestamp)>=Date.parse(item.started_at))));
+      if(replacement){this.selected=replacement.session_id;this.selectedOwner={...owner,session_id:this.selected};}
     }
 
     const sources = sessions.map(session => ({ session_id: session.session_id, pid: session.pid, origin: session.origin,

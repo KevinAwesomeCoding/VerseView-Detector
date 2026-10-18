@@ -109,7 +109,9 @@ test('selected owned backend follows only an acknowledged bot Start with the sam
   await reader.poll();await reader.select(f.sessionId);
   const id='e'.repeat(32);fixture.session_id='d'.repeat(32);fixture.revision++;
   fixture.control.results=[{id,action:'start',outcome:'requested'}];
-  fixture.control.bot={status:'online',events:[{id,route:'/start',http_status:200,timestamp:new Date(f.now).toISOString(),outcome:'acknowledged'}]};
+  fixture.control.bot={status:'online',events:[]};
+  fs.writeFileSync(file,JSON.stringify(fixture));assert.equal((await reader.poll()).connection,'unavailable');
+  fixture.revision++;fixture.control.bot.events=[{id,route:'/start',http_status:200,timestamp:new Date(f.now).toISOString(),outcome:'acknowledged'}];
   fs.writeFileSync(file,JSON.stringify(fixture));assert.equal((await reader.poll()).selected,fixture.session_id);
   fixture.session_id='c'.repeat(32);fixture.revision++;fixture.control.bot.events=[];
   fs.writeFileSync(file,JSON.stringify(fixture));assert.equal((await reader.poll()).connection,'unavailable');
