@@ -1,5 +1,31 @@
 # Verse delivery investigation
 
+## 2026-10-18: manual approval test prepared — temporary setting pending restoration
+
+After the user confirmed closing the backend, its PID68579 had exited. The private
+preview profile confidence threshold was recorded and raised **0.75 → 0.90** to
+reproduce a held short contextual phrase. `manual_confirm=true` and `verify=true`
+remain enabled. The production profile was not changed. Full private settings
+backup: `/tmp/verseview-manual-approval-20261018/settings.before.json` (600 file,
+700 folder). Preparation record: local
+`desktop-preview/test-results/manual-approval-20261018/preparation.json`.
+
+An isolated existing-engine/fake-browser check established that John3:17 context
+plus “Verse eighteen.” produces `MANUAL_CONFIRM_REQUIRED` for John3:18 at0.75
+confidence below0.90, without a browser command. This is preparation only, not a
+real microphone/manual-approval pass. Computer Use relaunched the same packaged
+0.11.2 host PID **72557**, recognition **stopped**. Saved context is staged for
+Start after acknowledged restore request `0bb72037106c474eaace8d83de7ece7e`;
+nothing was presented and no microphone was opened by this preparation.
+
+The user will Start, say the full John3:17 phrase to establish context, then
+“Verse eighteen.” and approve the held reference. **RESTORATION PENDING:** after
+the user stops this test, restore only `confidence`0.90→0.75 in the preview
+profile, preserving other edits; confirm actual current values before restoring.
+Do not report temporary settings restored until that is verified. No runtime
+code/build changed. Manual physical result is still unverified; progress75%6/8.
+
+
 ## 2026-10-18 15:12 CDT: rapid spoken transition and duplicate repeat pass
 
 The user repeated the planned English test in the same normal packaged **0.11.2**
