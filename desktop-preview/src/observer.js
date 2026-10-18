@@ -15,14 +15,19 @@
   const streamName = (session, role) => role === 'unknown' ? 'Unattributed stream'
     : `${role === 'primary' ? 'Primary' : 'Secondary'} · ${languageNames[session.config.streams[role].language] || session.config.streams[role].language || 'Language not reported'}`;
 
+  function reconcileCommand(snapshot){
+    const control=snapshot.session?.control;
+    if(command?.hostId&&control&&command.hostId!==control.id)command=null;
+    const result=control?.results.find(item=>item.id===command?.id);
+    if(result)command={...result,hostId:control.id};
+  }
+
   function controlPanel(snapshot) {
     const session = snapshot.session;
     const control = session?.control;
     if (!control) return '<p class="vv-caption vv-observer-note">Read-only connection. Engine controls remain in the existing detector.</p>';
-    if (command?.hostId && command.hostId !== control.id) command = null;
+    reconcileCommand(snapshot);
     const enabled = snapshot.connection === 'connected';
-    const result = control.results.find(item => item.id === command?.id);
-    if (result) command = { ...result, hostId: control.id };
     const disabled = !enabled || command?.outcome === 'submitted';
     const commandLabels = { submitted: 'Request sent', requested: 'Request acknowledged', answered: 'Decision acknowledged', prepared: 'Recovery prepared', discarded: 'Recovery discarded', rejected: 'Request rejected', failed: 'Request failed', unknown: 'Outcome unknown' };
     const notice = command ? `${commandLabels[command.outcome] || command.outcome}. ${command.reason || 'Waiting for the detector to acknowledge.'}` : 'Start uses the existing detector settings. Approval returns to the existing delivery checks.';
@@ -72,6 +77,7 @@
   }
 
   function status(snapshot) {
+    reconcileCommand(snapshot);
     const session = snapshot.session;
     return backendPanel() + `<section class="vv-observer-status" aria-label="Observer connection status" data-connection="${escape(snapshot.connection)}">
       <div><strong>${escape(snapshot.message)}</strong><p class="vv-caption">${session
@@ -135,7 +141,7 @@
     const session=snapshot.session,control=session?.control,bot=control?.bot;
     if(!bot)return '';
     const disabled=snapshot.connection!=='connected'||command?.outcome==='submitted';
-    return `<section class="vv-panel" data-bot-panel aria-label="Discord bot controls"><div class="vv-panel-head"><h2>Discord bot</h2><span class="vv-badge" data-bot-status>${escape(bot.status)}</span></div>
+    return `<section class="vv-panel vv-bot-panel" data-bot-panel aria-label="Discord bot controls"><div class="vv-panel-head"><h2>Discord bot</h2><span class="vv-badge" data-bot-status>${escape(bot.status)}</span></div>
       <p class="vv-caption">${escape(bot.message)}${bot.pid?` · Owned PID ${bot.pid}`:''}</p>
       ${['start_bot','stop_bot'].includes(command?.action)?`<p class="vv-caption" role="status">${escape(command.reason||'Waiting for the detector to acknowledge.')}</p>`:''}
       <p class="vv-caption">${bot.configured?'Private credentials configured.':'Add discord_bot_token to the private backend settings file.'} Start connects Discord; stopping the bot leaves recognition running. Commands control this preview’s backend.</p>
@@ -147,6 +153,7 @@
 
   const testGate = () => '<section class="vv-panel preview-about" aria-label="Sample mode separation"><h2>Sample demo</h2><p class="vv-caption">Sample controls are separate from the detector feed. Switch to Sample demo to run them; the detector feed and its controls remain separate.</p><button type="button" class="vv-btn" data-action="sample-mode">Open sample demo</button></section>';
   function updateRecoveryAvailability(snapshot) {
+    reconcileCommand(snapshot);
     const session = snapshot.session, control = session?.control;
     for(const button of document.querySelectorAll('[data-engine-action="start_bot"],[data-engine-action="stop_bot"]')){
       button.disabled=snapshot.connection!=='connected'||session?.session_id!==button.dataset.engineSession||!control?.actions.includes(button.dataset.engineAction)||command?.outcome==='submitted';

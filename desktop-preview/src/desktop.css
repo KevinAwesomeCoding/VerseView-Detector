@@ -62,6 +62,9 @@ html,body{margin:0;min-height:100%;background:transparent}
 .vv-suggestions{padding:16px 20px;margin-block:16px}
 .vv-suggestions summary{cursor:pointer;font-weight:700}
 .vv-suggestions-body{padding-top:12px;max-height:360px;overflow:auto;overflow-wrap:anywhere}
+#verseview-prototype .vv-bot-panel{padding:18px;margin-top:20px}
+#verseview-prototype .vv-bot-panel .vv-panel-head{padding:0 0 12px}
+#verseview-prototype [data-bot-events]{margin-top:12px;max-height:240px;overflow:auto;overflow-wrap:anywhere}
 .vv-suggestions .vv-pending-candidate{margin-top:12px}
 .vv-outline{padding:20px}
 .vv-outline textarea{display:block;box-sizing:border-box;width:100%;min-height:220px;margin:10px 0;padding:14px;border:1px solid var(--vv-border);border-radius:12px;resize:vertical;font:inherit;line-height:1.6;color:var(--vv-ink);background:var(--vv-panel)}
