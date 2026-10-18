@@ -28,7 +28,10 @@ function relocateLinks(source, destination, manifest) {
 function verify(root, platform, arch) {
   const value = JSON.parse(fs.readFileSync(path.join(root, 'backend-manifest.json'), 'utf8'));
   if (value.platform !== platform || value.arch !== arch) throw new Error('Native backend platform/architecture mismatch');
-  if (JSON.stringify(Object.entries(inventory(root)).sort()) !== JSON.stringify(Object.entries(value.files).sort())) throw new Error('Backend file integrity mismatch');
+  const actual = inventory(root);
+  const different = [...new Set([...Object.keys(actual), ...Object.keys(value.files)])]
+    .filter(file => JSON.stringify(actual[file]) !== JSON.stringify(value.files[file]));
+  if (different.length) throw new Error(`Backend file integrity mismatch: ${different.slice(0, 10).join(', ')}`);
   return value;
 }
 module.exports = { inventory, verify, relocateLinks };
