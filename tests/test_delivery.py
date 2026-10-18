@@ -111,6 +111,20 @@ class DeliveryTests(unittest.TestCase):
             self.assertTrue(self.send('John 3:17'))
         self.assertEqual(self.ctrl.driver.execute_script.call_count, 4)
 
+    def test_desktop_bot_keeps_real_worship_guard_and_candidate_acceptance(self):
+        from types import SimpleNamespace
+        from desktop_bot_bridge import ManagedBotBridge
+        bridge=ManagedBotBridge(SimpleNamespace(engine=engine,stop_requested=threading.Event()))
+        with patch.object(engine,'_controller',self.ctrl):
+            engine.WORSHIP_MODE=True
+            self.assertFalse(bridge.present('John 3:19','a'*32))
+            self.assertTrue(any(e['candidate_id']=='a'*32 and e['stage']=='worship' and e['outcome']=='SUPPRESSED' for e in self.events()))
+            self.assertFalse(self.events('COMMAND_ACCEPTED'))
+            engine.WORSHIP_MODE=False
+            self.assertTrue(bridge.present('John 3:20','b'*32))
+            accepted=self.events('COMMAND_ACCEPTED')[-1]
+            self.assertEqual((accepted['candidate_id'],accepted['source'],accepted['stream']),('b'*32,'DISCORD-MANUAL','unknown'))
+
     def test_desktop_watcher_manual_send_reaches_actual_delivery_and_keeps_worship_guard(self):
         from types import SimpleNamespace
         from desktop_suggestions import WatcherInbox

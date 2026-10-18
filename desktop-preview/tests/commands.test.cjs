@@ -101,6 +101,35 @@ test('control decoder exposes only bounded typed fields', t => {
   assert.deepEqual(decoded.control.actions, ['start']);
   assert.equal(JSON.stringify(decoded).includes('private'), false);
 });
+test('selected owned backend follows only an acknowledged bot Start with the same process/control',async t=>{
+  const f=setup(t),reader=new EngineFeedReader({directory:f.directory,clock:()=>f.now});
+  const fixture={...f.session,schema:1,revision:1,origin:'engine',host:{managed:true},started_at:new Date(f.now).toISOString(),
+    config:{streams:{primary:{enabled:true},secondary:{enabled:false}}},transcripts:[],delivery_events:[]};
+  const file=path.join(f.directory,'engine-123.json');fs.writeFileSync(file,JSON.stringify(fixture));
+  await reader.poll();await reader.select(f.sessionId);
+  const id='e'.repeat(32);fixture.session_id='d'.repeat(32);fixture.revision++;
+  fixture.control.results=[{id,action:'start',outcome:'requested'}];
+  fixture.control.bot={status:'online',events:[{id,route:'/start',http_status:200,timestamp:new Date(f.now).toISOString(),outcome:'acknowledged'}]};
+  fs.writeFileSync(file,JSON.stringify(fixture));assert.equal((await reader.poll()).selected,fixture.session_id);
+  fixture.session_id='c'.repeat(32);fixture.revision++;fixture.control.bot.events=[];
+  fs.writeFileSync(file,JSON.stringify(fixture));assert.equal((await reader.poll()).connection,'unavailable');
+});
+test('bot controls require a current explicit capability and never accept renderer credentials',async t=>{
+  const f=setup(t);f.session.control.actions=['start_bot'];
+  await assert.rejects(f.client.submit(f.sessionId,'stop_bot'));
+  const result=await f.client.submit(f.sessionId,'start_bot');
+  const request=JSON.parse(fs.readFileSync(path.join(f.inbox,`command-${result.id}.json`)));
+  assert.deepEqual(Object.keys(request).sort(),['id','control_id','session_id','action','created_at'].sort());
+  f.session.control.actions=[];await assert.rejects(f.client.submit(f.sessionId,'start_bot'));
+});
+test('bot decoder omits credentials and private log text and bounds command history',t=>{
+  const f=setup(t),fixture={...f.session,schema:1,revision:1,origin:'engine',started_at:new Date(f.now).toISOString(),
+    config:{streams:{primary:{enabled:true},secondary:{enabled:false}}},transcripts:[],delivery_events:[]};
+  fixture.control.bot={status:'online',configured:true,pid:456,token:'SECRET',log:'SECRET',proof:{frozen:true,token:'SECRET'},
+    events:Array.from({length:40},()=>({id:'c'.repeat(32),route:'/goto',timestamp:new Date(f.now).toISOString(),http_status:200,outcome:'acknowledged',ref:'SECRET'}))};
+  const bot=decodeSnapshot(fixture).control.bot;
+  assert.equal(bot.events.length,32);assert.equal(bot.pid,456);assert.equal(JSON.stringify(bot).includes('SECRET'),false);
+});
 test('suggestion sends target only an active available identity, not a renderer reference',async t=>{
   const f=setup(t),identity='d'.repeat(32);
   f.session.control.state='running';f.session.control.actions=['send_suggestion'];

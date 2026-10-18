@@ -13,7 +13,7 @@ def verification_time():
 
 
 @contextmanager
-def isolated_engine(engine):
+def isolated_engine(engine, silent=False):
     controller = engine.VerseController()
     controller.driver = Mock()
     controller.driver.switch_to = Mock()
@@ -22,6 +22,9 @@ def isolated_engine(engine):
     controller.vv_version = 'verseview11'
     controller.connect = Mock(return_value=True)
     async def speech(secondary):
+        if silent:
+            await engine.stop_event.wait()
+            return
         if secondary:
             await asyncio.sleep(.2)
             handler = engine.create_sarvam_transcript_handler(controller, True, '[QA-ML]', engine.parse_ml)

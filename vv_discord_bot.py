@@ -36,6 +36,11 @@ import logging
 import urllib.error
 import urllib.parse
 import urllib.request
+from desktop_bot_process import bridge_request, emit, owned_lifetime, verification_main
+
+if os.getenv('VV_BOT_VERIFY') == '1':
+    verification_main()
+    raise SystemExit(0)
 
 # Force UTF-8 on Windows BEFORE logging is configured.
 # cp1252 (Windows default pipe encoding) cannot encode emoji and will crash.
@@ -84,17 +89,7 @@ def _bridge(endpoint: str, params: Optional[dict] = None, timeout: int = 8) -> T
     Returns (http_status_code, body_text).
     Never raises — connection errors return (0, error_message).
     """
-    url = BRIDGE_BASE + endpoint
-    if params:
-        url += "?" + urllib.parse.urlencode(params)
-    try:
-        with urllib.request.urlopen(url, timeout=timeout) as resp:
-            return resp.status, resp.read().decode("utf-8", errors="replace")
-    except urllib.error.HTTPError as e:
-        body = e.read().decode("utf-8", errors="replace")
-        return e.code, body
-    except Exception as exc:
-        return 0, str(exc)
+    return bridge_request(BRIDGE_BASE, endpoint, params, timeout)
 
 
 async def _call(endpoint: str, params: Optional[dict] = None, timeout: int = 8) -> Tuple[int, str]:
@@ -283,6 +278,8 @@ def build_client() -> discord.Client:
         logger.info(f"Discord bot ready -- logged in as {client.user} (id={client.user.id})")
         logger.info(f"Bridge target: {BRIDGE_BASE}")
         print("[OK] Discord bot online as " + str(client.user), flush=True)
+        emit('ready',verification=False,frozen=bool(getattr(sys,'frozen',False)),
+             guiImported='vv_gui' in sys.modules or 'tkinter' in sys.modules)
 
     return client
 
@@ -305,6 +302,7 @@ async def _run_forever():
             await client.start(TOKEN)
         except discord.LoginFailure:
             logger.error("Invalid Discord token — check VV_BOT_TOKEN. Not retrying.")
+            emit('error',reason='authentication')
             return
         except Exception as exc:
             logger.error(f"Bot session ended ({exc}) — reconnecting in {backoff}s")
@@ -325,7 +323,7 @@ async def _run_forever():
 
 if __name__ == "__main__":
     try:
-        asyncio.run(_run_forever())
+        asyncio.run(owned_lifetime(_run_forever) if os.getenv('VV_MANAGED_BOT')=='1' else _run_forever())
     except KeyboardInterrupt:
         pass
     except Exception as exc:

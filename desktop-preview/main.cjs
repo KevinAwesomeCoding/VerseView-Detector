@@ -130,6 +130,10 @@ ipcMain.handle('preview:edit-outline',(event,sessionId,revision,text)=>{
   if(!trusted(event))throw new Error('Untrusted preview sender');
   return commands.submit(sessionId,'edit_outline',undefined,undefined,undefined,undefined,{revision,text});
 });
+ipcMain.handle('preview:bot-control',(event,sessionId,action)=>{
+  if(!trusted(event)||!['start_bot','stop_bot'].includes(action))throw new Error('Invalid bot control');
+  return commands.submit(sessionId,action);
+});
 ipcMain.handle('preview:outline-output-state',event=>{
   if(!trusted(event))throw new Error('Untrusted preview sender');return outlineOutput.state();
 });

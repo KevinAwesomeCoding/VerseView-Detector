@@ -95,8 +95,7 @@ def configuration(values, config, engine, confirm):
 
 def start_problem(values):
     # Keep unsupported settings intact and make their limitations explicit.
-    unsupported = [('discord_bot_token', 'Discord bot'),
-                   ('settings_sync_url', 'settings sync')]
+    unsupported = [('settings_sync_url', 'settings sync')]
     active = [name for key, name in unsupported if values.get(key)]
     if active:
         return 'Standalone migration still needs: ' + ', '.join(active) + '. Settings were retained; use the current detector for these features.'
@@ -199,7 +198,7 @@ class EngineRuntime:
         try:
             if self.verification:
                 from backend_verification import isolated_engine
-                with isolated_engine(self.engine): self.loop.run_until_complete(self._main(values))
+                with isolated_engine(self.engine, silent=values.get('qa_bot_silence') is True): self.loop.run_until_complete(self._main(values))
             else:
                 self.loop.run_until_complete(self._main(values))
             self.warmup.cancel()
@@ -222,6 +221,7 @@ class EngineRuntime:
             self.suggestions.cancel()
             self.outline.cancel()
             self.suggestions.join()
+            if hasattr(self,'bot'):self.bot.drain_delivery()
             pending = asyncio.all_tasks(self.loop)
             for task in pending: task.cancel()
             if pending: self.loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
@@ -278,10 +278,13 @@ class BackendHost:
         self.clock = clock
         self.store = ProfileStore(config, self.state, lambda: self.devices)
         self.settings = DesktopSettings(self.store.read, self.store.apply)
+        from desktop_bot import DesktopBot
+        self.bot = DesktopBot(runtime,self.store.load)
+        runtime.bot = self.bot
         self.publisher.begin({'streams': {}}, origin='callback-replay' if runtime.verification else 'engine')
         self.control = DesktopControl(publisher, self.state, self.start, runtime.stop, enabled=True, settings=self.settings,
                                       panic=runtime.panic, recovery=getattr(runtime, 'recovery', None),
-                                      suggestions=getattr(runtime, 'suggestions', None), outline=getattr(runtime, 'outline', None))
+                                      suggestions=getattr(runtime, 'suggestions', None), outline=getattr(runtime, 'outline', None),bot=self.bot)
 
     def state(self):
         return 'closed' if self.closing else self.runtime.state()
@@ -317,6 +320,7 @@ class BackendHost:
 
     def close(self):
         self.closing = True
+        if not self.bot.close():return False
         self.control.close()
         self.runtime.stop()
         if self.runtime.thread: self.runtime.thread.join(timeout=25)
@@ -379,4 +383,8 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    if os.getenv('VV_RUN_BOT') == '1':
+        import runpy
+        runpy.run_path(str(Path(getattr(sys,'_MEIPASS',Path(__file__).parent))/'vv_discord_bot.py'),run_name='__main__')
+    else:
+        main()

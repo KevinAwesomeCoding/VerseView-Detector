@@ -125,10 +125,22 @@
 
   function settings(snapshot) {
     const session = snapshot.session;
-    return status(snapshot) + window.detectorSettings.render(snapshot) + `<section class="vv-panel preview-about" aria-label="Observer setup"><h2>Local detector connection</h2>
+    return status(snapshot) + botPanel(snapshot) + window.detectorSettings.render(snapshot) + `<section class="vv-panel preview-about" aria-label="Observer setup"><h2>Local detector connection</h2>
       <p class="vv-caption">${session?.host?.managed ? "This dashboard owns the bundled backend and its private preview profile. The installed detector has not been replaced." : "The preview reads structured snapshots from your local VerseView/Observer folder. The installed detector has not been replaced."}</p>
       <p class="vv-caption">An updated detector must be started with <code>VERSEVIEW_OBSERVER=1</code> to publish the feed. Also set <code>VERSEVIEW_DESKTOP_CONTROL=1</code> to enable start/stop and candidate decisions. Without that opt-in the connection stays read only. Speech and connection settings can be saved above while stopped; credentials and advanced options remain in the detector.</p>
       <p class="vv-caption">${session ? `Session ${escape(session.session_id)} · Bible setting: ${escape(session.config.bible_translation || 'not reported')}` : 'No observer session selected.'}</p></section>`;
+  }
+
+  function botPanel(snapshot){
+    const session=snapshot.session,control=session?.control,bot=control?.bot;
+    if(!bot)return '';
+    const disabled=snapshot.connection!=='connected'||command?.outcome==='submitted';
+    return `<section class="vv-panel" data-bot-panel aria-label="Discord bot controls"><div class="vv-panel-head"><h2>Discord bot</h2><span class="vv-badge" data-bot-status>${escape(bot.status)}</span></div>
+      <p class="vv-caption">${escape(bot.message)}${bot.pid?` · Owned PID ${bot.pid}`:''}</p>
+      ${['start_bot','stop_bot'].includes(command?.action)?`<p class="vv-caption" role="status">${escape(command.reason||'Waiting for the detector to acknowledge.')}</p>`:''}
+      <p class="vv-caption">${bot.configured?'Private credentials configured.':'Add discord_bot_token to the private backend settings file.'} Start connects Discord; stopping the bot leaves recognition running. Commands control this preview’s backend.</p>
+      <div class="vv-control-actions">${['start_bot','stop_bot'].map(action=>`<button type="button" class="vv-btn" data-engine-action="${action}" data-engine-session="${session.session_id}" ${disabled||!control.actions.includes(action)?'disabled':''}>${action==='start_bot'?'Start bot':'Stop bot'}</button>`).join('')}</div>
+      ${bot.events.length?`<details data-bot-events><summary>Recent bot commands · ${bot.events.length}</summary>${bot.events.slice().reverse().map(row=>`<p class="vv-caption">${time(row.timestamp)} · ${escape(row.route)} · ${escape(row.outcome)} (${row.http_status})<br><code>${row.id}</code></p>`).join('')}<p class="vv-caption">Command acknowledgement does not establish visible presentation. Inspect delivery activity and the output.</p></details>`:''}</section>`;
   }
 
   function outline(snapshot){return status(snapshot)+controlPanel(snapshot)+window.liveOutline.render(snapshot);}
@@ -136,6 +148,9 @@
   const testGate = () => '<section class="vv-panel preview-about" aria-label="Sample mode separation"><h2>Sample demo</h2><p class="vv-caption">Sample controls are separate from the detector feed. Switch to Sample demo to run them; the detector feed and its controls remain separate.</p><button type="button" class="vv-btn" data-action="sample-mode">Open sample demo</button></section>';
   function updateRecoveryAvailability(snapshot) {
     const session = snapshot.session, control = session?.control;
+    for(const button of document.querySelectorAll('[data-engine-action="start_bot"],[data-engine-action="stop_bot"]')){
+      button.disabled=snapshot.connection!=='connected'||session?.session_id!==button.dataset.engineSession||!control?.actions.includes(button.dataset.engineAction)||command?.outcome==='submitted';
+    }
     for (const button of document.querySelectorAll('[data-recovery-revision]')) {
       button.disabled = snapshot.connection !== 'connected' || session?.session_id !== button.dataset.engineSession ||
         control?.state !== 'stopped' || control?.recovery?.revision !== button.dataset.recoveryRevision ||
@@ -172,6 +187,7 @@
       const submitted = action === 'start' ? await window.verseviewDesktop.startEngine(sessionId)
         : action === 'stop' ? await window.verseviewDesktop.stopEngine(sessionId)
         : action === 'panic' ? await window.verseviewDesktop.clearOutput(sessionId)
+        : ['start_bot','stop_bot'].includes(action) ? await window.verseviewDesktop.botControl(sessionId,action)
         : action === 'send_suggestion' ? await window.verseviewDesktop.sendSuggestion(sessionId, button.dataset.suggestionId)
         : ['restore_session', 'discard_session'].includes(action) ? await window.verseviewDesktop.recoverSession(sessionId, button.dataset.recoveryRevision, action === 'restore_session')
         : await window.verseviewDesktop.resolveCandidate(sessionId, button.dataset.candidate, action === 'approve');

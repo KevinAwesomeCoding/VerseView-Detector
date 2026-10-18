@@ -17,10 +17,11 @@ function feedDirectory({ platform, appData, home }) {
 function decodeControl(value) {
   if (!value || !/^[a-f0-9]{32}$/.test(value.id) || !['stopped', 'starting', 'running', 'stopping', 'closed'].includes(value.state)) return null;
   return { id: value.id, state: value.state,
-    actions: Array.isArray(value.actions) ? value.actions.filter(action => ['start', 'stop', 'save_settings', 'panic', 'restore_session', 'discard_session', 'send_suggestion', 'edit_outline'].includes(action)) : [],
+    actions: Array.isArray(value.actions) ? value.actions.filter(action => ['start', 'stop', 'save_settings', 'panic', 'restore_session', 'discard_session', 'send_suggestion', 'edit_outline', 'start_bot', 'stop_bot'].includes(action)) : [],
     recovery: decodeRecovery(value.recovery),
     suggestions: decodeSuggestions(value.suggestions),
     outline:decodeOutline(value.outline),
+    bot:decodeBot(value.bot),
     settings: settingsPolicy.decode(value.settings),
     pending: (Array.isArray(value.pending) ? value.pending : []).slice(0, 16)
       .filter(item => item && text(item.candidate_id, 128) && text(item.reference, 128))
@@ -30,6 +31,17 @@ function decodeControl(value) {
     results: (Array.isArray(value.results) ? value.results : []).slice(-32)
       .filter(item => item && /^[a-f0-9]{32}$/.test(item.id))
       .map(item => ({ id: item.id, action: text(item.action, 16), outcome: text(item.outcome, 24), reason: text(item.reason, 200) })) };
+}
+
+function decodeBot(value){
+  if(!value||!['stopped','starting','online','stopping','failed'].includes(value.status))return null;
+  return {status:value.status,message:text(value.message,400),configured:value.configured===true,
+    verification:value.verification===true,pid:Number.isSafeInteger(value.pid)&&value.pid>0?value.pid:null,
+    proof:value.proof?{frozen:value.proof.frozen===true,guiImported:value.proof.guiImported===true}:null,
+    events:(Array.isArray(value.events)?value.events:[]).slice(-32)
+      .filter(row=>row&&/^[a-f0-9]{32}$/.test(row.id||'')&&['/start','/stop','/status','/version','/goto','/next','/prev','/present','/clear','/close'].includes(row.route)&&timestamp(row.timestamp))
+      .map(row=>({id:row.id,route:row.route,timestamp:row.timestamp,http_status:Number.isInteger(row.http_status)?row.http_status:0,
+        outcome:row.outcome==='acknowledged'?'acknowledged':'rejected'}))};
 }
 
 function decodeOutline(value){
@@ -187,6 +199,16 @@ class EngineFeedReader {
         if (this.selected === transition.sessionId) this.selected = replacement.session_id;
         this.commandTransition = null;
       } else if (this.clock() > transition.deadline) this.commandTransition = null;
+    }
+    // A remote Start may rotate the owned backend's session too. Follow only
+    // the same process/control with a matching acknowledged bot request.
+    const previous=this.snapshot?.session;
+    if(this.selected&&previous?.session_id===this.selected&&previous.host?.managed){
+      const replacement=active.find(item=>item.session_id!==this.selected&&item.pid===previous.pid
+        &&item.control?.id===previous.control?.id&&item.host?.managed&&item.control.results.some(result=>
+          result.action==='start'&&result.outcome==='requested'&&item.control.bot?.events.some(event=>
+            event.id===result.id&&event.route==='/start'&&event.http_status===200)));
+      if(replacement)this.selected=replacement.session_id;
     }
 
     const sources = sessions.map(session => ({ session_id: session.session_id, pid: session.pid, origin: session.origin,

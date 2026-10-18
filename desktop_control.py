@@ -14,6 +14,7 @@ import uuid
 from desktop_settings import SettingsError
 from desktop_recovery import RecoveryError
 from desktop_outline import OutlineError
+from desktop_bot import BotError
 
 _HEX = re.compile(r"^[a-f0-9]{32}$")
 
@@ -23,13 +24,14 @@ def now_seconds():
 
 
 class DesktopControl:
-    def __init__(self, publisher, state, start, stop, *, enabled=False, clock=now_seconds, settings=None, panic=None, recovery=None, suggestions=None, outline=None):
+    def __init__(self, publisher, state, start, stop, *, enabled=False, clock=now_seconds, settings=None, panic=None, recovery=None, suggestions=None, outline=None, bot=None):
         self.publisher, self.state = publisher, state
         self.start, self.stop, self.enabled, self.clock = start, stop, enabled, clock
         self.settings, self.panic = settings, panic
         self.recovery = recovery
         self.suggestions = suggestions
         self.outline = outline
+        self.bot = bot
         self.control_id = uuid.uuid4().hex
         self.directory = publisher.directory / f"control-{os.getpid()}-{self.control_id}"
         self.session_id = None
@@ -70,9 +72,14 @@ class DesktopControl:
                 actions.append('save_settings')
             if state in ('stopped', 'running') and self.outline:
                 actions.append('edit_outline')
+            bot=self.bot.snapshot() if self.bot else None
+            if state!='closed' and bot:
+                if bot['status'] in ('stopped','failed') and bot['configured']:actions.append('start_bot')
+                if bot['status'] in ('starting','online'):actions.append('stop_bot')
             self.publisher.emit('control', value={
                 'id': self.control_id, 'state': state, 'actions': actions, 'settings': settings, 'recovery': recovery, 'suggestions': suggestions,
                 'outline': self.outline.snapshot() if self.outline else None,
+                'bot': bot,
                 'pending': [{key: item[key] for key in ('candidate_id', 'reference', 'confidence', 'stream', 'source')}
                             for item in self.pending.values()], 'results': self.results[-32:]})
 
@@ -127,7 +134,10 @@ class DesktopControl:
             if valid:
                 try:
                     state = self.state()
-                    if action == 'start' and state == 'stopped':
+                    if action in ('start_bot','stop_bot') and self.bot and action in self.publisher.snapshot()['control']['actions']:
+                        (self.bot.start if action=='start_bot' else self.bot.stop)()
+                        outcome,reason='requested','Bot lifecycle requested; observe its status. Recognition is unchanged.'
+                    elif action == 'start' and state == 'stopped':
                         outcome = 'requested' if 'start' in self.publisher.snapshot()['control']['actions'] and self.start() else 'failed'
                         reason = 'Start requested; observe engine status' if outcome == 'requested' else 'Start did not begin; check the detector'
                     elif (action in ('restore_session', 'discard_session') and state == 'stopped' and self.recovery
@@ -164,11 +174,11 @@ class DesktopControl:
                             reason = 'Candidate is no longer awaiting approval'
                     else:
                         reason = 'Action unavailable in the current engine state'
-                except (SettingsError, RecoveryError, OutlineError) as exc:
+                except (SettingsError, RecoveryError, OutlineError, BotError) as exc:
                     outcome, reason = 'rejected', str(exc)
                 except Exception:
                     outcome, reason = 'failed', 'Detector control failed; inspect the detector log'
-            self.results.append(dict(id=command_id, action=action if action in ('start', 'stop', 'approve', 'reject', 'save_settings', 'panic', 'restore_session', 'discard_session', 'send_suggestion', 'edit_outline') else 'unknown',
+            self.results.append(dict(id=command_id, action=action if action in ('start', 'stop', 'approve', 'reject', 'save_settings', 'panic', 'restore_session', 'discard_session', 'send_suggestion', 'edit_outline', 'start_bot', 'stop_bot') else 'unknown',
                                      outcome=outcome, reason=reason))
             self.results = self.results[-32:]
             self.refresh()

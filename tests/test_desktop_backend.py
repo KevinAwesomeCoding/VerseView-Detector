@@ -77,12 +77,13 @@ class BackendTests(unittest.TestCase):
         self.assertEqual(configuration(values, settings, engine, callback)['language'], 'hi')
 
     def test_unsupported_features_and_missing_keys_are_explicit(self):
-        for key in ('discord_bot_token', 'settings_sync_url'):
+        for key in ('settings_sync_url',):
             value = {**settings.DEFAULTS, key: True}
             self.assertIn('migration still needs', start_problem(value))
         self.assertIn('credentials are missing', start_problem(settings.DEFAULTS))
         values = {**settings.DEFAULTS, 'deepgram_api_key': 'present'}
         self.assertEqual(start_problem(values), '')
+        self.assertEqual(start_problem({**values,'discord_bot_token':'private'}), '')
         self.assertEqual(start_problem({**values, 'local_llm_warm_at_start': True}), '')
         self.assertEqual(start_problem({**values, 'watcher_enabled': True}), '')
         self.assertEqual(start_problem({**values, 'live_points_llm_enabled': True}), '')
@@ -96,7 +97,7 @@ class BackendTests(unittest.TestCase):
         original = self.path.read_bytes()
         publisher = ObserverPublisher(True, self.temporary.name)
         runtime = SimpleNamespace(verification=True, state=Mock(return_value='stopped'), start=Mock(return_value=True),
-                                  stop=Mock(), panic=Mock(), thread=None, error='', stop_requested=threading.Event())
+                                  stop=Mock(), panic=Mock(), thread=None, error='', stop_requested=threading.Event(),profile=Path(self.temporary.name))
         host = BackendHost(settings, publisher, runtime, [{'id': 0, 'label': 'Synthetic input'}])
         self.addCleanup(host.close)
         runtime.start.assert_not_called()
@@ -118,7 +119,7 @@ class BackendTests(unittest.TestCase):
         self.path.write_text(json.dumps(values))
         publisher = ObserverPublisher(True, self.temporary.name)
         runtime = SimpleNamespace(verification=True, state=Mock(return_value='stopped'), start=Mock(),
-                                  stop=Mock(), panic=Mock(), thread=None, error='', stop_requested=threading.Event())
+                                  stop=Mock(), panic=Mock(), thread=None, error='', stop_requested=threading.Event(),profile=Path(self.temporary.name))
         host = BackendHost(settings, publisher, runtime, [{'id': 0, 'label': 'Synthetic input'}])
         self.addCleanup(host.close)
         import datetime
@@ -131,7 +132,7 @@ class BackendTests(unittest.TestCase):
     def test_host_boot_never_starts_recognition_and_close_stops_only_owned_runtime(self):
         publisher = ObserverPublisher(True, self.temporary.name)
         runtime = SimpleNamespace(verification=True, state=Mock(return_value='stopped'), start=Mock(return_value=True),
-                                  stop=Mock(), panic=Mock(), thread=None, error='', stop_requested=threading.Event())
+                                  stop=Mock(), panic=Mock(), thread=None, error='', stop_requested=threading.Event(),profile=Path(self.temporary.name))
         host = BackendHost(settings, publisher, runtime, [{'id': 0, 'label': 'Synthetic input'}])
         self.addCleanup(publisher.close)
         runtime.start.assert_not_called()
@@ -143,7 +144,7 @@ class BackendTests(unittest.TestCase):
     def test_unexpected_start_error_never_exports_raw_exception(self):
         publisher = ObserverPublisher(True, self.temporary.name)
         runtime = SimpleNamespace(verification=True, state=Mock(return_value='stopped'), start=Mock(side_effect=ValueError('private-key')),
-                                  stop=Mock(), panic=Mock(), thread=None, error='', stop_requested=threading.Event())
+                                  stop=Mock(), panic=Mock(), thread=None, error='', stop_requested=threading.Event(),profile=Path(self.temporary.name))
         host = BackendHost(settings, publisher, runtime, [{'id': 0, 'label': 'Synthetic input'}])
         self.addCleanup(host.close)
         with patch('desktop_backend.logging.getLogger') as logger:
