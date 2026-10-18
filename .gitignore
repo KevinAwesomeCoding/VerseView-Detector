@@ -44,4 +44,5 @@ desktop-preview/test-results/
 
 !verseview.spec
 !tests/test_desktop_backend.py
+!tests/test_service_schedule.py
 desktop-preview/backend-build/

@@ -33,11 +33,22 @@ restarted. Explicit relaunch selects the new owned PID and leaves recognition
 stopped. Closing an external detector feed remains outside this ownership.
 
 Compatibility is incomplete. Saved live-outline display, watcher suggestions,
-Discord bot, smart schedule, settings sync, or local-model warmup settings block
+Discord bot, settings sync, or local-model warmup settings block
 Start with a named migration message. Their values are retained; they are not
 silently disabled. Session restoration and full legacy feature parity also
 remain open. Session transcripts/optional summaries have a headless save path,
 but real cloud summary behavior has not been physically verified.
+
+Smart Schedule now shares the legacy local timetable: Saturday Malayalam;
+Sunday English from 09:10, Malayalam from 10:40 and Hindi from 16:40. In the
+standalone preview it resolves when you explicitly press Start. English uses
+one stream; Malayalam/Hindi add an English secondary stream using the legacy
+secondary-provider rules. The primary provider and delivery guards stay as
+saved. Incompatible scheduled provider choices stop with a message rather than
+being silently changed. The effective language is reported in the host notice
+and configured speech streams; saved settings remain unchanged. No service
+timer or saved auto-start starts recognition in this preview. This migration
+has unit checks; a rebuilt packaged schedule check is recorded separately.
 
 A native Windows companion must be built on Windows. The updated preview workflow
 builds through the existing `verseview.spec`, smoke-tests the frozen host without

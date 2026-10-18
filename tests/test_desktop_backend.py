@@ -77,12 +77,53 @@ class BackendTests(unittest.TestCase):
         self.assertEqual(configuration(values, settings, engine, callback)['language'], 'hi')
 
     def test_unsupported_features_and_missing_keys_are_explicit(self):
-        for key in ('live_points_llm_enabled', 'watcher_enabled', 'discord_bot_token', 'settings_sync_url', 'smart_schedule'):
+        for key in ('live_points_llm_enabled', 'watcher_enabled', 'discord_bot_token', 'settings_sync_url'):
             value = {**settings.DEFAULTS, key: True}
             self.assertIn('migration still needs', start_problem(value))
         self.assertIn('credentials are missing', start_problem(settings.DEFAULTS))
         values = {**settings.DEFAULTS, 'deepgram_api_key': 'present'}
         self.assertEqual(start_problem(values), '')
+
+    def test_schedule_resolves_at_explicit_start_without_saving_or_changing_guards(self):
+        values, _ = self.store.load()
+        values.update(smart_schedule=True, language='English', stt_engine='sarvam',
+                      sarvam_api_key='private', secondary_stt_engine='assemblyai',
+                      assemblyai_api_key='private', dedup_window=91)
+        self.path.write_text(json.dumps(values))
+        original = self.path.read_bytes()
+        publisher = ObserverPublisher(True, self.temporary.name)
+        runtime = SimpleNamespace(verification=True, state=Mock(return_value='stopped'), start=Mock(return_value=True),
+                                  stop=Mock(), panic=Mock(), thread=None, error='', stop_requested=threading.Event())
+        host = BackendHost(settings, publisher, runtime, [{'id': 0, 'label': 'Synthetic input'}])
+        self.addCleanup(host.close)
+        runtime.start.assert_not_called()
+        import datetime
+        from service_schedule import effective_start_settings
+        saturday = datetime.datetime(2026, 10, 17, 12)
+        with patch('desktop_backend.effective_start_settings', side_effect=lambda raw: effective_start_settings(raw, saturday)):
+            self.assertTrue(host.start())
+        effective = runtime.start.call_args.args[0]
+        self.assertEqual((effective['language'], effective['secondary_language']), ('Malayalam', 'en'))
+        self.assertTrue(effective['dual_stt_enabled'])
+        self.assertEqual(effective['dedup_window'], 91)
+        self.assertEqual(self.path.read_bytes(), original)
+        self.assertIn('Smart Schedule selected Malayalam', host.notice)
+
+    def test_schedule_incompatible_primary_provider_stays_stopped(self):
+        values, _ = self.store.load()
+        values.update(smart_schedule=True, language='English', stt_engine='deepgram')
+        self.path.write_text(json.dumps(values))
+        publisher = ObserverPublisher(True, self.temporary.name)
+        runtime = SimpleNamespace(verification=True, state=Mock(return_value='stopped'), start=Mock(),
+                                  stop=Mock(), panic=Mock(), thread=None, error='', stop_requested=threading.Event())
+        host = BackendHost(settings, publisher, runtime, [{'id': 0, 'label': 'Synthetic input'}])
+        self.addCleanup(host.close)
+        import datetime
+        from service_schedule import effective_start_settings
+        with patch('desktop_backend.effective_start_settings', side_effect=lambda raw: effective_start_settings(raw, datetime.datetime(2026, 10, 17))):
+            self.assertFalse(host.start())
+        runtime.start.assert_not_called()
+        self.assertIn('supported primary language', host.notice)
 
     def test_host_boot_never_starts_recognition_and_close_stops_only_owned_runtime(self):
         publisher = ObserverPublisher(True, self.temporary.name)

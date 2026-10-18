@@ -2828,25 +2828,8 @@ class VerseViewApp(ctk.CTk):
     # ──────────────────────────────────────────────────────────
     def _get_scheduled_language(self):
         """Return the language string that matches the current day/time, or None."""
-        now = datetime.datetime.now()
-        wd  = now.weekday()  # 0=Mon … 5=Sat, 6=Sun
-        t   = now.time()
-
-
-        if wd == 5:  # Saturday → Malayalam
-            return "Malayalam"
-
-
-        if wd == 6:  # Sunday — pick the LATEST threshold that has passed
-            if t >= datetime.time(16, 40):
-                return "Hindi"
-            if t >= datetime.time(10, 40):
-                return "Malayalam"
-            if t >= datetime.time(9, 10):
-                return "English"
-
-
-        return None  # weekday or too early — no auto-language
+        from service_schedule import scheduled_language
+        return scheduled_language(datetime.datetime.now())
 
 
     def _apply_schedule_dual_stt(self, lang: str):

@@ -18,6 +18,7 @@ import signal
 import sys
 import threading
 import time
+from service_schedule import effective_start_settings
 
 
 class BackendError(ValueError):
@@ -92,7 +93,7 @@ def start_problem(values):
     # Keep unsupported settings intact and make their limitations explicit.
     unsupported = [('live_points_llm_enabled', 'live outline display'),
                    ('watcher_enabled', 'watcher suggestions'), ('discord_bot_token', 'Discord bot'),
-                   ('smart_schedule', 'smart schedule'), ('settings_sync_url', 'settings sync'),
+                   ('settings_sync_url', 'settings sync'),
                    ('local_llm_warm_at_start', 'local model warmup')]
     active = [name for key, name in unsupported if values.get(key)]
     if active:
@@ -213,14 +214,17 @@ class BackendHost:
 
     def start(self):
         values, _ = self.store.load()
+        values, scheduled = effective_start_settings(values)
+        schedule_notice = ('Smart Schedule selected ' + scheduled +
+                           (' with English secondary. ' if scheduled != 'English' else ' only. ')) if scheduled else ''
         try:
             from desktop_settings import project, validate_changes, SettingsError
             validate_changes(project(values), project(values), self.devices)
             result = self.runtime.start(values, self.config, self.confirm)
-            self.notice = 'Engine start requested; device/provider readiness is reported separately.'
+            self.notice = schedule_notice + 'Engine start requested; device/provider readiness is reported separately.'
             return result
         except (BackendError, SettingsError) as exc:
-            self.notice = str(exc)
+            self.notice = schedule_notice + str(exc)
             return False
         except Exception:
             logging.getLogger(__name__).exception("Backend configuration failed")
