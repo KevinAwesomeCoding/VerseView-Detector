@@ -72,8 +72,18 @@ function decodeSnapshot(value, now = Date.now()) {
       timestamp: item.timestamp, stage: text(item.stage, 64), outcome: text(item.outcome, 64), reason: text(item.reason, 400) }));
   return { schema: 1, session_id: value.session_id, pid: value.pid, origin: value.origin,
     started_at: value.started_at, updated_at: value.updated_at, revision: value.revision,
-    host: value.host?.managed === true ? { managed: true, verification: value.host.verification === true, notice: text(value.host.notice, 500) } : null,
+    host: value.host?.managed === true ? { managed: true, verification: value.host.verification === true,
+      notice: text(value.host.notice, 500), warmup: decodeWarmup(value.host.warmup) } : null,
     engine_state: text(value.engine_state, 64), config, streams, transcripts, delivery_events, control: decodeControl(value.control) };
+}
+
+function decodeWarmup(value) {
+  if (!value || !['off', 'skipped', 'running', 'complete', 'failed', 'cancelled', 'busy'].includes(value.status)) return null;
+  return { status: value.status, total: Number.isSafeInteger(value.total) ? Math.min(4, Math.max(0, value.total)) : 0,
+    roles: (Array.isArray(value.roles) ? value.roles : []).slice(0, 4)
+      .filter(row => row && ['verse', 'outline', 'summary', 'watcher'].includes(row.role) && ['warmed', 'failed'].includes(row.status))
+      .map(row => ({ role: row.role, status: row.status,
+        elapsed_seconds: Number.isFinite(row.elapsed_seconds) ? Math.min(86400, Math.max(0, row.elapsed_seconds)) : 0 })) };
 }
 
 class EngineFeedReader {

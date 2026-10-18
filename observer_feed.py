@@ -109,9 +109,10 @@ class ObserverPublisher:
                 data["delivery_events"].append(row)
                 data["delivery_events"] = data["delivery_events"][-192:]
             elif kind == "host":
+                from desktop_warmup import public_status
                 value = values.get("value", {})
                 safe = {"managed": value.get("managed") is True, "verification": value.get("verification") is True,
-                        "notice": _text(value.get("notice"), 500)}
+                        "notice": _text(value.get("notice"), 500), "warmup": public_status(value.get("warmup"))}
                 if data.get("host") == safe:
                     return
                 data["host"] = safe

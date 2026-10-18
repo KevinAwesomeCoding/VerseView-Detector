@@ -1867,7 +1867,7 @@ def warm_local_llm_model(endpoint: str = "", model: str = "", timeout: float = 4
                   f"role={role or 'generic'}, keep_alive={_keep_alive}")
 
 
-def warm_all_local_llm_roles() -> list:
+def warm_all_local_llm_roles(clients=None, cancelled=None, on_result=None) -> list:
     """Warm every role currently routed to the local LLM, using the SAME
     already-built clients the live pipeline uses AND that role's REAL
     production temperature/max_tokens/num_ctx (LOCAL_LLM_ROLE_REQUEST_PARAMS).
@@ -1880,12 +1880,18 @@ def warm_all_local_llm_roles() -> list:
     event loop or the CustomTkinter main thread. A slow/cold model here delays
     nothing but this one warmup pass.
 
-    Returns a list of (role, ok, message, elapsed_seconds) — never raises.
+    Returns a list of (role, ok, message, elapsed_seconds). The desktop host
+    can supply a captured client map, cancellation between roles and a result
+    callback. The GUI's default no-argument behavior is unchanged.
     """
     results = []
-    if not _local_llm_available():
-        return results
-    for role, client in sorted(local_llm_clients.items()):
+    if clients is None:
+        if not _local_llm_available():
+            return results
+        clients = dict(local_llm_clients)
+    for role, client in sorted(clients.items()):
+        if cancelled and cancelled():
+            break
         _p = local_llm_role_request_params(role)
         _max_tokens = _p["max_tokens"] if _p["max_tokens"] is not None else 16
         _num_ctx    = _p.get("num_ctx")
@@ -1914,6 +1920,8 @@ def warm_all_local_llm_roles() -> list:
             logger.warning(f"🔥 Local LLM warmup failed: role={role} model={client.model!r} "
                            f"elapsed={elapsed:.2f}s status={kind} — {e}")
             results.append((role, False, f"{client.model}: {e}", elapsed))
+        if on_result:
+            on_result(results[-1])
     return results
 
 

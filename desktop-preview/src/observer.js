@@ -47,7 +47,18 @@
     const value = window.previewShell.getBackend();
     const busy = ['starting', 'closing'].includes(value.status);
     const session = window.previewShell.getObserver().session;
-    return `<section class="vv-backend-status" aria-label="Bundled backend status"><div><strong>${value.status === 'unavailable' ? 'External detector connection' : 'Standalone backend preview'}</strong><p class="vv-caption">${escape(value.status === 'unavailable' ? 'This build has no native companion. An updated external detector can still publish the feed.' : value.message)}${value.pid ? ` · PID ${value.pid}` : ''}</p>${session?.host?.notice ? `<p class="vv-caption">${escape(session.host.notice)}</p>` : ''}</div><div class="vv-control-actions">${value.owned ? '<button type="button" class="vv-btn" data-backend-action="folder">Open backend settings folder</button><button type="button" class="vv-btn" data-backend-action="close">Close backend</button>' : value.status !== 'unavailable' ? '<button type="button" class="vv-btn" data-backend-action="launch">Launch bundled backend</button>' : ''}${busy ? '<span class="vv-caption">Please wait…</span>' : ''}</div></section>`;
+    return `<section class="vv-backend-status" aria-label="Bundled backend status"><div><strong>${value.status === 'unavailable' ? 'External detector connection' : 'Standalone backend preview'}</strong><p class="vv-caption">${escape(value.status === 'unavailable' ? 'This build has no native companion. An updated external detector can still publish the feed.' : value.message)}${value.pid ? ` · PID ${value.pid}` : ''}</p>${session?.host?.notice ? `<p class="vv-caption">${escape(session.host.notice)}</p>` : ''}${warmupStatus(session?.host?.warmup)}</div><div class="vv-control-actions">${value.owned ? '<button type="button" class="vv-btn" data-backend-action="folder">Open backend settings folder</button><button type="button" class="vv-btn" data-backend-action="close">Close backend</button>' : value.status !== 'unavailable' ? '<button type="button" class="vv-btn" data-backend-action="launch">Launch bundled backend</button>' : ''}${busy ? '<span class="vv-caption">Please wait…</span>' : ''}</div></section>`;
+  }
+
+  function warmupStatus(value) {
+    if (!value || value.status === 'off') return '';
+    const labels = { skipped:'No local model roles are configured for warmup.',
+      running:`Warming local models · ${value.roles.length} of ${value.total} roles finished. Recognition can continue.`,
+      complete:'Local model warmup completed.', failed:'Local model warmup finished with errors. Inspect the private backend log.',
+      cancelled:'Local model warmup stopped. An in-flight request may still finish.',
+      busy:'Warmup skipped for this start while a previous request finishes.' };
+    const roles = { verse:'Verse detection', outline:'Outline', summary:'Summary', watcher:'Watcher' };
+    return `<p class="vv-caption" data-warmup-status="${value.status}" role="status">${escape(labels[value.status])}${value.roles.length ? `<br>${value.roles.map(row => `${roles[row.role]}: ${row.status} (${row.elapsed_seconds.toFixed(1)}s)`).join(' · ')}` : ''}</p>`;
   }
 
   function status(snapshot) {

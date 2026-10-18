@@ -20,6 +20,7 @@ import threading
 import time
 from service_schedule import effective_start_settings
 from desktop_recovery import SessionRecovery, RecoveryError
+from desktop_warmup import SessionWarmup
 
 
 class BackendError(ValueError):
@@ -94,8 +95,7 @@ def start_problem(values):
     # Keep unsupported settings intact and make their limitations explicit.
     unsupported = [('live_points_llm_enabled', 'live outline display'),
                    ('watcher_enabled', 'watcher suggestions'), ('discord_bot_token', 'Discord bot'),
-                   ('settings_sync_url', 'settings sync'),
-                   ('local_llm_warm_at_start', 'local model warmup')]
+                   ('settings_sync_url', 'settings sync')]
     active = [name for key, name in unsupported if values.get(key)]
     if active:
         return 'Standalone migration still needs: ' + ', '.join(active) + '. Settings were retained; use the current detector for these features.'
@@ -122,6 +122,7 @@ class EngineRuntime:
         self.recovery = SessionRecovery(profile)
         self.checkpoint_due = 0
         self.has_started = False
+        self.warmup = SessionWarmup()
 
     def state(self):
         if not self.thread or not self.thread.is_alive(): return 'stopped'
@@ -157,6 +158,7 @@ class EngineRuntime:
 
     def stop(self):
         self.stop_requested.set()
+        self.warmup.cancel()
         if self.loop and self.loop.is_running():
             self.loop.call_soon_threadsafe(self._signal_stop)
 
@@ -166,8 +168,10 @@ class EngineRuntime:
     def _signal_stop(self):
         if self.engine.stop_event: self.engine.stop_event.set()
 
-    async def _main(self):
+    async def _main(self, values):
         # Covers Stop during startup before engine.main has installed stop_event.
+        self.warmup.start(self.engine, bool(values.get('local_llm_warm_at_start')),
+                          stopped=self.stop_requested.is_set)
         task = asyncio.create_task(self.engine.main())
         while not task.done():
             if self.stop_requested.is_set(): self._signal_stop()
@@ -180,14 +184,16 @@ class EngineRuntime:
         try:
             if self.verification:
                 from backend_verification import isolated_engine
-                with isolated_engine(self.engine): self.loop.run_until_complete(self._main())
+                with isolated_engine(self.engine): self.loop.run_until_complete(self._main(values))
             else:
-                self.loop.run_until_complete(self._main())
+                self.loop.run_until_complete(self._main(values))
+            self.warmup.cancel()
             self.stop_requested.set()
             self.checkpoint('stopped')
             if not self.verification:
                 self._save_session(values)
         except Exception:
+            self.warmup.cancel()
             self.checkpoint('error')
             logging.getLogger(__name__).exception('Backend engine or session processing failed')
             self.error = 'Engine or session processing failed. Inspect the private backend log.'
@@ -279,7 +285,8 @@ class BackendHost:
         if hasattr(self.runtime, 'autosave'): self.runtime.autosave()
         self.control.tick()
         self.publisher.emit('host', value={'managed': True, 'notice': self.runtime.error or self.notice,
-                                           'verification': self.runtime.verification})
+                                           'verification': self.runtime.verification,
+                                           'warmup': self.runtime.warmup.snapshot() if hasattr(self.runtime, 'warmup') else None})
 
     def close(self):
         self.closing = True

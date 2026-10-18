@@ -16,7 +16,10 @@ with tempfile.TemporaryDirectory(prefix='vv-recovery-smoke-') as temporary:
     (profile/'settings.json').write_text(json.dumps({'language':'English','stt_engine':'deepgram',
         'deepgram_api_key':'QA-KEY','sarvam_api_key':'QA-KEY','dual_stt_enabled':True,
         'secondary_language':'ml','secondary_stt_engine':'sarvam','manual_confirm':True,
-        'verify':False,'llm_enabled':False,'auto_save_notes':False,'auto_start':True}), encoding='utf-8')
+        'verify':False,'llm_enabled':False,'auto_save_notes':False,'auto_start':True,
+        'local_llm_enabled':True,'local_llm_warm_at_start':True,
+        'local_llm_role_verse':'local','local_llm_role_summary':'local',
+        'local_llm_model':'QA-model','local_llm_auth_token':'SECRET-QA-TOKEN'}), encoding='utf-8')
     child = None
     handles = []
     def wait_for(read, predicate, timeout=30):
@@ -61,6 +64,13 @@ with tempfile.TemporaryDirectory(prefix='vv-recovery-smoke-') as temporary:
         value=launch()
         assert not checkpoint.exists(), 'Idle launch must not create or overwrite a checkpoint'
         command(value,'start')
+        value=wait_for(snapshot,lambda value:value.get('host',{}).get('warmup',{}).get('status')=='failed')
+        warmup=value['host']['warmup']
+        assert warmup['total']==2 and len(warmup['roles'])==2
+        assert {row['role']:row['status'] for row in warmup['roles']}=={'summary':'failed','verse':'warmed'}
+        assert value['control']['state']=='running', 'Warmup errors must not stop recognition'
+        assert any(row['outcome']=='COMMAND_ACCEPTED' for row in value['delivery_events'])
+        assert 'SECRET-' not in json.dumps(value)
         saved=wait_for(lambda:json.loads(checkpoint.read_bytes()),lambda value:value.get('reason')=='autosave',timeout=30)
         assert saved['data']['current_chapter']=='3'
         assert saved['data']['current_verse']=='17'
@@ -83,6 +93,7 @@ with tempfile.TemporaryDirectory(prefix='vv-recovery-smoke-') as temporary:
         assert checkpoint.exists(), 'Restore before Start must retain the original checkpoint'
         print(json.dumps({'result':'PASS','native':os.name,'frozen':True,'autosaveIntervalSeconds':15,
             'engineStringContext':True,'crashCheckpointRetained':True,'restoreOnlyRemainsStopped':True,
+            'warmup':'PASS with slow mocked completions, one private failure, and concurrent delivery',
             'microphoneSTT':'NOT USED - callback replay','presentation':'FAKE CONTROLLER'}))
     finally:
         if child and child.poll() is None:

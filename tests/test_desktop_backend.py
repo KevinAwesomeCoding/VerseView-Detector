@@ -83,6 +83,7 @@ class BackendTests(unittest.TestCase):
         self.assertIn('credentials are missing', start_problem(settings.DEFAULTS))
         values = {**settings.DEFAULTS, 'deepgram_api_key': 'present'}
         self.assertEqual(start_problem(values), '')
+        self.assertEqual(start_problem({**values, 'local_llm_warm_at_start': True}), '')
 
     def test_schedule_resolves_at_explicit_start_without_saving_or_changing_guards(self):
         values, _ = self.store.load()

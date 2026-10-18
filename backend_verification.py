@@ -1,6 +1,7 @@
 """Explicit frozen-backend QA adapter. Never selected for normal recognition."""
 import asyncio
 import datetime as dt
+import time
 from contextlib import contextmanager, ExitStack
 from unittest.mock import Mock, patch
 
@@ -33,6 +34,17 @@ def isolated_engine(engine):
             controller.send_verse('John 3:18', confidence=.2, source='BACKEND-VERIFICATION', stream='secondary')
         await engine.stop_event.wait()
     with ExitStack() as stack:
+        # Explicit QA only: exercise the real warmup loop with synthetic client
+        # completions. Slow calls prove recognition/Stop remain responsive;
+        # the deliberately private failure must never enter dashboard status.
+        def warm_completion(role, **_kwargs):
+            time.sleep(4)
+            if role == 'summary':
+                raise engine.LocalLLMError('auth', 'SECRET-QA-ENDPOINT-KEY')
+            return engine._GroqResponse('OK')
+        for role, client in engine.local_llm_clients.items():
+            stack.enter_context(patch.object(client.chat.completions, 'create',
+                side_effect=lambda _role=role, **kwargs: warm_completion(_role, **kwargs)))
         for name, value in [('VerseController', lambda: controller), ('reconcile_chromedriver_cache', Mock()),
                             ('multi_fetch', Mock(return_value='Isolated verse text')), ('_trigger_atem_keyer', Mock()),
                             ('send_to_discord', Mock()), ('_start_bot_bridge', None),

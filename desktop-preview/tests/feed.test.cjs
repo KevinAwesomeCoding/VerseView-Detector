@@ -107,3 +107,17 @@ test('recovery preview is bounded, attributed and excludes arbitrary saved setti
   assert.deepEqual(decoded.transcripts,[]);
   assert.deepEqual(decoded.delivery_events,[]);
 });
+test('warmup status is typed and drops model, endpoint and raw errors', () => {
+  const value = fixture();
+  value.host = { managed:true, warmup:{status:'failed',total:99,endpoint:'SECRET',roles:[
+    {role:'verse',status:'warmed',elapsed_seconds:2.5,model:'SECRET'},
+    {role:'summary',status:'failed',elapsed_seconds:Infinity,error:'SECRET'},
+    {role:'SECRET',status:'failed',elapsed_seconds:1}]}};
+  const decoded = decodeSnapshot(value, now);
+  assert.deepEqual(decoded.host.warmup,{status:'failed',total:4,roles:[
+    {role:'verse',status:'warmed',elapsed_seconds:2.5},
+    {role:'summary',status:'failed',elapsed_seconds:0}]});
+  assert.equal(JSON.stringify(decoded).includes('SECRET'),false);
+  value.host.warmup.status='SECRET';
+  assert.equal(decodeSnapshot(value,now).host.warmup,null);
+});
