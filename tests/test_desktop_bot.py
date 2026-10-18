@@ -16,6 +16,7 @@ import uuid
 from desktop_bot import DesktopBot, BotError
 from desktop_bot_bridge import ManagedBotBridge, current_reference, stepped_reference
 from desktop_bot_process import owned_lifetime, bridge_request
+from vv_bot_bridge import _BridgeHandler
 from observer_feed import ObserverPublisher
 from desktop_control import DesktopControl
 import vv_streaming_master as engine
@@ -101,6 +102,18 @@ class BotTests(unittest.TestCase):
                 with bridge.delivery():pass
         finally:release.set();worker.join();waiter.join()
         self.assertTrue(drained.is_set())
+
+    def test_explicit_close_keeps_existing_close_behavior_separate_from_clear(self):
+        runtime=SimpleNamespace(state=lambda:'running',stop_requested=threading.Event())
+        bridge=ManagedBotBridge(runtime);bridge.start()
+        try:
+            with patch.dict(os.environ,{'VV_BRIDGE_TOKEN':bridge.token}),\
+                 patch.object(_BridgeHandler,'_handle_close',autospec=True,side_effect=lambda handler,_:handler._send(200,'Closed')) as close,\
+                 patch.object(engine,'remote_clear',return_value=(True,'Cleared')) as clear:
+                base='http://127.0.0.1:'+str(bridge.port)
+                self.assertEqual(bridge_request(base,'/close')[0],200);close.assert_called_once();clear.assert_not_called()
+                self.assertEqual(bridge_request(base,'/clear')[0],200);clear.assert_called_once()
+        finally:bridge.stop()
 
     def test_owned_subprocess_is_opt_in_private_and_stops_on_close(self):
         with tempfile.TemporaryDirectory() as directory:

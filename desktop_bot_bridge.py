@@ -179,7 +179,8 @@ class _ManagedHandler(_BridgeHandler):
                     if not reference or len(reference)>128:self._send(409,'Explicit verse required');return
                     ok=self.bridge.present(reference,self.request_id)
                     self._send(200 if ok else 409,'Verse command accepted; verify the visible output.');return
-                if self.route in ('/clear','/close'):return self._handle_clear({})
+                if self.route=='/clear':return self._handle_clear({})
+                if self.route=='/close':return self._handle_close({})
                 self._send(404,'Unknown action')
         except Exception:
             logging.getLogger(__name__).exception('Owned bot bridge request failed')
