@@ -33,12 +33,16 @@ class DesktopBot:
         self.logger.addHandler(handler)
 
     def snapshot(self):
-        values,_=self.load()
+        try:
+            values,_=self.load();available=True
+        except Exception:
+            values={};available=False
         with self.lock:
             value=dict(status=self.status,message=self.message,configured=bool(str(values.get('discord_bot_token') or '').strip()),
                        pid=self.child.pid if self.child and self.child.poll() is None else None,
                        verification=self.runtime.verification,proof=self.proof)
             bridge=self.bridge
+        if not available:value['message']='Private bot settings are unavailable. Check the backend settings file; an active bot can still be stopped.'
         value['events']=bridge.snapshot() if bridge else []
         return value
 

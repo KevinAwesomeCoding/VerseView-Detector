@@ -152,6 +152,16 @@ class BotTests(unittest.TestCase):
                     self.assertIsNone(bot.thread)
             finally:bot.close();runtime.publisher.close()
 
+    def test_temporary_private_settings_parse_error_does_not_crash_status_or_stop(self):
+        with tempfile.TemporaryDirectory() as directory:
+            runtime=self.runtime(Path(directory));bot=DesktopBot(runtime,Mock(side_effect=ValueError('PRIVATE-JSON-CONTENT')))
+            try:
+                snapshot=bot.snapshot()
+                self.assertEqual(snapshot['status'],'stopped');self.assertFalse(snapshot['configured'])
+                self.assertIn('unavailable',snapshot['message']);self.assertNotIn('PRIVATE-JSON',str(snapshot))
+                bot.stop();self.assertTrue(bot.close())
+            finally:bot.close();runtime.publisher.close()
+
     def test_parent_eof_cancels_owned_sdk_task_and_runs_its_cleanup(self):
         async def run():
             closed=[]
