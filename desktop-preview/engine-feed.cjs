@@ -118,7 +118,8 @@ function decodeSnapshot(value, now = Date.now()) {
     started_at: value.started_at, updated_at: value.updated_at, revision: value.revision,
     host: value.host?.managed === true ? { managed: true, verification: value.host.verification === true,
       notice: text(value.host.notice, 500), warmup: decodeWarmup(value.host.warmup) } : null,
-    engine_state: text(value.engine_state, 64), config, streams, transcripts, delivery_events, control: decodeControl(value.control) };
+    engine_state: text(value.engine_state, 64), history_available: value.history_available === true,
+    config, streams, transcripts, delivery_events, control: decodeControl(value.control) };
 }
 
 function decodeWarmup(value) {
@@ -149,6 +150,36 @@ class EngineFeedReader {
     }
     this.selected = sessionId;
     return this.poll();
+  }
+
+  async transcriptPage(sessionId, offset = 0) {
+    if (!/^[a-f0-9]{32}$/.test(sessionId || '') || !Number.isSafeInteger(offset) || offset < 0
+      || this.snapshot.session?.session_id !== sessionId) throw new Error('Transcript session unavailable');
+    if (!this.snapshot.session.history_available) return { available: false, rows: [], next: offset, complete: true };
+    let handle;
+    try {
+      handle = await fs.promises.open(path.join(this.directory, `transcript-${sessionId}.jsonl`), fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
+      const stat = await handle.stat();
+      if (!stat.isFile() || offset > stat.size) throw new Error('Invalid history');
+      const buffer = Buffer.alloc(512 * 1024);
+      const { bytesRead } = await handle.read(buffer, 0, buffer.length, offset);
+      const end = buffer.subarray(0, bytesRead).lastIndexOf(10) + 1;
+      if (bytesRead === buffer.length && !end) throw new Error('Oversized history record');
+      const rows = buffer.subarray(0, end).toString('utf8').split('\n').filter(Boolean).map(line => {
+        const row = JSON.parse(line);
+        if (!/^[a-f0-9]{32}$/.test(row.id || '')) throw new Error('Invalid transcript identity');
+        if (row.update === true) return { id: row.id, update: true, translation: text(row.translation) };
+        if (!['primary','secondary'].includes(row.stream) || !timestamp(row.timestamp) || row.is_final !== true
+          || typeof row.text !== 'string' || row.text.length > 32768) throw new Error('Invalid transcript');
+        return { id: row.id, stream: row.stream, timestamp: row.timestamp, language: text(row.language,24),
+          text: row.text, translation: text(row.translation), is_final: true };
+      });
+      return { available: true, rows, next: offset + end, complete: offset + bytesRead >= stat.size,
+        pending: end < bytesRead };
+    } catch (error) {
+      if (error.code === 'ENOENT' && offset === 0) return { available: true, rows: [], next: 0, complete: true };
+      throw new Error('Session history could not be read. Recent speech is still available.');
+    } finally { if (handle) await handle.close(); }
   }
 
   async readFile(name) {

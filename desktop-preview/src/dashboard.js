@@ -258,8 +258,10 @@
     const snapshot=window.previewShell.getObserver();
     const next=document.createElement('div');next.className='vv-content';
     next.innerHTML=state.view==='session'?window.observerView.session(snapshot,`vv-${root.querySelector('[data-layout]').dataset.layout}`):state.view==='activity'?window.observerView.activity(snapshot):state.view==='outline'?window.observerView.outline(snapshot):appearance()+window.observerView.settings(snapshot)+desktopInfo();
+    const transcriptScroll=window.transcriptView?.beforePatch() || [];
     const surface=root.querySelector('[data-layout]'),scrollTop=surface.scrollTop;
     patchObserverNode(content,next);
+    window.transcriptView?.afterPatch(transcriptScroll);
     window.detectorSettings?.syncControls();
     window.liveOutline?.syncControls();
     if(globalThis.lucide)lucide.createIcons({attrs:{width:16,height:16}});

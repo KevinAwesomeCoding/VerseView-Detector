@@ -98,6 +98,10 @@ ipcMain.handle('preview:observer', event => {
   if (!trusted(event)) throw new Error('Untrusted preview sender');
   return observer.poll();
 });
+ipcMain.handle('preview:transcript-page', (event, sessionId, offset) => {
+  if (!trusted(event)) throw new Error('Untrusted preview sender');
+  return observer.transcriptPage(sessionId, offset);
+});
 ipcMain.handle('preview:select-observer', (event, sessionId) => {
   if (!trusted(event)) throw new Error('Untrusted preview sender');
   return observer.select(sessionId);

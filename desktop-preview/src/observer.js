@@ -93,7 +93,8 @@
     const language = config?.language || '';
     const name = languageNames[language] || language || `${role === 'primary' ? 'Primary' : 'Secondary'} speech`;
     const label = language === 'ml' ? 'മലയാളം' : name;
-    const lines = session?.transcripts.filter(row => row.stream === role && row.is_final).slice(-4) || [];
+    const full = window.transcriptView?.isFull() === true;
+    const lines = full ? window.transcriptView.rows(session, role) : session?.transcripts.filter(row => row.stream === role && row.is_final).slice(-4) || [];
     const partial = session?.transcripts.filter(row => row.stream === role && !row.is_final).at(-1);
     const lastEvent = session?.delivery_events.filter(row => row.stream === role && row.reference).at(-1);
     const streamState = session?.streams[role]?.state;
@@ -102,7 +103,7 @@
     })[streamState] || 'Waiting for status';
     return `<section class="vv-panel vv-stream vv-observed-stream" data-speech-stream="${role}" aria-label="${escape(name)} observed speech">
       <div class="vv-stream-header"><div><h2 lang="${escape(language || 'und')}">${escape(label)}</h2><p class="vv-stream-provider">${role === 'primary' ? 'Primary' : 'Secondary'} · ${escape(config?.provider || 'Provider not reported')}</p></div><span class="vv-badge">${escape(streamStatus)}</span></div>
-      <div class="vv-stream-results">${lines.length ? lines.map(row => `<div class="vv-transcript-line"><span class="vv-transcript-time">${time(row.timestamp)}</span><p lang="${escape(row.language || 'und')}">${escape(row.text)}</p>${row.translation && row.translation !== row.text ? `<details class="vv-caption"><summary>English translation</summary><p lang="en">${escape(row.translation)}</p></details>` : ''}</div>`).join('') : '<p class="vv-observer-empty">No final transcript received.</p>'}</div>
+      <div class="vv-stream-results ${full ? 'vv-full-transcript' : ''}" ${full ? `data-full-transcript="${role}" tabindex="0" aria-label="${escape(name)} full transcript"` : ''}>${lines.length ? lines.map(row => `<div class="vv-transcript-line"><span class="vv-transcript-time">${time(row.timestamp)}</span><p lang="${escape(row.language || 'und')}">${escape(row.text)}</p>${row.translation && row.translation !== row.text ? `<details class="vv-caption"><summary>English translation</summary><p lang="en">${escape(row.translation)}</p></details>` : ''}</div>`).join('') : '<p class="vv-observer-empty">No final transcript received.</p>'}</div>
       ${partial ? `<div class="vv-partial"><span class="vv-caption">Interim transcript</span><p lang="${escape(partial.language || 'und')}">${escape(partial.text)}</p></div>` : ''}
       <div class="vv-ref-notice">${lastEvent ? `<span><span class="vv-ref-notice-label">Latest reported candidate outcome</span><span class="vv-ref-notice-ref">${escape(lastEvent.reference)}</span></span><span class="vv-badge">${escape(outcome(lastEvent.outcome))}</span>` : '<span class="vv-caption">No reference outcome reported for this stream.</span>'}</div>
     </section>`;
@@ -120,7 +121,7 @@
     const session = snapshot.session;
     const transcripts = `<section class="vv-stream-section" aria-label="Observed speech streams"><div class="vv-dual-grid">${streamPanel(session, 'primary')}${streamPanel(session, 'secondary')}</div></section>`;
     const unknown = session?.transcripts.filter(row => row.stream === 'unknown').slice(-3) || [];
-    return status(snapshot) + controlPanel(snapshot) + (layout.endsWith('focus') ? output(session) + transcripts : transcripts + output(session))
+    return status(snapshot) + controlPanel(snapshot) + (window.transcriptView?.controls(session) || '') + (window.transcriptView?.isFull() ? transcripts : layout.endsWith('focus') ? output(session) + transcripts : transcripts + output(session))
       + (unknown.length ? `<section class="vv-panel vv-observer-unknown"><h2>Unattributed speech</h2>${unknown.map(row => `<p>${escape(row.text)}</p>`).join('')}</section>` : '')
       + `<p class="vv-caption vv-observer-note">${session?.host?.managed ? 'The bundled detector owns recognition and delivery. Advanced queue and presentation options are in its private backend settings file.' : 'The detector owns recognition and delivery. Queue and presentation settings remain in its existing window.'}</p>`;
   }

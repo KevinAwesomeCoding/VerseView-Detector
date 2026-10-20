@@ -44,6 +44,7 @@ class ObserverPublisher:
         self._stop = threading.Event()
         self._thread = None
         self._data = None
+        self._history_pending = []
 
     def begin(self, config, origin="engine"):
         if not self.enabled:
@@ -62,7 +63,7 @@ class ObserverPublisher:
                           "bible_translation": _text(config.get("bible_translation"), 64)},
                           "streams": {role: {"state": "configured" if streams[role]["enabled"] else "disabled",
                                              "last_transcript_at": None} for role in streams},
-                          "transcripts": [], "delivery_events": []}
+                          "transcripts": [], "delivery_events": [], "history_available": True}
         if self._thread is None or not self._thread.is_alive():
             self._stop.clear()
             self._thread = threading.Thread(target=self._run, name="VerseViewObserver", daemon=True)
@@ -90,6 +91,11 @@ class ObserverPublisher:
                 data["transcripts"] = [item for item in data["transcripts"]
                                        if item["is_final"] or item["stream"] != role]
                 data["transcripts"].append(row)
+                if row['is_final']:
+                    full = {**row, 'text': _text(values.get('text'), 32768)}
+                    if len(values.get('text', '')) > 32768:
+                        data['history_available'] = False
+                    self._queue_history(data, full)
                 data["transcripts"] = data["transcripts"][-48:]
                 data["streams"][role] = {"state": "transcript_received", "last_transcript_at": row["timestamp"]}
                 result = row["id"]
@@ -98,6 +104,9 @@ class ObserverPublisher:
                 if row is None:
                     return
                 row["translation"] = _text(values.get("translation"))
+                if row['is_final']:
+                    self._queue_history(data, {'id': row['id'], 'update': True,
+                                               'translation': row['translation']})
             elif kind == "delivery":
                 event = values.get("event", {})
                 # Do not export arbitrary context, credentials, provider metadata or exceptions.
@@ -142,8 +151,26 @@ class ObserverPublisher:
                 if not self._data:
                     return
                 data = copy.deepcopy(self._data)
+                pending = list(self._history_pending)
             data["updated_at"] = _now()
             self.directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+            # Final speech is journaled by the background writer, not STT callbacks.
+            completed = 0
+            try:
+                for session_id, row in pending:
+                    flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND | getattr(os, 'O_NOFOLLOW', 0) | getattr(os, 'O_BINARY', 0)
+                    fd = os.open(self.directory / f'transcript-{session_id}.jsonl', flags, 0o600)
+                    with os.fdopen(fd, 'a', encoding='utf-8', newline='\n') as handle:
+                        handle.write(json.dumps(row, ensure_ascii=False) + '\n')
+                    completed += 1
+            except OSError:
+                # History failure must not suppress the recent live snapshot.
+                data['history_available'] = False
+                with self._lock:
+                    if self._data and self._data['session_id'] == data['session_id']:
+                        self._data['history_available'] = False
+            with self._lock:
+                del self._history_pending[:completed]
             destination = self.directory / f"engine-{os.getpid()}.json"
             temporary = None
             try:
@@ -155,6 +182,12 @@ class ObserverPublisher:
             finally:
                 if temporary and os.path.exists(temporary):
                     os.unlink(temporary)
+
+    def _queue_history(self, data, row):
+        if len(self._history_pending) >= 10000:
+            data['history_available'] = False
+            return
+        self._history_pending.append((data['session_id'], copy.deepcopy(row)))
 
     def _run(self):
         while not self._stop.is_set():

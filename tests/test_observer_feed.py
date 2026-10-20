@@ -106,3 +106,52 @@ class ObserverTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+class TranscriptHistoryTests(unittest.TestCase):
+    def test_private_history_keeps_beginning_across_snapshot_limit_and_sessions(self):
+        with tempfile.TemporaryDirectory() as directory:
+            p=observer_feed.ObserverPublisher(True,directory)
+            try:
+                p.begin(CONFIG);first=p.snapshot()['session_id']
+                ids=[p.emit('transcript',stream='primary' if i%2==0 else 'secondary',text=f'Final {i}',is_final=True) for i in range(120)]
+                p.emit('transcript',stream='primary',text='unfinished',is_final=False)
+                p.emit('translation',transcript_id=ids[-1],translation='Translated final')
+                p.flush()
+                rows=[json.loads(s) for s in (Path(directory)/f'transcript-{first}.jsonl').read_text().splitlines()]
+                finals=[r for r in rows if not r.get('update')]
+                self.assertEqual(len(finals),120)
+                self.assertEqual(finals[0]['text'],'Final 0');self.assertEqual(finals[-1]['text'],'Final 119')
+                self.assertEqual(len(p.snapshot()['transcripts']),48)
+                self.assertEqual(rows[-1]['translation'],'Translated final')
+                self.assertNotIn('unfinished',str(rows))
+                if os.name!='nt':self.assertEqual((Path(directory)/f'transcript-{first}.jsonl').stat().st_mode&0o777,0o600)
+                p.begin(CONFIG);second=p.snapshot()['session_id'];p.emit('transcript',stream='primary',text='New session',is_final=True);p.flush()
+                self.assertNotEqual(first,second)
+                self.assertNotIn('Final 0',(Path(directory)/f'transcript-{second}.jsonl').read_text())
+            finally:p.close()
+
+    def test_long_final_retains_more_than_the_snapshot_preview(self):
+        with tempfile.TemporaryDirectory() as directory:
+            p=observer_feed.ObserverPublisher(True,directory)
+            try:
+                p.begin(CONFIG);p.emit('transcript',stream='primary',text='a'*6000,is_final=True);p.flush()
+                sid=p.snapshot()['session_id'];row=json.loads((Path(directory)/f'transcript-{sid}.jsonl').read_text())
+                self.assertEqual(len(row['text']),6000)
+                self.assertEqual(len(p.snapshot()['transcripts'][0]['text']),2000)
+            finally:p.close()
+
+    def test_history_write_failure_keeps_recent_live_snapshot_available(self):
+        with tempfile.TemporaryDirectory() as directory:
+            p=observer_feed.ObserverPublisher(True,directory)
+            try:
+                p.begin(CONFIG);p._stop.set();p._wake.set();p._thread.join(timeout=2)
+                p.emit('transcript',stream='primary',text='Still visible',is_final=True)
+                with patch('observer_feed.os.open',side_effect=OSError('history unavailable')):
+                    # Isolate the history opener; NamedTemporaryFile uses its own
+                    # opener too, so verify live snapshot in the next successful flush.
+                    try:p.flush()
+                    except OSError:pass
+                p.flush();snapshot=p.snapshot()
+                self.assertEqual(snapshot['transcripts'][-1]['text'],'Still visible')
+                self.assertFalse(snapshot['history_available'])
+            finally:p.close()

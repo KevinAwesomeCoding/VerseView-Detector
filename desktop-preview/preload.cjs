@@ -32,6 +32,7 @@ contextBridge.exposeInMainWorld('verseviewDesktop', Object.freeze({
     return () => ipcRenderer.removeListener('preview:backend-changed', listener);
   },
   observer: () => ipcRenderer.invoke('preview:observer'),
+  transcriptPage: (sessionId, offset) => ipcRenderer.invoke('preview:transcript-page', sessionId, offset),
   selectObserver: sessionId => ipcRenderer.invoke('preview:select-observer', sessionId),
   onObserverChanged: callback => {
     const listener = (_event, value) => callback(value);
