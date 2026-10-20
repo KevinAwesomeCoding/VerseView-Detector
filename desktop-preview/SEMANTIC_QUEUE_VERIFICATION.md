@@ -89,3 +89,16 @@ occur inside the existing180-second queue expiry. Do not force a match, bypass
 guards or inject a transcript. Stop after the bounded attempt and preserve a
 failure at its last confirmed/first failed stage. No successful live queue release
 or original-incident explanation is claimed by these preflight/build checks.
+
+
+### Final routing checkpoint — explicit confirmation pending
+
+Computer Use rechecked the actual VerseVIEW11.0.0#2 display configuration before
+providing live presentation instructions. Main now targets **Screen1 →1470×956**
+(Stage/AUX disabled), changed from the earlier approved1920×1080 configuration.
+The control URL remains localhost50010/control.html. No routing was changed by
+inspection; the VERSES tab was restored. The user has been asked to confirm current
+audience/projector/broadcast/livestream isolation and approve the bounded John3:19
+→queued3:20 test on this resolved screen. Recognition remains stopped; do not
+start the presentation test until that answer arrives. Current preparation state:
+`AWAITING_CURRENT_SCREEN_ISOLATION_APPROVAL`.
