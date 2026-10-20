@@ -1338,3 +1338,14 @@ pre-test manifest exactly (`installed-app-preservation.json`). Temporary detecto
 settings and the build environment remain in place for the pending verification;
 cleanup has not yet been claimed. The separate test bundle remains the artifact
 identified above; committing its source does not rebuild or replace that bundle.
+
+
+## October20,2026 — consumer interface implementation
+
+The separate Electron app now implements normal/Developer Mode and guarded
+one-click backend preparation. Detailed provenance, checks and limits are in
+[CONSUMER_UI_VERIFICATION.md](CONSUMER_UI_VERIFICATION.md). Packaged synthetic
+recovery, approval, bilingual transcript/history and independent scrolling checks
+passed. This introduces no new evidence explaining the original intermittent
+incident and does not claim a new physical microphone/STT or VerseVIEW output pass.
+The original installed detector was not replaced.

@@ -82,3 +82,43 @@ the window. Basic settings and the listening header remained readable. The glass
 header was changed to an opaque theme background to prevent underlying text from
 showing through it. A focused regression also covers preparation after a manual
 backend close while its final observer snapshot is still fresh.
+
+## Delivered artifact and cleanup
+
+Final runtime revision: `52082eda` (neutral “No reference yet” placeholder when
+stopped). Version0.12.0; build ID `2026-10-20T22-20-42-068Z-52082eda-darwin-arm64`.
+Separate app: `~/Applications/VerseView Preview/0.12.0-52082ed/VerseView Desktop Preview.app`.
+Archive SHA256: `3acdb7689a669ae163713e50fc6c2cdc1a6decc5bec9281a6b0273d92af1593d`.
+
+Built with the existing process:
+
+```sh
+python desktop-preview/scripts/build-backend.py
+cd desktop-preview
+npm run package -- --platform=darwin --arch=arm64 --backend="$(cat backend-build/latest.txt)"
+node scripts/verify-latest.cjs
+python scripts/archive-latest.py
+```
+
+The backend was rebuilt after the credential-boundary change and reused for the
+subsequent renderer-only polishing. Final package inventory28 files, ad-hoc signature,
+archive extraction and extracted frozen startup all passed. No dependencies or
+system security/signing settings were installed or changed.
+
+Native CI39506618364 at bda6f4bf passed Windowsx64, MacARM64 and MacIntel. It includes
+the consumer workflow, pinned opaque header and70 desktop tests; the final one-line
+placeholder change is covered locally and awaits its own pushed CI result. These
+native builds do not substitute for Windows physical UI/microphone testing.
+
+Computer Use confirmed the prior normal-profile bda6f4bf package, source URL and
+Focus screen with listening stopped. The Mac locked before the final52082eda
+window could be opened/confirmed; an unlock request is pending. Its package and
+signature have been verified, and the installed final copy is ready to open.
+
+All isolated QA main/backend processes exited. Disposable QA profile, synthetic
+journals and dummy source were removed; no real microphone/cloud/presentation was
+used in those checks. Normal preview settings match the private pre-update backup
+byte-for-byte. Previous app versions remain available. The original detector's
+settings SHA256 remains `e1e2bc2198a328250fe8f3ca1b6b3c3f48928820750916fdc91cada8d26b9760`.
+The original installed detector remains intact. Publisher signing/notarization and
+production replacement remain separate steps requiring the existing approvals.
