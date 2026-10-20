@@ -94,3 +94,11 @@ command path passes; the user explicitly confirms visible 3:17 while held and
 3:18 only after approval. Visible reference behavior passes by user observation.
 Temporary preview confidence90%→75% restored, all other values preserved, production
 profile untouched, recognition stopped. Other physical gates remain; progress75%.
+
+October19 bilingual follow-up: real concurrent English/Deepgram and Malayalam/Sarvam
+transport, source attribution and native panels pass with a recorded limitation:
+Sarvam primary quota errors caused the existing automatic saved-backup fallback.
+No reference commands were generated; bilingual shared delivery/dedup and accurate
+translation are unverified. Recognition stopped; all8temporary key changes restored
+to exact prior semantic values/presence. Review primary quota before another provider
+run. Windows/semantic/remaining gates stay open; progress6/8,75%.

@@ -1,5 +1,80 @@
 # Verse delivery investigation
 
+## 2026-10-19 23:47–23:51 CDT: physical bilingual transport and panel results
+
+The user completed actual spoken English/Malayalam checks in the normal packaged
+0.11.2 app, source `e54b905fabe60ebfcf60f61916a15ab67079bb11`, build
+`2026-10-18T17-04-40-349Z-e54b905f-darwin-arm64`, backend PID **72557**.
+Latest recognition session: `733a9222c7f74894906b89db808d8190`. UTC events are
+October20; local times here are October19, America/Chicago (CDT).
+
+**PASS for concurrent real provider transport, stream attribution and native
+panel rendering, with the Sarvam backup-key limitation below.** The latest
+snapshot contains two primary final transcripts, eight secondary final transcripts,
+and one primary interim. Computer Use observed actual English/Deepgram and
+Malayalam/Sarvam panels, with the configured stream/provider identities retained.
+No transcript injection or synthetic audio was used.
+
+| Local time / stream | Recognized provider output |
+| --- | --- |
+| **23:50:34.896467**, primary/en/Deepgram | “Hello, everyone. This is an English microphone test.” |
+| **23:50:45.037703**, secondary/ml/Sarvam | “എല്ലാവർക്കും സ്വാഗതം ചെയ്യുന്നു.” |
+| **23:51:24.544042**, secondary/ml/Sarvam | “ഇത് മലയാളം ശബ്ദ പരിശോധനയാണ്.” |
+
+Other Malayalam fragments were imperfect, and Sarvam also transcribed the English
+phrase using Malayalam script. Deepgram attempted English phonetics for Malayalam
+speech. Both engines receive the same microphone audio; this is **provider/stream
+separation**, not automatic routing that guarantees only one language appears in
+each pane. Translation accuracy is **UNVERIFIED**: secondary `translation` fields
+repeat the source Malayalam. Do not claim a correct English translation from them.
+Zero candidate/delivery events occurred, as intended for the non-reference test;
+shared bilingual verse delivery/dedup and semantic release were not exercised.
+
+### Preserved provider failure and automatic fallback
+
+The logs show three Start/Stop sequences in this interval. In each, the Sarvam
+primary key connected, then the provider handler reported a **quota error** and
+existing application code automatically selected the previously saved backup key.
+For the latest session: primary connected **23:50:27.474**, quota/fallback logged
+**23:50:27.737**, backup connected **23:50:28.605**. Deepgram connected
+**23:50:26.787**. The successful Malayalam text therefore establishes operation
+with the **backup**, not a healthy primary-key quota. Earlier sequences show the
+same fallback at23:48:05 and23:49:16. No further provider run, account/provider
+substitution or retry was initiated by this inspection. Do not conceal this as an
+unqualified primary-provider pass. Review the primary quota before another run;
+no billing, credentials or retry policy was changed. Cerebras startup still reports
+HTTP402/payment_required separately; semantic-model prerequisites remain unresolved.
+
+### Stop and complete temporary-settings restoration
+
+The last Stop request `d7ab61717f48493a9b90e7a92a27d41e` is acknowledged.
+Inspection confirmed recognition and both streams stopped, no pending candidate.
+All **eight** changed keys were restored to their prior value **and presence**:
+three intentional dual-STT/language/provider changes plus the five default keys
+materialized by the existing settings-save path. All saved values now equal the
+private pre-test baseline; byte-for-byte equality is not claimed because JSON
+serialization differs. Unrelated edits were preserved; confidence0.75 and existing
+manual/verification guards remain unchanged. Primary English/Deepgram, secondary
+disabled, and previous secondary settings are restored for the next explicit Start.
+The stopped UI retains the last bilingual session's text; that is historical output,
+not evidence that recording continues or that temporary settings remain enabled.
+
+Both local/private preparation records are now
+`TEST_INSPECTED_ALL_TEMPORARY_SETTINGS_RESTORED`. Production settings hash remains
+`e1e2bc2198a328250fe8f3ca1b6b3c3f48928820750916fdc91cada8d26b9760`;
+installed app intact. Baseline/full raw log remain private under
+`/tmp/verseview-bilingual-20261019/` (700 folder,600 files). Local snapshots,
+results, filtered provider timeline and CUA captures are under
+`desktop-preview/test-results/bilingual-20261019/`.
+[Actual separated panels](evidence/2026-10-19-bilingual/result-panels.jpg).
+
+No runtime code change, rebuild or full suite was needed. Current bilingual
+transport/UI check is complete within this scope. Windows physical acceptance,
+semantic prerequisites/release, shared bilingual reference behavior and other
+remaining physical/distribution gates retain **6/8,75%** progress. Original
+intermittent incident unresolved. The previous pending restoration entry is resolved.
+
+
 ## Bilingual physical check prepared — restoration pending
 
 The user explicitly approved preparation of a bounded English/Deepgram plus

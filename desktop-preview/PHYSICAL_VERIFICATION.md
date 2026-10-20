@@ -1,5 +1,16 @@
 # Mac physical acceptance checkpoint — October 18, 2026
 
+**October 19 bilingual follow-up:** actual English/Deepgram and Malayalam/Sarvam
+speech reached separate native panels. **Transport/attribution/rendering PASS with
+Sarvam backup-key limitation:** primary reported quota errors and the existing
+app automatically used its saved backup. Translation accuracy, language routing
+and bilingual verse/dedup behavior are not established by this non-reference test.
+No presentation events occurred. Recognition is stopped; all eight temporary
+settings changes are restored to prior semantic value/presence, production unchanged.
+See the [latest investigation entry](../docs/DELIVERY_INVESTIGATION.md) and
+[actual panels](../docs/evidence/2026-10-19-bilingual/result-panels.jpg).
+
+
 **October 19 follow-up:** actual packaged 0.11.2 real speech produced a contextual
 John 3:18 candidate held for30.197168seconds until the user's approval. The same
 candidate then reached browser command acceptance. **Manual hold/approval command
