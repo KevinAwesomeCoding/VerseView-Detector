@@ -1,5 +1,28 @@
 # Verse delivery investigation
 
+## October20: semantic queue blocker corrected; live test prepared
+
+The user explicitly deferred interactive Windows physical testing and asked to
+proceed with semantic release before production installation/signing. Read-only
+inspection found cloud verse matching prefers configured Groq, independently of
+Cerebras billing. A single bounded old-model request returned404; account model
+listing omitted the hardcoded model. Verse-text fetch passed. An available Groq
+model passed positive/negative semantic probes with bounded instruct-mode output.
+The minimal0.11.3 compatibility correction passes151 Python/50 Node tests, native
+CI39393732698 on all3targets, packaged lifecycle, inventory/signature/archive and
+frozen startup checks. No delivery guards or retry policy changed.
+
+The actual rebuilt normal app19755 and frozen backend19764 are running from the
+new artifact, with recognition stopped and saved recovery staged/Start enabled.
+Preview settings equal the restored baseline; production settings unchanged,
+installed app intact. Actual spoken queue release is still UNVERIFIED and requires
+the user's next coordinated test. Windows physical is deferred, not passed; it does
+not block preparing a Mac production candidate. See the
+[semantic preparation report](../desktop-preview/SEMANTIC_QUEUE_VERIFICATION.md)
+for exact provenance, preflight limits and live phrases. Original incident remains
+unresolved; progress6/8,75%.
+
+
 ## 2026-10-19 23:47–23:51 CDT: physical bilingual transport and panel results
 
 The user completed actual spoken English/Malayalam checks in the normal packaged

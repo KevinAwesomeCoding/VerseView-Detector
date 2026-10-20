@@ -5,8 +5,9 @@ Overall: **[████████████░░░░] 75% — 6 of 8 mil
 This is an engineering milestone count, not elapsed-time estimation or a
 production-readiness score. The scope below is the current working baseline;
 changes to scope can change the denominator. Physical acceptance remains partial;
-the user resumed Mac access, then deferred spoken cases while away. macOS and
-Windows remain required throughout.
+the user completed several Mac spoken checks. Cross-platform build support
+continues; interactive Windows physical acceptance is now deferred at the user's
+explicit request, and is not claimed passed.
 
 | # | Milestone | State / completion requirement |
 | --- | --- | --- |
@@ -16,8 +17,8 @@ Windows remain required throughout.
 | 4 | Engine controls and manual decisions | Complete with isolated checks: start/stop requests, lifecycle status, exact-candidate approval/rejection. |
 | 5 | Non-secret settings in the dashboard | Complete with isolated checks: microphone, languages/providers, dual STT, Bible translation and VerseVIEW URL; stopped-engine saves, validation, conflict handling and package verification. |
 | 6 | Standalone backend integration and packaging | Complete within isolated scope: frozen companion/private profile, core lifecycle/settings/confirmation, Smart Schedule, recovery, warmup, watcher suggestions, outline notes/output, owned Discord bot controls and credential sync. Preview 0.11.0 passes all three native CI targets and eight packaged Mac suites. |
-| 7 | Physical end-to-end checks on macOS and Windows | Partial: actual Mac microphone open/provider connection, windowed bilingual outline and native UI checks recorded. Human/bilingual STT, visible verse delivery, live queue, remaining native appearance and Windows graphical acceptance remain unverified. |
-| 8 | Installation and replacement readiness | In progress: isolated Mac portable install/update/uninstall/reinstall and rollback pass; migration/rollback guide is written. Windows graphical lifecycle, production identity/signing/distribution, physical acceptance and explicit approval before replacement remain open. |
+| 7 | Physical acceptance | Partial: Mac rapid spoken delivery/duplicate and manual approval pass with user-observed output; dual-STT transport/panels pass with recorded backup-key limitation. Live semantic release and remaining Mac checks are open. Windows physical is explicitly deferred, not passed. |
+| 8 | Installation and replacement readiness | In progress: isolated Mac portable install/update/uninstall/reinstall and rollback pass; migration/rollback guide is written. Production identity/signing/distribution, remaining Mac acceptance and explicit replacement approval remain open. Windows graphical lifecycle is deferred and remains unverified. |
 
 Completed milestones have the limits recorded in their verification reports.
 They do not establish real speech transport, visible presentation, Windows
@@ -102,3 +103,10 @@ No reference commands were generated; bilingual shared delivery/dedup and accura
 translation are unverified. Recognition stopped; all8temporary key changes restored
 to exact prior semantic values/presence. Review primary quota before another provider
 run. Windows/semantic/remaining gates stay open; progress6/8,75%.
+
+October20: semantic readiness exposed an unavailable hardcoded Groq model (404,
+missing from account listing).0.11.3 compatibility fix and151 Python/50 Node,
+all3nativeCI/package checks pass. The actual new Mac app is prepared, stopped,
+awaiting human semantic queue speech. See the semantic preparation report. Windows
+physical checks are now deferred by the user; retain that limitation rather than
+blocking all Mac production preparation. Progress remains6/8,75%.
