@@ -1,5 +1,28 @@
 # Verse delivery investigation
 
+## October20: committed candidate, native CI and separate Mac installation
+
+Provider and consumer Settings changes were committed/pushed on the existing
+`codex/desktop-backend` branch as1e01b24fddc65e9e000b08335f891b7470b3006e;
+unrelated.DS_Store stayed excluded.174 Python/53 Node checks passed, and
+[native CI39494833854](https://github.com/KevinAwesomeCoding/VerseView-Detector/actions/runs/39494833854)
+passed Windows x64, Intel Mac and Apple Silicon Mac package/archive/frozen checks.
+The exact-commit0.11.6 Mac build was independently verified and installed in a
+separate versioned user Applications directory. Its actual packaged app/backend
+run from that location; recognition remains stopped and Drive sync is up to date.
+A private profile backup was verified; original installed app and production
+settings are intact. No new live speech/presentation test was claimed.
+
+Per the user's direction to skip unavailable work, Apple distribution signing/
+notarization was skipped after a read-only check found0valid signing identities;
+Windows publisher signing is unconfigured and physical Windows acceptance stays
+deferred. Ad-hoc signature checks passed; no security protections were weakened.
+The production workflow still targets the legacy app; main/release publishing were
+not changed. See [release readiness](../desktop-preview/RELEASE_READINESS.md) for
+artifact digests, local install/rollback details and remaining acceptance limits.
+Original intermittent incident remains unresolved; no installed-app replacement
+was performed.
+
 ## October20: cloud Settings integrated in packaged0.11.6
 
 The managed dashboard now exposes reviewed per-feature cloud routes, masked

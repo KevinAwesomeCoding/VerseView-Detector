@@ -1,8 +1,9 @@
 # Release readiness — October20,2026
 
 Current candidate: **0.11.6**, separate desktop preview, shared Mac/Windows source.
-The provider and consumer Settings changes are being committed and built through
-the existing scoped preview workflow. This document does not authorize replacing
+The provider and consumer Settings changes are committed as
+`1e01b24fddc65e9e000b08335f891b7470b3006e` on `codex/desktop-backend` and pushed
+through the existing scoped preview workflow. This document does not authorize replacing
 the original installed detector or publishing a release.
 
 ## Completed scope
@@ -13,14 +14,57 @@ the original installed detector or publishing a release.
   and Drive credential sync. Existing profiles and guards are preserved.
 - Scoped real microphone/semantic results remain documented separately; new
   Settings behavior was exercised in an isolated packaged QA profile.
--174 Python/53 Node checks and local Mac package/archive startup checks passed for
-  the integration candidate. Exact-commit native CI results will be recorded after
-  the branch push.
+- 174 Python/53 Node checks and local Mac package/archive startup checks passed for
+  the integration candidate. Native CI [run39494833854](https://github.com/KevinAwesomeCoding/VerseView-Detector/actions/runs/39494833854)
+  **passed all three targets** for the exact source commit: Windows x64, Intel Mac
+  x64 and Apple Silicon Mac ARM64. Tests, native frozen feature checks, package
+  inventory and extracted archive/startup verification all completed successfully.
+
+GitHub transfer artifacts (14-day retention; these digests are for the outer
+GitHub artifacts, not the inner app archives):
+
+| Target | Artifact ID | GitHub SHA256 digest |
+| --- | --- | --- |
+| Windows x64 |12297855857|`e0643bf09bcb584cf1405be59f9b9c66a15811952a99f915065034919fcffc30`|
+| Intel Mac x64 |12296954883|`4f226dcd651ff0e8fbb17ca40eede13685faeb984c6945dbdf6cbd84614af30c`|
+| Apple Silicon Mac ARM64 |12295624988|`1b96474f25723b87dd7249cfebe592f79d33232c256e644b0971f13b8d7c9eee`|
+
+Sanitized local CI record: `build/verification/ci-39494833854.json`.
+
+## Exact-commit Mac candidate and separate installation
+
+Build `2026-10-20T20-46-57-364Z-1e01b24f-darwin-arm64` contains the committed
+runtime source above. Only unrelated.DS_Store was untracked. Existing build scripts
+were used; no dependency or system-security changes were needed. The archive is
+`out/deliverables/2026-10-20T20-46-57-364Z-1e01b24f-darwin-arm64.tar.gz`, SHA256
+`85c8f7182268b8bc817043197d37567fda337e52b1ed557bf19f7689aff4b34d`.
+Inventory of 26 files, deep/strict ad-hoc signature, extracted archive inventory and
+extracted frozen-backend startup passed.
+
+A separate copy was installed at
+`~/Applications/VerseView Preview/0.11.6-1e01b24/VerseView Desktop Preview.app`.
+The copied app passed inventory and signature verification, then was opened using
+Computer Use. App40964 and its own bundled backend40984 run from this installed
+location, not a source script or checkout artifact. The existing private preview
+profile was retained; recognition stays stopped, free routes remain enabled and
+startup credential sync reports already up to date. Saved-session recovery was
+not discarded. The earlier preview artifacts are retained.
+
+Before launch, the stopped preview profile was copied privately to the sibling
+`VerseView Preview Backups/20261020T154812-before-1e01b24` directory under Application
+Support, with 700 directory permissions and a verified settings checksum. The
+original production profile hash remains
+`e1e2bc2198a328250fe8f3ca1b6b3c3f48928820750916fdc91cada8d26b9760`.
+The original `/Applications/VerseView Detector.app` was not replaced.
+
+Local sanitized installation record: `test-results/release-candidate-install.json`.
+This is a separately installed preview candidate, not an Apple-notarized production
+release. It retains preview identity/profile separation for safe rollback.
 
 ## Skipped or awaiting acceptance
 
 - **Apple distribution signing/notarization skipped:** read-only
-  `security find-identity -v -p codesigning` returned0valid identities. No certificate,
+  `security find-identity -v -p codesigning` returned 0 valid identities. No certificate,
   Apple account, payment, keychain or security changes were attempted. Existing
   workflow ad-hoc signatures validate local package integrity, not publisher identity
   or notarization. Do not bypass an OS warning to install it.

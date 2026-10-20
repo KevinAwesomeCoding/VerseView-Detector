@@ -1,5 +1,14 @@
 # Desktop migration progress
 
+October20 delivery update: provider/consumer Settings source1e01b24 is committed
+and pushed. Native CI39494833854 passed all three targets. The exact-commit0.11.6
+Mac candidate is installed separately with verified profile backup/rollback;
+the original installed detector remains intact. Distribution signing/notarization
+is skipped for lack of signing identities, Windows physical checks are deferred,
+and this revision's live speech/outline acceptance remains unverified. See
+[release readiness](../desktop-preview/RELEASE_READINESS.md). These scoped delivery
+results do not turn the remaining acceptance criteria into passes.
+
 Overall: **[████████████░░░░] 75% — 6 of 8 milestones complete**
 
 This is an engineering milestone count, not elapsed-time estimation or a
