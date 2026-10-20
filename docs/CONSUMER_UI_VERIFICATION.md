@@ -61,3 +61,16 @@ verification. Windows physical inspection remains deferred. The original intermi
 delivery incident remains unresolved. Overall migration remains6/8 (75%); publisher
 signing/notarization, production replacement and outstanding physical checks are
 not implied complete by this interface milestone.
+
+Packaged long-history check:100 explicitly labelled synthetic journal rows were
+added only to the disposable QA profile. Computer Use scrolled English back to
+entries033–043 while Malayalam stayed at092–100, then Jump to live returned
+English to089–099. Smaller Full transcript text and independent scrolling are
+visually verified. Deterministic tests establish the ease-out timing; static
+screenshots establish the ending position, not animation timing.
+
+A long-page inspection exposed the listening header scrolling offscreen. The
+header now sticks to the top of the scrolling surface, keeping Stop available.
+The final package repeats this check. Packaged recovery also paused at Resume /
+Start new with recognition stopped, staged Resume without starting, then began
+synthetic recognition only on a second explicit Start.
