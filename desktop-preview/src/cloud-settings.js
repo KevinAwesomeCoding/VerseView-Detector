@@ -4,7 +4,7 @@
   const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const copy=v=>JSON.parse(JSON.stringify(v));
   const labels={verse:'Verse detection and semantic checks',watcher:'English context watcher',watcher_malayalam:'Malayalam context watcher',outline:'Live outline',summary:'Sermon summaries'};
-  const credentialLabels={groq_api_key:'Groq API key',gemini_api_key:'Gemini API key',cloudflare_api_token:'Cloudflare API token',cloudflare_account_id:'Cloudflare account ID'};
+  const credentialLabels={groq_api_key:'Groq API key',gemini_api_key:'Gemini API key',cloudflare_api_token:'Cloudflare API token',cloudflare_account_id:'Cloudflare account ID',deepgram_api_key:'Deepgram speech key',sarvam_api_key:'Sarvam speech key',sarvam_api_key_backup:'Sarvam backup speech key',assemblyai_api_key:'AssemblyAI speech key',gladia_api_key:'Gladia speech key'};
   let draft=null;
   const dirty=()=>draft&&JSON.stringify(draft.values)!==JSON.stringify(draft.base);
   const refresh=()=>root.dispatchEvent(new Event('preview:observer'));
@@ -26,11 +26,12 @@
     }catch{return 'Check the Drive download URL and numeric limits. Limits can only be lowered.';}
   }
   function editable(s){return s.connection==='connected'&&s.session?.host?.managed&&s.session.control.state==='stopped'&&s.session.control.actions.includes('save_settings');}
-  function render(snapshot){
+  function render(snapshot,advanced=window.previewShell.isDeveloper?.()===true){
     sync(snapshot);
     if(!draft||!snapshot.session?.host?.managed)return '';
     const v=draft.values,locked=!editable(snapshot)||!!draft.pending;
     const select=(role,options)=>`<label>${labels[role]}<select data-cloud-route="${role}" ${locked?'disabled':''}>${options.map(pair=>`<option value="${esc(pair)}" ${v.routes[role]===pair?'selected':''}>${esc(pair.replace('|',' · '))}</option>`).join('')}</select></label>`;
+    if(!advanced)return `<section class="vv-detector-settings" aria-label="Provider connections"><h2>Provider connections</h2><p class="vv-caption">${v.enabled?'Free-only AI routing is enabled.':'Using your saved AI routing.'} Speech providers have separate allowances. Saved keys are hidden; leave a field blank to keep it.</p><form data-cloud-form novalidate><div class="vv-settings-grid">${policy.credentials.map(k=>`<label>${credentialLabels[k]} · ${v.credentials[k]?'Configured':'Missing'}<input type="password" autocomplete="new-password" spellcheck="false" maxlength="512" data-cloud-credential="${k}" placeholder="Enter replacement to update" ${locked?'disabled':''}></label>`).join('')}</div><details><summary>Sync from Google Drive</summary><label>Drive download link<input type="url" autocomplete="off" spellcheck="false" maxlength="2048" data-cloud-sync value="${esc(v.sync_url)}" ${locked?'disabled':''}></label><p class="vv-caption">Loads supported credentials. Your speech and presentation settings stay as saved.</p></details><p class="vv-caption" role="status" data-cloud-status>${esc(draft.conflict?'Settings changed elsewhere. Reload before saving.':draft.pending?'Saving…':draft.notice||error()||'Stop listening before saving connections.')}</p><div class="vv-control-actions"><button class="vv-btn vv-btn-primary" type="submit" data-cloud-save ${locked||draft.conflict||error()||(!dirty()&&!hasCredentials())?'disabled':''}>Save connections</button><button class="vv-btn" type="button" data-cloud-reload ${draft.pending?'disabled':''}>Reload</button></div></form></section>`;
     return `<section class="vv-panel vv-detector-settings" aria-label="Cloud providers"><div class="vv-panel-head"><h2>Cloud providers</h2><span class="vv-badge">${v.enabled?'Free-only routing':'Legacy routing'}</span></div>
       <p class="vv-caption">Changes apply on the next engine start. Free-only routing never switches to a paid model. Speech transcription still uses your selected speech provider and its separate allowance.</p>
       <form data-cloud-form novalidate>
@@ -76,7 +77,8 @@
     if(!e.target.matches('[data-cloud-form]'))return;e.preventDefault();
     const s=window.previewShell.getObserver();sync(s);
     if(!draft||draft.pending||draft.conflict||!editable(s)||error())return;
-    const {credentials:presence,...values}=copy(draft.values);
+    const {credentials:presence,...allValues}=copy(draft.values);
+    const values=window.previewShell.isDeveloper?.()===true?allValues:{sync_url:allValues.sync_url};
     values.credentials=Object.fromEntries([...root.querySelectorAll('[data-cloud-credential]')].filter(f=>f.value).map(f=>[f.dataset.cloudCredential,f.value]));
     try{policy.validate(values);}catch{draft.notice='Check replacement credentials. Spaces and control characters are not allowed.';refresh();return;}
     const owner=draft;owner.pending={id:null};

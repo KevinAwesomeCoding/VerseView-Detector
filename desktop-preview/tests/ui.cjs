@@ -1,3 +1,4 @@
+const enableDeveloper = require('./enable-developer.cjs');
 'use strict';
 // Uses an existing Playwright installation; no browser download is needed.
 const { _electron } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
@@ -18,7 +19,7 @@ fs.mkdirSync(output, { recursive: true });
   async function launch() {
     application = await _electron.launch({ executablePath, args,
       env: { ...process.env, VV_PREVIEW_TEST_PROFILE: '1', VV_OBSERVER_TEST_DIRECTORY: observerDirectory } });
-    const page = await application.firstWindow();
+    const page = await application.firstWindow(); await enableDeveloper(page);
     page.on('pageerror', error => errors.push(error.message));
     page.on('console', message => { if (message.type() === 'error') consoleErrors.push(message.text()); });
     await page.locator('.vv-output-ref').waitFor();

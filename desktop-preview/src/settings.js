@@ -36,7 +36,7 @@
   function render(snapshot) {
     sync(snapshot);
     const settings = snapshot.session?.control?.settings;
-    if (!settings || !draft) return '<section class="vv-panel vv-detector-settings"><h2>Speech and VerseVIEW settings</h2><p class="vv-caption">Settings require the updated detector with desktop controls enabled. Credentials and advanced options remain in its existing window.</p></section>';
+    if (!settings || !draft) return '<section class="vv-panel vv-detector-settings"><h2>Speech and VerseVIEW settings</h2><p class="vv-caption">Choose Prepare settings above to load your microphone, language and VerseVIEW options. Listening stays stopped.</p></section>';
     const values = draft.values, control = snapshot.session.control;
     const editable = snapshot.connection === 'connected' && control.state === 'stopped' && control.actions.includes('save_settings');
     const locked = !editable || !!draft.submission;
@@ -56,7 +56,7 @@
         ${select('secondary_language', 'Secondary language', ['en', 'ml', 'hi'].map(code => [code, Object.keys(policy.languages).find(name => policy.languages[name] === code)]), !values.dual_stt_enabled)}
         ${select('secondary_stt_engine', 'Secondary speech provider', policy.providersFor(values.secondary_language || 'en').map(key => [key, policy.providers[key]]), !values.dual_stt_enabled)}
         <label class="vv-settings-url">VerseVIEW control URL<input type="url" autocomplete="off" spellcheck="false" maxlength="512" data-detector-setting="remote_url" value="${escape(values.remote_url)}" ${locked ? 'disabled' : ''}></label>
-      </div><p class="vv-caption">${snapshot.session?.host?.managed ? "Close and relaunch the stopped backend to refresh its microphone list." : "The device list comes from the detector. Refresh microphones in its window if hardware changes."} Saving does not open a microphone or test the connection.</p>
+      </div><p class="vv-caption">${snapshot.session?.host?.managed ? "If a microphone is missing, reconnect it and use Runtime in Developer Mode to restart the stopped service." : "The device list comes from the detector. Refresh microphones in its window if hardware changes."} Saving does not open a microphone or test the connection.</p>
       <p class="vv-caption vv-settings-message" role="status" aria-live="polite" data-settings-status>${escape(draft.conflict ? 'Settings changed elsewhere. Reload to review the latest values before saving.' : draft.submission ? 'Saving settings; waiting for the detector to acknowledge.' : draft.notice || error || (changed() ? 'Unsaved changes.' : 'No unsaved changes.'))}</p>
       <div class="vv-control-actions"><button type="submit" class="vv-btn vv-btn-primary" data-save-settings ${locked || !changed() || draft.conflict || error ? 'disabled' : ''}>Save settings</button><button type="button" class="vv-btn" data-reload-settings ${draft.submission ? 'disabled' : ''}>Reload settings</button></div></form></section>`;
   }

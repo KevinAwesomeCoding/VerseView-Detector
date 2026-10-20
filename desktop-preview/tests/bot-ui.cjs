@@ -1,3 +1,4 @@
+const enableDeveloper = require('./enable-developer.cjs');
 'use strict';
 const {_electron}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
 const assert=require('node:assert/strict'),fs=require('node:fs'),os=require('node:os'),path=require('node:path');
@@ -18,7 +19,7 @@ const root=path.resolve(__dirname,'..'),output=path.join(root,'test-results');fs
       VV_PREVIEW_TEST_PROFILE:'1',VV_BACKEND_VERIFY:'1',VV_BACKEND_SOURCE_PROFILE:source,VV_OBSERVER_TEST_DIRECTORY:path.join(directory,'empty')}});
     profile=path.join(await application.evaluate(({app})=>app.getPath('userData')),'Backend');
     assert.match(profile,/[/\\]QA[/\\]Backend$/);fs.rmSync(profile,{recursive:true,force:true});
-    page=await application.firstWindow();page.on('pageerror',e=>errors.push(e.message));
+    page=await application.firstWindow(); await enableDeveloper(page);page.on('pageerror',e=>errors.push(e.message));
     await page.locator('#preview-mode').selectOption('observer');
     const surface=page.locator('#preview-surface'),action=name=>surface.locator(`[data-engine-action="${name}"]`);
     const nav=label=>surface.getByRole('button',{name:label,exact:true}).filter({visible:true}).click();

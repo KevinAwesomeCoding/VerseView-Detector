@@ -1,8 +1,9 @@
-# Consumer interface and Developer Mode — proposed plan
+# Consumer interface and Developer Mode
 
 Inspected October20,2026: installed0.11.6 candidate and current renderer/settings
-code. The consumer/Developer Mode cleanup is a plan only. The separately requested
-Live transcript switch is implemented; see LIVE_TRANSCRIPT_VIEW.md for verification.
+code. The approved consumer/Developer Mode cleanup is implemented in0.12.0.
+See CONSUMER_UI_VERIFICATION.md for current verification and limits.
+The Live transcript switch is also implemented; see LIVE_TRANSCRIPT_VIEW.md.
 Overall migration progress remains6/8,75%.
 
 ## Default experience

@@ -1,3 +1,4 @@
+const enableDeveloper = require('./enable-developer.cjs');
 'use strict';
 const {_electron}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
 const assert=require('node:assert/strict'),fs=require('node:fs'),os=require('node:os'),path=require('node:path');
@@ -20,7 +21,7 @@ const root=path.resolve(__dirname,'..'),output=path.join(root,'test-results');fs
     assert.match(profile,/[/\\]QA[/\\]Backend$/);fs.rmSync(profile,{recursive:true,force:true});
     const settingsPath=path.join(profile,'settings.json');
     const changeURL=suffix=>{const values=JSON.parse(fs.readFileSync(settingsPath));values.settings_sync_url='https://sync.invalid/SECRET/'+suffix;fs.writeFileSync(settingsPath,JSON.stringify(values));};
-    page=await application.firstWindow();page.on('pageerror',e=>errors.push(e.message));
+    page=await application.firstWindow(); await enableDeveloper(page);page.on('pageerror',e=>errors.push(e.message));
     await page.locator('#preview-mode').selectOption('observer');const surface=page.locator('#preview-surface');
     const action=name=>surface.locator(`[data-engine-action="${name}"]`);
     await surface.getByRole('button',{name:'Settings',exact:true}).filter({visible:true}).click();

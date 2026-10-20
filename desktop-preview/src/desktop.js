@@ -2,12 +2,13 @@
   'use strict';
   const preferenceKey = 'verseview-desktop-preview.preferences.v1';
   const themeNames = ['sage', 'midnight', 'glass', 'galaxy', 'aurora', 'ember'];
-  let preferences = { theme: 'glass', layout: 'studio', mode: 'observer' };
+  let preferences = { theme: 'glass', layout: 'studio', mode: 'observer', developer: false };
   try {
     const stored = JSON.parse(localStorage.getItem(preferenceKey));
     if (themeNames.includes(stored?.theme)) preferences.theme = stored.theme;
     if (['studio', 'focus'].includes(stored?.layout)) preferences.layout = stored.layout;
     if (['samples', 'observer'].includes(stored?.mode)) preferences.mode = stored.mode;
+    preferences.developer = stored?.developer === true;
   } catch { /* Corrupt or unavailable storage must not prevent launch. */ }
   const root = document.getElementById('verseview-prototype');
   const surface = document.getElementById('preview-surface');
@@ -41,7 +42,7 @@
   });
   document.getElementById('preview-reset').addEventListener('click', () => root.dispatchEvent(new Event('preview:reset')));
   function setMode(value) {
-    preferences.mode = value === 'samples' ? 'samples' : 'observer';
+    preferences.mode = value === 'samples' && preferences.developer ? 'samples' : 'observer';
     mode.value = preferences.mode;
     document.getElementById('preview-reset').hidden = preferences.mode !== 'samples';
     persist();
@@ -51,10 +52,20 @@
   setMode(preferences.mode);
   setLayout(preferences.layout);
 
+  root.dataset.developer=String(preferences.developer);
   window.previewShell = Object.freeze({
     initialTheme: preferences.theme,
     getMode: () => preferences.mode,
     setMode,
+    setLayout: value => {setLayout(value);root.dispatchEvent(new Event('preview:layout'));},
+    getLayout: () => preferences.layout,
+    isDeveloper: () => preferences.developer,
+    setDeveloper: value => {
+      preferences.developer=value===true;
+      root.dataset.developer=String(preferences.developer);
+      if(!preferences.developer)setMode('observer');
+      persist();root.dispatchEvent(new Event('preview:developer'));
+    },
     getObserver: () => observer,
     getEnvironment: () => environment,
     getBackend: () => backend,

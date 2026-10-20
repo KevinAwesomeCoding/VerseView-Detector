@@ -38,6 +38,21 @@ class CloudSettingsTests(unittest.TestCase):
         self.assertTrue(self.form.snapshot()['cloud']['credentials']['gemini_api_key'])
         self.assertNotIn('NEW-PRIVATE-KEY',json.dumps(self.form.snapshot()))
 
+    def test_speech_credentials_are_write_only_and_preserve_delivery_and_routes(self):
+        before=json.loads(self.path.read_text())
+        snapshot=self.form.snapshot()
+        credentials={key:'PRIVATE-SPEECH-KEY' for key in ('deepgram_api_key','sarvam_api_key',
+                    'sarvam_api_key_backup','assemblyai_api_key','gladia_api_key')}
+        self.form.save(snapshot['revision'],{'cloud_settings':{'credentials':credentials}})
+        saved=json.loads(self.path.read_text())
+        for key in credentials:
+            self.assertEqual(saved[key],credentials[key])
+            self.assertTrue(self.form.snapshot()['cloud']['credentials'][key])
+        self.assertNotIn('PRIVATE-SPEECH-KEY',json.dumps(self.form.snapshot()))
+        for key in ('remote_url','manual_confirm','stt_engine','dual_stt_enabled'):
+            self.assertEqual(saved[key],before[key])
+        self.assertEqual(saved['free_cloud_config']['future_option'],7)
+
     def test_invalid_patch_never_echoes_secrets_or_writes(self):
         before=self.path.read_bytes()
         patches=[{'credentials':{'gemini_api_key':'SECRET\nBAD'}},

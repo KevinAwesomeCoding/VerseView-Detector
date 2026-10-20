@@ -1,3 +1,4 @@
+const enableDeveloper = require('./enable-developer.cjs');
 'use strict';
 // Actual packaged app relocation/update/rollback; only a synthetic QA profile.
 const { _electron } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
@@ -50,7 +51,7 @@ function inventory(directory) {
     profile = path.join(await application.evaluate(({ app }) => app.getPath('userData')), 'Backend');
     assert.match(profile, /[/\\]QA[/\\]Backend$/);
     if (first) { assert.equal(fs.existsSync(profile), false, 'Close and clean earlier synthetic QA runs first'); ownsProfile = true; }
-    page = await application.firstWindow(); page.on('pageerror', error => errors.push(error.message));
+    page = await application.firstWindow(); await enableDeveloper(page); page.on('pageerror', error => errors.push(error.message));
     await page.locator('#preview-mode').selectOption('observer');
     const surface = page.locator('#preview-surface');
     await surface.getByRole('button', { name: 'Settings', exact: true }).filter({ visible: true }).click();

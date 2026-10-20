@@ -20,10 +20,10 @@ test('Settings view acknowledges bot commands without visiting the engine contro
   const root={addEventListener:(name,fn)=>(listeners[name]??=[]).push(fn),dispatchEvent:()=>{}};
   const button={disabled:false,dataset:{engineAction:'start_bot',engineSession:sessionId}};
   const document={getElementById:()=>root,addEventListener:()=>{},querySelectorAll:selector=>selector.includes('start_bot')?[button]:[]};
-  const window={previewShell:{getObserver:()=>snapshot,getBackend:()=>({status:'unavailable'}),getMode:()=> 'observer'},
+  const window={previewShell:{isDeveloper:()=>true,getObserver:()=>snapshot,getBackend:()=>({status:'unavailable'}),getMode:()=> 'observer'},
     cloudSettings:{render:()=>''},detectorSettings:{render:()=>''},verseviewDesktop:{botControl:async()=>({id,action:'start_bot',outcome:'submitted'})}};
   vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../src/observer.js'),'utf8'),{window,document,Event,setTimeout:()=>{}});
-  await listeners.click[0]({target:{closest:()=>button}});
+  await listeners.click[0]({target:{closest:selector=>selector==='[data-engine-action]'?button:null}});
   snapshot.session.control.results=[{id,action:'start_bot',outcome:'requested',reason:'Bot request acknowledged'}];
   snapshot.session.control.actions=['stop_bot'];snapshot.session.control.bot.status='online';button.dataset.engineAction='stop_bot';
   window.observerView.updateRecoveryAvailability(snapshot);assert.equal(button.disabled,false);
@@ -35,7 +35,7 @@ test('Settings view acknowledges bot commands without visiting the engine contro
 test('setup instructions distinguish the bundled host from an external detector and label saved Bible settings',()=>{
   const snapshot={connection:'connected',message:'Connected',sources:[],session:{session_id:'a'.repeat(32),pid:123,engine_state:'configured',config:{},
     host:{managed:true},control:{results:[],settings:{values:{bible_translation:'WEB'}}}}};
-  const window={previewShell:{getObserver:()=>snapshot,getBackend:()=>({status:'unavailable'})},cloudSettings:{render:()=>''},detectorSettings:{render:()=>''}};
+  const window={previewShell:{isDeveloper:()=>true,getObserver:()=>snapshot,getBackend:()=>({status:'unavailable'})},cloudSettings:{render:()=>''},detectorSettings:{render:()=>''}};
   const document={getElementById:()=>({addEventListener:()=>{}}),addEventListener:()=>{}};
   vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../src/observer.js'),'utf8'),{window,document,Event,setTimeout:()=>{}});
   let html=window.observerView.settings(snapshot);

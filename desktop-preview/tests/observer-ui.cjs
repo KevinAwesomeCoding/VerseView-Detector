@@ -1,3 +1,4 @@
+const enableDeveloper = require('./enable-developer.cjs');
 'use strict';
 const { _electron } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const assert = require('node:assert/strict');
@@ -36,7 +37,7 @@ fs.mkdirSync(output, { recursive: true });
   try {
     application = await _electron.launch({ executablePath, args: process.env.PREVIEW_EXECUTABLE ? [] : [root],
       env: { ...process.env, VV_PREVIEW_TEST_PROFILE: '1', VV_OBSERVER_TEST_DIRECTORY: directory } });
-    const page = await application.firstWindow();
+    const page = await application.firstWindow(); await enableDeveloper(page);
     page.on('pageerror', error => errors.push(error.message));
     await page.evaluate(() => localStorage.clear());
     await page.reload();

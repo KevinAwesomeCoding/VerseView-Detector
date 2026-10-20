@@ -3,7 +3,7 @@
   'use strict';
   const groq='groq|qwen/qwen3.8-27b', gemini=['gemini|gemini-3.5-flash-lite','gemini|gemini-3.8-flash'];
   const routes={verse:[groq],watcher:['cloudflare|@cf/qwen/qwen3-30b-a3b-fp8',groq],watcher_malayalam:[groq],outline:gemini,summary:gemini};
-  const credentials=['groq_api_key','gemini_api_key','cloudflare_api_token','cloudflare_account_id'];
+  const credentials=['groq_api_key','gemini_api_key','cloudflare_api_token','cloudflare_account_id','deepgram_api_key','sarvam_api_key','sarvam_api_key_backup','assemblyai_api_key','gladia_api_key'];
   const ceilings={groq:{rpd:1000,tpd:200000},cloudflare:{rpd:2000,tpd:1000000},gemini:{rpd:500,tpd:2000000}};
   const object=v=>v&&typeof v==='object'&&!Array.isArray(v);
   function syncURL(v){

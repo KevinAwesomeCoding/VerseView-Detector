@@ -12,7 +12,9 @@ ROUTES = {
     'outline': [('gemini', 'gemini-3.5-flash-lite'), ('gemini', 'gemini-3.8-flash')],
     'summary': [('gemini', 'gemini-3.5-flash-lite'), ('gemini', 'gemini-3.8-flash')],
 }
-CREDENTIALS = ('groq_api_key', 'gemini_api_key', 'cloudflare_api_token', 'cloudflare_account_id')
+CREDENTIALS = ('groq_api_key', 'gemini_api_key', 'cloudflare_api_token', 'cloudflare_account_id',
+               'deepgram_api_key', 'sarvam_api_key', 'sarvam_api_key_backup',
+               'assemblyai_api_key', 'gladia_api_key')
 CEILINGS = {'groq': {'rpd': 1000, 'tpd': 200000},
             'cloudflare': {'rpd': 2000, 'tpd': 1000000},
             'gemini': {'rpd': 500, 'tpd': 2000000}}

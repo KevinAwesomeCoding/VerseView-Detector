@@ -1,7 +1,8 @@
 (()=>{
   const root=document.getElementById('verseview-prototype');
   const observing=()=>window.previewShell.getMode()==='observer';
-  const connectionNotice=()=>window.observerView.connectionNotice(window.previewShell.getObserver());
+  const developer=()=>window.previewShell.isDeveloper();
+  const connectionNotice=()=>developer()?window.observerView.connectionNotice(window.previewShell.getObserver()):window.observerView.consumerNotice(window.previewShell.getObserver());
   const themes={
     sage:{name:'Sage',description:'Soft sage · follows system',preview:['#edf1ea','#fff','#247e69']},
     midnight:{name:'Midnight',description:'Matte charcoal & indigo',preview:['#111319','#242834','#6c7ce0']},
@@ -93,11 +94,13 @@
       transcript(stream==='secondary'?'യോഹന്നാൻ മൂന്നാം അധ്യായം പതിനേഴാം വാക്യം.':'John chapter three, verse seventeen.',ref,accepted?'Reference detected · command accepted':'Duplicate suppressed',accepted?'ok':'muted',stream,id);
     }
   }
-  const nav=()=>`<nav class="vv-nav" aria-label="Dashboard navigation">${[['session','radio','Live session'],['activity','list-filter','Activity'],...(observing()?[['outline','notebook-pen','Outline']]:[]),['testing','flask-conical','Test area'],['settings','sliders-horizontal','Settings']].map(([view,i,label])=>`<button class="cursor-interaction" type="button" data-action="view" data-view="${view}" aria-current="${state.view===view?'page':'false'}">${icon(i)}${label}</button>`).join('')}</nav>`;
+  const views=()=>[['session','radio',developer()?'Live session':'Live'],...(observing()?[['outline','notebook-pen','Outline']]:[]),['activity','history',developer()?'Activity':'History'],['settings','sliders-horizontal','Settings']];
+  const developerViews=[['runtime','terminal','Runtime'],['diagnostics','list-filter','Diagnostics'],['testing','flask-conical','Test area'],['cloud','cloud','Cloud tuning'],['build','info','Build information']];
+  const nav=()=>`<nav class="vv-nav" aria-label="Dashboard navigation">${[...views(),...(developer()?developerViews:[])].map(([view,i,label],index)=>`${developer()&&index===views().length?'<span class="vv-eyebrow vv-developer-label">Developer</span>':''}<button class="cursor-interaction" type="button" data-action="view" data-view="${view}" aria-current="${state.view===view?'page':'false'}">${icon(i)}${label}</button>`).join('')}</nav>`;
   const brand=()=>`<div class="vv-brand"><span class="vv-brand-mark" aria-hidden="true">v</span><span>VerseView<span style="display:block;font-size:9px;letter-spacing:2px;color:var(--vv-muted);margin-top:-3px">DETECTOR</span></span></div>`;
   const button=(action,label,i='',primary=false,extra='')=>`<button type="button" class="vv-btn cursor-interaction ${primary?'vv-btn-primary':''}" data-action="${action}" ${extra}>${i?icon(i):''}${label}</button>`;
   function themePicker(prefix){return `<div class="vv-theme-control">${icon('palette')}<label class="vv-live-announcement" for="${prefix}-theme">Color theme</label><select id="${prefix}-theme" class="vv-theme-select cursor-interaction" data-setting="theme" aria-label="Color theme">${Object.entries(themes).map(([key,t])=>`<option value="${key}" ${state.theme===key?'selected':''}>${t.name}</option>`).join('')}</select></div>`}
-  function appearance(){return `<section class="vv-panel vv-appearance" aria-label="Appearance settings"><div class="vv-panel-head"><h2>Appearance</h2><span class="vv-badge">${themes[state.theme].name}</span></div><div class="vv-theme-grid">${Object.entries(themes).map(([key,t])=>`<button type="button" class="vv-theme-option cursor-interaction" data-action="theme" data-theme-choice="${key}" aria-label="${t.name} theme" aria-pressed="${state.theme===key}"><span class="vv-theme-mini" style="--preview-bg:${t.preview[0]};--preview-panel:${t.preview[1]};--preview-accent:${t.preview[2]}" aria-hidden="true"><span class="vv-theme-mini-sidebar"></span><span class="vv-theme-mini-main"><span></span><span></span><span></span></span></span><span class="vv-theme-name">${t.name}${state.theme===key?icon('check'):'<span style="width:16px;height:16px" aria-hidden="true"></span>'}</span><span class="vv-theme-description">${t.description}</span></button>`).join('')}</div><p class="vv-theme-note">Changes the detector interface. VerseVIEW presentation themes are separate.</p></section>`}
+  function appearance(){return `<section class="vv-panel vv-appearance" aria-label="Appearance settings"><div class="vv-panel-head"><h2>Appearance</h2><span class="vv-badge">${themes[state.theme].name}</span></div><div class="vv-theme-grid">${Object.entries(themes).map(([key,t])=>`<button type="button" class="vv-theme-option cursor-interaction" data-action="theme" data-theme-choice="${key}" aria-label="${t.name} theme" aria-pressed="${state.theme===key}"><span class="vv-theme-mini" style="--preview-bg:${t.preview[0]};--preview-panel:${t.preview[1]};--preview-accent:${t.preview[2]}" aria-hidden="true"><span class="vv-theme-mini-sidebar"></span><span class="vv-theme-mini-main"><span></span><span></span><span></span></span></span><span class="vv-theme-name">${t.name}${state.theme===key?icon('check'):'<span style="width:16px;height:16px" aria-hidden="true"></span>'}</span><span class="vv-theme-description">${t.description}</span></button>`).join('')}</div><label class="vv-layout-setting">Window layout<select class="vv-select" data-appearance-layout><option value="studio" ${window.previewShell.getLayout()==='studio'?'selected':''}>Studio</option><option value="focus" ${window.previewShell.getLayout()==='focus'?'selected':''}>Focus</option></select></label><p class="vv-theme-note">Changes the detector interface. VerseVIEW presentation themes are separate.</p></section>`}
   const sourceBadge=stream=>`<span class="vv-source" data-stream="${stream}">${streamInfo[stream]?.tag||'EN'} · ${streamInfo[stream]?.role||'Primary'}</span>`;
   function output(){return `<section class="vv-panel vv-output" aria-label="Simulated presentation preview"><div class="vv-output-top"><span class="vv-eyebrow">Presentation preview</span><span class="vv-badge">English · KJV</span></div><div class="vv-output-ref">${esc(state.reference)}</div><blockquote class="vv-verse" style="padding:0">${esc(verses[state.reference])}</blockquote><div class="vv-output-foot"><span class="vv-output-status">${icon('check')}Command accepted · ${esc(streamInfo[state.outputStream]?.name||'English')}</span><span>Preview only</span></div></section>`}
   function detectionNotice(stream){
@@ -142,19 +145,40 @@
     const env=window.previewShell.getEnvironment();
     return `<section class="vv-panel preview-about" aria-label="Desktop preview information"><h2>Desktop preview</h2><p class="vv-caption">${esc(env.appearance?.reason||'Preparing window appearance')}</p><p class="vv-caption">Version ${esc(env.version)} · ${env.packaged?'Packaged application':'Development preview'} · ${esc(env.platform)}</p><p class="vv-caption">Build: ${esc(env.buildId||'development')}</p><p class="vv-caption">Appearance, layout, and source choice are saved. Observations come from the detector; samples reset on launch.</p></section>`;
   }
+  function advanced(){return `<section class="vv-panel vv-advanced"><details><summary>Advanced</summary><label class="vv-settings-dual"><input type="checkbox" data-developer-mode ${developer()?'checked':''}> Developer Mode</label><p class="vv-caption">Show runtime tools, diagnostics, cloud tuning and samples.</p></details><p class="vv-caption">VerseView Detector · ${esc(window.previewShell.getEnvironment().version)}</p></section>`;}
+  function pageContent(prefix){
+    const snapshot=window.previewShell.getObserver();
+    if(state.view==='session')return session(prefix);
+    if(state.view==='activity')return observing()?developer()?window.observerView.activity(snapshot):window.observerView.history(snapshot):activity();
+    if(state.view==='outline'&&observing())return window.observerView.outline(snapshot);
+    if(state.view==='settings')return (observing()?window.observerView.settings(snapshot):settings(prefix))+appearance()+advanced();
+    if(!developer())return '';
+    if(state.view==='testing')return testing(prefix);
+    if(state.view==='build')return desktopInfo();
+    if(!observing())return window.observerView.testGate();
+    if(state.view==='runtime')return window.observerView.runtime(snapshot);
+    if(state.view==='diagnostics')return window.observerView.activity(snapshot);
+    if(state.view==='cloud')return window.observerView.cloud(snapshot);
+    return '';
+  }
+  function liveHeader(){
+    const s=window.previewShell.getObserver();
+    return observing()||['running','starting','stopping'].includes(s.session?.control?.state)?window.observerView.compactControls(s):'<span class="vv-badge">Sample demo · no microphone</span>';
+  }
   function health(){return `<div class="vv-health" aria-label="Simulated connection status">${['primary','secondary'].map(stream=>`<span class="vv-badge ${active(stream)?'vv-ok':''}"><span class="vv-dot"></span>${streamInfo[stream].name} ${active(stream)?'sample active':'paused'}</span>`).join('')}<span class="vv-badge vv-ok"><span class="vv-dot"></span>Presentation simulated</span><span class="vv-meter-wrap"><span class="vv-badge">Sample audio</span><span class="vv-meter ${state.listening?'':'is-paused'}" role="img" aria-label="Simulated shared audio input level">${[4,8,12,15,11,7,12,9,5,7].map((h,i)=>`<span style="height:${h}px;opacity:${i>6?.3:.8}"></span>`).join('')}</span></span></div>`}
   function render(){
+    if(!developer()&&!views().some(([view])=>view===state.view))state.view='session';
     designRender();
     const scrollTop=root.querySelector('[data-layout]')?.scrollTop||0;
-    const focused=root.contains(document.activeElement)?{layout:document.activeElement.closest('[data-layout]')?.dataset.layout,action:document.activeElement.dataset.action,view:document.activeElement.dataset.view,setting:document.activeElement.dataset.setting,stream:document.activeElement.dataset.stream,themeChoice:document.activeElement.dataset.themeChoice}:null;
+    const focused=root.contains(document.activeElement)?{layout:document.activeElement.closest('[data-layout]')?.dataset.layout,action:document.activeElement.dataset.action,view:document.activeElement.dataset.view,setting:document.activeElement.dataset.setting,stream:document.activeElement.dataset.stream,themeChoice:document.activeElement.dataset.themeChoice,developer:document.activeElement.hasAttribute('data-developer-mode')}:null;
     for(const app of root.querySelectorAll('[data-layout]')){
       const prefix=`vv-${app.dataset.layout}`;
-      const titles={session:'Live session',activity:'Delivery activity',outline:'Sermon outline',testing:'Test area',settings:'Settings'};
-      const subtitles=observing()?{session:'Speech streams, candidate decisions, and delivery status',activity:'Structured events from the detector',outline:'Editable notes and an optional separate display',testing:'Samples stay separate from live observations',settings:'Appearance, speech, and VerseVIEW connection'}:{session:'Sample audio · English and Malayalam',activity:'Detection, approval, and delivery details',testing:'Sample speech · no microphone required',settings:'Audio, recognition, and delivery'};
-      app.innerHTML=`<div class="vv-shell"><aside class="vv-sidebar">${brand()}<div><div class="vv-eyebrow vv-nav-label">Workspace</div>${nav()}</div><div class="vv-sidebar-foot"><p>${observing()?'Detector connection':'Rehearsal workspace'}</p><p>${observing()?'Local engine feed':'Sample data only'}</p></div></aside>
-        <main class="vv-main"><div class="vv-narrow-nav">${brand()}${nav()}</div><header class="vv-topline"><div><h1>${titles[state.view]||titles.session}</h1><p class="vv-subtitle">${subtitles[state.view]||subtitles.session}</p></div><div class="vv-live-controls">${themePicker(prefix)}${observing()?'<span class="vv-pill">Local feed</span>':button('toggle',state.listening?'Pause demo':'Resume demo',state.listening?'pause':'play',!state.listening)}</div></header>
-        <div class="vv-content">${state.view==='session'?session(prefix):state.view==='activity'?(observing()?window.observerView.activity(window.previewShell.getObserver()):activity()):state.view==='outline'&&observing()?window.observerView.outline(window.previewShell.getObserver()):state.view==='testing'?testing(prefix):appearance()+(observing()?window.observerView.settings(window.previewShell.getObserver()):settings(prefix))+desktopInfo()}</div>
-        <div class="${state.view==='session'?'vv-live-announcement':'vv-feedback'}" role="status" aria-live="polite">${state.view==='session'?'':icon('info')}<span data-connection-notice>${esc(observing()?connectionNotice():state.feedback)}</span></div><footer class="vv-foot"><span>${observing()?'Desktop preview · live observer':'Desktop preview · sample data only'}</span><span>${observing()?'Delivery guards remain in the engine':'No microphone or VerseVIEW connection'}</span></footer></main></div>`;
+      const titles={session:developer()?'Live session':'Live',activity:developer()?'Delivery activity':'History',outline:'Sermon outline',testing:'Test area',settings:'Settings',runtime:'Runtime',diagnostics:'Diagnostics',cloud:'Cloud tuning',build:'Build information'};
+      const subtitles=observing()?{session:developer()?'Speech streams, candidate decisions, and delivery status':'Your speech and references, live',activity:developer()?'Structured events from the detector':'Recent reference outcomes',outline:'Editable notes and an optional separate display',testing:'Samples stay separate from live observations',settings:'Appearance, speech, and VerseVIEW connection'}:{session:'Sample audio · English and Malayalam',activity:'Detection, approval, and delivery details',testing:'Sample speech · no microphone required',settings:'Audio, recognition, and delivery'};
+      app.innerHTML=`<div class="vv-shell"><aside class="vv-sidebar">${brand()}<div><div class="vv-eyebrow vv-nav-label">Workspace</div>${nav()}</div>${developer()?`<div class="vv-sidebar-foot"><p>${observing()?'Detector connection':'Rehearsal workspace'}</p><p>${observing()?'Local engine feed':'Sample data only'}</p></div>`:''}</aside>
+        <main class="vv-main"><div class="vv-narrow-nav">${brand()}${nav()}</div><header class="vv-topline"><div><h1>${titles[state.view]||titles.session}</h1><p class="vv-subtitle">${subtitles[state.view]||subtitles.session}</p></div><div class="vv-live-controls">${liveHeader()}</div></header>
+        <div class="${state.view==='session'?'vv-live-announcement':'vv-feedback'}" role="status" aria-live="polite">${state.view==='session'?'':icon('info')}<span data-connection-notice>${esc(observing()?connectionNotice():state.feedback)}</span></div>
+        <div class="vv-content">${pageContent(prefix)}</div>${developer()?`<footer class="vv-foot"><span>${observing()?'Desktop preview · live observer':'Desktop preview · sample data only'}</span><span>${observing()?'Delivery guards remain in the engine':'No microphone or VerseVIEW connection'}</span></footer>`:''}</main></div>`;
       app.scrollTop=scrollTop;
     }
     window.detectorSettings?.syncControls();
@@ -165,7 +189,8 @@
       let el;
       const visibleMatch=selector=>[...app.querySelectorAll(selector)].find(candidate=>candidate.getClientRects().length>0);
       const sourceSelector=focused.stream?`[data-stream="${focused.stream}"]`:'';
-      if(focused.setting)el=visibleMatch(`[data-setting="${focused.setting}"]${sourceSelector}`);
+      if(focused.developer)el=visibleMatch('[data-developer-mode]');
+      else if(focused.setting)el=visibleMatch(`[data-setting="${focused.setting}"]${sourceSelector}`);
       else if(focused.action)el=visibleMatch(`[data-action="${focused.action}"]${sourceSelector}${focused.view?`[data-view="${focused.view}"]`:''}${focused.themeChoice?`[data-theme-choice="${focused.themeChoice}"]`:''}`);
       if(el&&!el.disabled)el.focus({preventScroll:true});
     }
@@ -175,9 +200,9 @@
     const b=e.target.closest('button[data-action]');if(!b||b.disabled)return;
     const previousView=state.view;
     const a=b.dataset.action;
-    if(a==='sample-mode'){window.previewShell.setMode('samples');return}
+    if(a==='sample-mode'){if(developer())window.previewShell.setMode('samples');return}
     if(observing()&&!['view','theme','activity'].includes(a))return;
-    if(a==='view')state.view=b.dataset.view;
+    if(a==='view'){if(![...views(),...(developer()?developerViews:[])].some(([view])=>view===b.dataset.view))return;state.view=b.dataset.view;}
     else if(a==='theme'&&validTheme(b.dataset.themeChoice)){state.theme=b.dataset.themeChoice;state.feedback=`${themes[state.theme].name} theme selected.`}
     else if(a==='activity')state.view='activity';
     else if(a==='toggle'){state.listening=!state.listening;state.feedback=state.listening?'Demo resumed. Choose a sample phrase to continue.':'Demo paused. No sample speech will be processed.'}
@@ -198,6 +223,8 @@
     if(previousView!==state.view)root.querySelector('[data-layout]').scrollTop=0;
   });
   root.addEventListener('change',e=>{
+    if(e.target.matches('[data-developer-mode]')){window.previewShell.setDeveloper(e.target.checked);return;}
+    if(e.target.matches('[data-appearance-layout]')){window.previewShell.setLayout(e.target.value);return;}
     const key=e.target.dataset.setting;if(!key)return;
     if(observing()&&key!=='theme')return;
     if(key==='threshold')state.threshold=Number(e.target.value);
@@ -210,7 +237,8 @@
   root.addEventListener('input',e=>{if(e.target.dataset.setting==='threshold'){state.threshold=Number(e.target.value);root.querySelectorAll('.vv-threshold').forEach(el=>el.textContent=`${state.threshold}%`)}});
   root.addEventListener('preview:layout',()=>{render();root.querySelector('[data-layout]').scrollTop=0});
   root.addEventListener('preview:environment',render);
-  root.addEventListener('preview:mode',()=>{if(!observing()&&state.view==='outline')state.view='session';render();root.querySelector('[data-layout]').scrollTop=0});
+  root.addEventListener('preview:developer',()=>{if(!developer()&&developerViews.some(([view])=>view===state.view))state.view='session';render();});
+  root.addEventListener('preview:mode',()=>{if(observing()){const {theme,view}=state;state={...initial(),theme,view};}if(!observing()&&state.view==='outline')state.view='session';render();root.querySelector('[data-layout]').scrollTop=0});
   let observerRefreshPending=false;
   // Patch only observer content. Keep theme/navigation controls and unchanged
   // source selectors in place while provider events arrive. No remote HTML is
@@ -232,6 +260,8 @@
     while(current.childNodes.length>next.childNodes.length)current.lastChild.remove();
   }
   function observerRefresh(){
+    const header=root.querySelector('.vv-live-controls');
+    if(header){const nextHeader=document.createElement('div');nextHeader.className='vv-live-controls';nextHeader.innerHTML=liveHeader();patchObserverNode(header,nextHeader);}
     if(!observing())return;
     const notice=root.querySelector('[data-connection-notice]');
     if(notice&&notice.textContent!==connectionNotice())notice.textContent=connectionNotice();
@@ -257,7 +287,7 @@
     if(!content||state.view==='testing')return;
     const snapshot=window.previewShell.getObserver();
     const next=document.createElement('div');next.className='vv-content';
-    next.innerHTML=state.view==='session'?window.observerView.session(snapshot,`vv-${root.querySelector('[data-layout]').dataset.layout}`):state.view==='activity'?window.observerView.activity(snapshot):state.view==='outline'?window.observerView.outline(snapshot):appearance()+window.observerView.settings(snapshot)+desktopInfo();
+    next.innerHTML=pageContent(`vv-${root.querySelector('[data-layout]').dataset.layout}`);
     const transcriptScroll=window.transcriptView?.beforePatch() || [];
     const surface=root.querySelector('[data-layout]'),scrollTop=surface.scrollTop;
     patchObserverNode(content,next);

@@ -1,3 +1,4 @@
+const enableDeveloper = require('./enable-developer.cjs');
 'use strict';
 const { _electron } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const assert = require('node:assert/strict'), fs = require('node:fs'), os = require('node:os'), path = require('node:path');
@@ -27,7 +28,7 @@ fs.mkdirSync(output, { recursive: true });
     backendProfile=path.join(await application.evaluate(({app})=>app.getPath('userData')),'Backend');
     assert.match(backendProfile,/[/\\]QA[/\\]Backend$/);
     if(reset)fs.rmSync(backendProfile,{recursive:true,force:true});
-    page=await application.firstWindow();page.on('pageerror',error=>errors.push(error.message));
+    page=await application.firstWindow(); await enableDeveloper(page);page.on('pageerror',error=>errors.push(error.message));
     await page.locator('#preview-mode').selectOption('observer');
     app=page.locator('#preview-surface');
     await app.getByRole('button',{name:'Live session',exact:true}).click();
