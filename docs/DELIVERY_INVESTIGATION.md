@@ -1,5 +1,49 @@
 # Verse delivery investigation
 
+## 2026-10-19 23:36 CDT: real speech manual hold and approval command pass
+
+The user completed the prepared test in normal packaged **0.11.2**, source
+`e54b905fabe60ebfcf60f61916a15ab67079bb11`, build
+`2026-10-18T17-04-40-349Z-e54b905f-darwin-arm64`, frozen backend PID **72557**,
+recognition session `bd586e48aaf54e32a3d9533e2149e58d`. UTC events are October 20;
+local America/Chicago dates/times below are **October 19 CDT**.
+
+| Real Deepgram final input | Candidate | Result / local time |
+| --- | --- | --- |
+| “John chapter three verse seventeen.” 23:36:12.125397 | `bcc879eeaf50` | DETECTED .127668 → DELIVERY_REQUESTED .138130 → COMMAND_ACCEPTED **23:36:12.153834**. |
+| “Verse eighteen.” 23:36:18.524402 | `9e94a92b2567` | CONTEXTUAL DETECTED .529910 → MANUAL_CONFIRM_REQUIRED **23:36:18.530202**. No presentation request while held. |
+| Dashboard approval, request `01632a1e04fe4d46b7a888f5433d313d` | same `9e94a92b2567` | Decision acknowledged `answered`; DELIVERY_REQUESTED **23:36:48.727370** → COMMAND_ACCEPTED **23:36:48.745815**. |
+
+**PASS for the real microphone/STT → contextual candidate → manual hold → user
+approval → browser command path.** The same reference/candidate identity is retained
+throughout. The hold lasted **30.197168 seconds** before a presentation request.
+The actual presentation staying on 3:17 and changing to 3:18 only after approval
+still awaits explicit user confirmation; “done” alone is not treated as proof of
+visible verse text. No contemporaneous output screenshot was captured. Manual
+rejection remains a separate untested case.
+
+The user stopped recognition; Stop request
+`e09d297d6c8e4acb9d2c5dee00f53582` is acknowledged. Inspection confirmed state
+`stopped` with no pending candidate. The temporary preview **confidence threshold
+is restored 0.90 → 0.75**, with `manual_confirm=true` and `verify=true` retained.
+Only the recorded field was changed back, preserving all other current fields;
+all resulting settings values equal the pre-test baseline. The JSON serialization
+is not byte-identical, so byte-for-byte restoration is not claimed. The next
+explicit Start rereads these persisted values through `ProfileStore.load`; no
+microphone restart was needed to verify restoration. Both local/private preparation
+records now say `TEST_INSPECTED_CONFIDENCE_RESTORED`.
+
+Production settings hash remains unchanged:
+`e1e2bc2198a328250fe8f3ca1b6b3c3f48928820750916fdc91cada8d26b9760`.
+Original installed application intact. Local snapshots/results:
+`desktop-preview/test-results/manual-approval-20261018/`; full raw log and settings
+backup remain private under `/tmp/verseview-manual-approval-20261018/` (700 folder,
+600 files). No runtime source changes, rebuild, blind retries or guard disabling.
+The prior “temporary setting pending restoration” entry below is resolved by this
+checkpoint. Remaining dual-STT/semantic/active-layout/Windows physical checks keep
+milestone progress **6/8, 75%**. The original intermittent incident is unresolved.
+
+
 ## 2026-10-18: manual approval test prepared — temporary setting pending restoration
 
 After the user confirmed closing the backend, its PID68579 had exited. The private

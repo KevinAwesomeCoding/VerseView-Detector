@@ -1,5 +1,14 @@
 # Mac physical acceptance checkpoint — October 18, 2026
 
+**October 19 follow-up:** actual packaged 0.11.2 real speech produced a contextual
+John 3:18 candidate held for30.197168seconds until the user's approval. The same
+candidate then reached browser command acceptance. **Manual hold/approval command
+path PASS**; exact visible before/after output awaits user confirmation. Recognition
+is stopped and the temporary confidence threshold is restored90%→75%, with all
+other saved values preserved and production settings unchanged. See the latest
+[investigation entry](../docs/DELIVERY_INVESTIGATION.md) for timestamps and cleanup.
+
+
 **Latest repeat, 15:12 CDT:** normal packaged 0.11.2 recognized all three full
 English phrases. 3:16 and 3:17 PRESENT commands were accepted **9.475974 seconds
 apart**; repeated 3:17 was recognized and suppressed by the exact-reference guard,
