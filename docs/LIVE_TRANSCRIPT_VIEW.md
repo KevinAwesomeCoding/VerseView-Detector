@@ -64,3 +64,26 @@ Opened through Computer Use and left in Focus, with backend/listening stopped.
 Previous0.11.6 preview is retained. A private settings backup was made before the
 switch. Disposable QA profile and dummy source were removed after owned QA/backend
 processes exited. Normal settings and original detector settings were preserved.
+
+## Smooth Jump to live — 0.11.8
+
+Jump to live now uses a 360ms cubic ease-out animation. Ordinary live following
+stays immediate. Reduce Motion skips the animation, including if enabled while
+it is running. Wheel, touch, pointer and scrolling-key input in a transcript
+panel cancels its movement. Observer panel replacement preserves the animation's
+position, and each frame resolves the latest panel/bottom. Switching views or
+listening sessions cancels outstanding movement.
+
+All60 desktop tests passed, including focused timing, DOM replacement/new speech,
+manual cancellation and Reduce Motion checks. Syntax/offline checks and packaged
+inventory verification passed. The unchanged tested frozen backend was reused.
+Build ID: `2026-10-20T21-54-10-513Z-d6bd2f44-darwin-arm64`, based on d6bd2f44 plus
+manifest-recorded uncommitted animation/version changes. Used the same packaging
+command above, without rebuilding the unchanged backend.
+Separate preview opened at `~/Applications/VerseView Preview/0.11.8-smooth-jump/VerseView Desktop Preview.app`.
+Computer Use confirmed Full transcript and Jump to live in this exact packaged
+app, left with listening stopped. Animation timing is verified by deterministic
+frame tests; it has not been visually verified against a long real transcript.
+Previous previews and the original installed detector remain intact. No provider
+settings, microphone permissions, dependencies or security settings were changed.
+Overall migration progress remains6/8 (75%).
