@@ -17,10 +17,11 @@ local America/Chicago dates/times below are **October 19 CDT**.
 **PASS for the real microphone/STT → contextual candidate → manual hold → user
 approval → browser command path.** The same reference/candidate identity is retained
 throughout. The hold lasted **30.197168 seconds** before a presentation request.
-The actual presentation staying on 3:17 and changing to 3:18 only after approval
-still awaits explicit user confirmation; “done” alone is not treated as proof of
-visible verse text. No contemporaneous output screenshot was captured. Manual
-rejection remains a separate untested case.
+The user explicitly confirmed that the actual presentation stayed on **John 3:17**
+while held, then changed to **John 3:18 only after Approve**. **PASS for visible
+reference behavior by user observation**, combined with the same-ID event trace.
+No contemporaneous automated output screenshot or exact verse-text capture was
+obtained. Manual rejection remains a separate untested case.
 
 The user stopped recognition; Stop request
 `e09d297d6c8e4acb9d2c5dee00f53582` is acknowledged. Inspection confirmed state

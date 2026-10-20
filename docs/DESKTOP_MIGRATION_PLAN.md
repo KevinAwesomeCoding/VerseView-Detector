@@ -90,6 +90,7 @@ open. Progress remains6/8,75%; original incident unresolved.
 
 October 19 manual test: real speech held contextual John 3:18 for30.197168seconds
 before user approval; same-ID PRESENT command accepted afterward. Hold/approval
-command path passes; visible before/after output awaits explicit user confirmation.
+command path passes; the user explicitly confirms visible 3:17 while held and
+3:18 only after approval. Visible reference behavior passes by user observation.
 Temporary preview confidence90%→75% restored, all other values preserved, production
 profile untouched, recognition stopped. Other physical gates remain; progress75%.

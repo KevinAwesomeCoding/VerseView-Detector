@@ -3,7 +3,9 @@
 **October 19 follow-up:** actual packaged 0.11.2 real speech produced a contextual
 John 3:18 candidate held for30.197168seconds until the user's approval. The same
 candidate then reached browser command acceptance. **Manual hold/approval command
-path PASS**; exact visible before/after output awaits user confirmation. Recognition
+path PASS**; the user explicitly confirms visible 3:17 while held and 3:18 only
+after approval (**visible reference behavior PASS by user observation**). Exact
+verse-text/automated output capture remains unverified. Recognition
 is stopped and the temporary confidence threshold is restored90%→75%, with all
 other saved values preserved and production settings unchanged. See the latest
 [investigation entry](../docs/DELIVERY_INVESTIGATION.md) for timestamps and cleanup.
