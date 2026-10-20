@@ -21,7 +21,7 @@
     cancelled=false;busy=true;notice=start?'Preparing to listen…':'Preparing settings…';refresh();
     try{
       let snapshot=window.previewShell.getObserver();
-      if(snapshot.connection!=='connected'||!snapshot.session?.control){
+      if(snapshot.connection!=='connected'||!snapshot.session?.control||snapshot.session.control.state==='closed'){
         const backend=window.previewShell.getBackend();
         if(backend.owned||['starting','closing','ready'].includes(backend.status))throw new Error('The engine connection is unavailable. Check Diagnostics in Developer Mode before trying again.');
         const result=await window.verseviewDesktop.launchBackend();
@@ -30,6 +30,7 @@
         await waitFor(()=>{const s=window.previewShell.getObserver();return s.connection==='connected'&&s.session?.host?.managed&&s.session.pid===result.pid;});
       }
       snapshot=window.previewShell.getObserver();
+      if(snapshot.connection!=='connected'||!snapshot.session?.control)throw new Error('The engine connection was lost. Reconnect before trying again.');
       if(!start){notice='Ready. You can configure speech and connections.';return;}
       if(snapshot.session.control.sync?.status==='pulling'){
         notice='Syncing credentials…';refresh();

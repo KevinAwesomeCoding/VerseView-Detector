@@ -101,3 +101,7 @@ test('normal Connections submits only write-only replacements and sync URL, pres
  await root.listeners.submit[0]({target:{matches:()=>true},preventDefault:()=>{}});
  const change=submitted[2].cloud_settings;assert.deepEqual(Object.keys(change).sort(),['credentials','sync_url']);assert.equal(change.credentials.deepgram_api_key,'WRITE-ONLY-TEST-KEY');assert.equal(field.value,'');assert.doesNotMatch(html,/WRITE-ONLY-TEST-KEY/);
 });
+test('an explicitly closed backend can be prepared again even while its last snapshot is fresh',async()=>{
+ const h=flowHarness();h.s.session.control.state='closed';h.backend({status:'closed',owned:false});
+ await h.flow.prepare(false);assert.deepEqual(h.calls,['launch']);
+});

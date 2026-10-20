@@ -46,7 +46,7 @@
     const devices = settings.devices.map(item => [String(item.id), item.label]);
     if (!devices.some(([key]) => key === String(values.mic_index))) devices.unshift([String(values.mic_index), `Unavailable microphone (${values.mic_index})`]);
     return `<section class="vv-panel vv-detector-settings" aria-label="Detector speech and connection settings"><div class="vv-panel-head"><h2>Speech and VerseVIEW settings</h2><span class="vv-badge">${editable ? 'Engine stopped' : 'Read only'}</span></div>
-      <p class="vv-caption">Save while the engine is stopped. Changes take effect on the next start. ${snapshot.session?.host?.managed ? "Cloud credentials and provider routes can be configured in Cloud providers." : "Credentials and advanced options remain in the detector window."}</p>
+      <p class="vv-caption">Save while the engine is stopped. Changes take effect on the next start. ${snapshot.session?.host?.managed ? "Provider credentials and sync are in Connections below; model tuning is available in Developer Mode." : "Credentials and advanced options remain in the detector window."}</p>
       <form data-detector-settings-form novalidate><div class="vv-settings-grid">
         ${select('mic_index', 'Microphone', devices)}
         ${select('bible_translation', 'Bible translation', policy.bibles.map(value => [value, value]))}

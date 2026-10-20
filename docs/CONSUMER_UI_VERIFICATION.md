@@ -43,7 +43,7 @@ account confirmations and budgets. Model routing and quotas remain in Developer 
 ## Verification
 
 - PASS:178 Python tests, including speech-credential redaction and preservation;
-  69 desktop tests, including developer preference/source gating, normal vs developer
+  70 desktop tests, including developer preference/source gating, normal vs developer
   visibility, duplicate/held/queue projection, Stop across pages, history, cancellation,
   sync waiting, recovery/failure gates and basic saves preserving advanced settings.
 - PASS: JavaScript syntax/offline checks and whitespace checks.
@@ -74,3 +74,11 @@ header now sticks to the top of the scrolling surface, keeping Stop available.
 The final package repeats this check. Packaged recovery also paused at Resume /
 Start new with recognition stopped, staged Resume without starting, then began
 synthetic recognition only on a second explicit Start.
+
+The pinned header was verified through Computer Use while Settings scrolled far
+below its initial viewport. Native Window → Move & Resize → Left also verified a
+half-width window (about735 logical pixels), then Return to Previous Size restored
+the window. Basic settings and the listening header remained readable. The glass
+header was changed to an opaque theme background to prevent underlying text from
+showing through it. A focused regression also covers preparation after a manual
+backend close while its final observer snapshot is still fresh.
