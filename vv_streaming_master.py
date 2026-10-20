@@ -64,7 +64,10 @@ def fetch_chapter_verses(book: str, chapter: str) -> list:
 normalize_numbers_only = norm_eng
 
 
-# ── GROQ CLIENT  (verse extraction — llama-3.1-8b-instant) ──────────────────
+# ── GROQ CLIENT ───────────────────────────────────────────────────────────
+# One model for Groq verse detection/semantic checks and existing Groq fallbacks.
+# Qwen instruct mode keeps the bounded 48-token verse response free of reasoning.
+GROQ_VERSE_MODEL = "qwen/qwen3.8-27b"
 class _GroqResponse:
     class _Choice:
         class _Msg:
@@ -78,6 +81,8 @@ class _GroqCompletions:
     def create(self, model, messages, temperature=0.2, max_tokens=None, **kw):
         headers = {"Authorization": f"Bearer {self._key}", "Content-Type": "application/json"}
         body    = {"model": model, "messages": messages, "temperature": temperature}
+        if model == GROQ_VERSE_MODEL:
+            body["reasoning_effort"] = "none"
         if max_tokens is not None:
             body["max_tokens"] = max_tokens
         for attempt in range(3):
@@ -223,7 +228,7 @@ class _MistralClient:
 # Two differences from the cloud clients, both deliberate:
 #   • There is no API key — the connection is host/port/model/timeout instead.
 #   • The `model` argument passed by a call site is IGNORED. Call sites pass
-#     cloud model ids ("llama-3.1-8b-instant", "gpt-oss-120b", …) which mean
+#     cloud model ids ("qwen/qwen3.8-27b", "gpt-oss-120b", …) which mean
 #     nothing to a local server, so the client always uses the model name the
 #     user configured in Advanced Settings. This is what makes it drop-in.
 #
@@ -1523,7 +1528,7 @@ def scripture_read_advance_expected(verse_num: int) -> None:
         logger.debug(f"📖 SR: expected verse advanced → {_sr_expected_verse}")
 
 # ── LLM CLIENTS (initialised in configure()) ─────────────────────────────────
-groq_client     = None   # verse extraction only            (Groq llama-3.1-8b-instant)
+groq_client     = None   # verse extraction only            (Groq verse model)
 cerebras_client = None   # live outline + summary fallback  (Cerebras gpt-oss-120b)
 mistral_client  = None   # sermon summary primary           (Mistral mistral-large-latest)
 
@@ -2028,7 +2033,7 @@ def _watcher_clients_for_provider(provider: str):
         _wc = _local_client_for("watcher")
         if _local_llm_available() and _wc is not None:
             if LOCAL_LLM_ON_FAILURE == "fallback":
-                _fb, _fm = ((groq_client, "llama-3.1-8b-instant") if groq_client
+                _fb, _fm = ((groq_client, GROQ_VERSE_MODEL) if groq_client
                             else (cerebras_client, "llama3.1-8b"))
             else:
                 _fb, _fm = (None, "")
@@ -2039,13 +2044,13 @@ def _watcher_clients_for_provider(provider: str):
         )
     if p == "cerebras":
         return (cerebras_client, "llama3.1-8b",
-                groq_client,     "llama-3.1-8b-instant")
+                groq_client,     GROQ_VERSE_MODEL)
     if p == "mistral":
         return (mistral_client,  "mistral-large-latest",
-                groq_client,     "llama-3.1-8b-instant")
+                groq_client,     GROQ_VERSE_MODEL)
     # default: Groq primary, Cerebras fallback (mirrors extract_verse_with_llm /
     # _llm_semantic_match model choices).
-    return (groq_client,     "llama-3.1-8b-instant",
+    return (groq_client,     GROQ_VERSE_MODEL,
             cerebras_client, "llama3.1-8b")
 
 
@@ -2886,7 +2891,7 @@ def configure(
     # ── Groq: verse extraction only ──
     groq_client = _GroqClient(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
     if groq_client:
-        logger.info("🔍 Verse LLM          : Groq  llama-3.1-8b-instant")
+        logger.info(f"🔍 Verse LLM          : Groq  {GROQ_VERSE_MODEL}")
     else:
         logger.warning("⚠️  No Groq key — LLM verse extraction disabled")
 
@@ -4430,7 +4435,8 @@ def translate_to_english(text: str) -> str:
             r = requests.post(
                 "https://api.groq.com/openai/v1/chat/completions",
                 headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
-                json={"model": "llama-3.1-8b-instant", "messages": [{"role": "user", "content": prompt}], "temperature": 0.2},
+                json={"model": GROQ_VERSE_MODEL, "reasoning_effort": "none",
+                      "messages": [{"role": "user", "content": prompt}], "temperature": 0.2},
                 timeout=5, verify=certifi.where()
             )
             if r.status_code == 200:
@@ -4494,7 +4500,7 @@ def extract_verse_with_llm(text):
         LLM_CALL_COUNT += 1
         response = _role_completion(
             "verse",
-            cloud_client=groq_client, cloud_model="llama-3.1-8b-instant",
+            cloud_client=groq_client, cloud_model=GROQ_VERSE_MODEL,
             messages=[{
                 "role": "user",
                 "content": (
@@ -4577,12 +4583,12 @@ def _excerpt_since_last_advance(max_words: int = 40) -> str:
 
 
 def _llm_semantic_match(verse_text: str, transcript_excerpt: str, label: str = "") -> bool:
-    """Use Groq llama-3.1-8b-instant (fallback: Cerebras) to check if transcript matches a verse.
+    """Use the shared Groq verse model (fallback: Cerebras) to check if transcript matches a verse.
     Bug 1: Groq has a separate quota from the outline generator (Cerebras), so routing semantic
     match here protects the Cerebras quota for the live outline loop."""
     # Bug 1: prefer Groq to keep Cerebras quota exclusively for the outline generator
     _client     = groq_client or cerebras_client
-    _model      = "llama-3.1-8b-instant" if _client is groq_client else "llama3.1-8b"
+    _model      = GROQ_VERSE_MODEL if _client is groq_client else "llama3.1-8b"
     _client_tag = "Groq" if _client is groq_client else "Cerebras"
     # Semantic match belongs to the "verse" role — when that role is routed to the
     # local LLM it is served locally (with the same fallback/skip policy).

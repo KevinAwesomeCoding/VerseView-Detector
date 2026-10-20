@@ -751,3 +751,28 @@ class DeliveryTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class GroqCompatibilityTests(unittest.TestCase):
+    def test_current_verse_model_uses_instruct_mode_with_bounded_answer(self):
+        response = Mock()
+        response.json.return_value = {'choices': [{'message': {'content': 'YES'}}]}
+        with patch.object(engine.requests, 'post', return_value=response) as post:
+            result = engine._GroqClient('FAKE-TEST-KEY').chat.completions.create(
+                model=engine.GROQ_VERSE_MODEL, messages=[{'role': 'user', 'content': 'Test'}],
+                temperature=0.0, max_tokens=48)
+        self.assertEqual(result.choices[0].message.content, 'YES')
+        body = post.call_args.kwargs['json']
+        self.assertEqual(body['model'], 'qwen/qwen3.8-27b')
+        self.assertEqual(body['reasoning_effort'], 'none')
+        self.assertEqual(body['max_tokens'], 48)
+
+    def test_semantic_match_routes_to_available_model_and_preserves_no_match(self):
+        with patch.object(engine, 'groq_client', object()), patch.object(engine, 'cerebras_client', None), \
+             patch.object(engine, 'LOCAL_LLM_ENABLED', False), \
+             patch.object(engine, '_role_completion', side_effect=[engine._GroqResponse('YES'), engine._GroqResponse('NO')]) as completion:
+            self.assertTrue(engine._llm_semantic_match('Verse text', 'Matching excerpt'))
+            self.assertFalse(engine._llm_semantic_match('Verse text', 'Unrelated greeting'))
+        for call in completion.call_args_list:
+            self.assertEqual(call.kwargs['cloud_model'], engine.GROQ_VERSE_MODEL)
+            self.assertEqual(call.kwargs['max_tokens'], 48)
