@@ -17,6 +17,7 @@ DEFAULT_LOCAL_LLM_ENDPOINT = "http://127.0.0.1:11434"
 SYNC_ALLOWED_KEYS = frozenset({
     "deepgram_api_key", "groq_api_key", "gemini_api_key", "cerebras_api_key",
     "mistral_api_key", "sarvam_api_key", "sarvam_api_key_backup", "assemblyai_api_key",
+    "cloudflare_api_token", "cloudflare_account_id",
     "discord_webhook_url", "discord_log_webhook_url", "discord_notes_webhook_url", "discord_bot_token",
 })
 
@@ -25,6 +26,12 @@ DEFAULTS = {
     "deepgram_api_key":           "",
     "groq_api_key":               "",
     "gemini_api_key":             "",
+    # Opt-in private backend configuration. Existing profiles retain legacy
+    # routing until explicitly activated; no credentials are inferred or moved.
+    "free_cloud_enabled":         False,
+    "free_cloud_config":          {},
+    "cloudflare_api_token":       "",
+    "cloudflare_account_id":      "",
     "cerebras_api_key":           "",
     "mistral_api_key":            "",
     "sarvam_api_key":             "",

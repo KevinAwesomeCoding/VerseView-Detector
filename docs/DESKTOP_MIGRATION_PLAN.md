@@ -110,3 +110,13 @@ all3nativeCI/package checks pass. The actual new Mac app is prepared, stopped,
 awaiting human semantic queue speech. See the semantic preparation report. Windows
 physical checks are now deferred by the user; retain that limitation rather than
 blocking all Mac production preparation. Progress remains6/8,75%.
+
+Later October20: the real semantic queue release passed by command evidence and
+the user's visible-output confirmation; see the latest investigation entry for
+its screenshot limitation. A separate0.11.4 Mac ARM64 free-cloud LLM candidate now
+passes169 Python/50 Node checks, frozen startup/package/archive and fake-provider
+watcher guard checks. Verified account plans and bilingual probes select different
+English/Malayalam watcher routes with shared budgets. This adds no completed
+overall milestone: candidate microphone/outline acceptance, recurring-free STT,
+and production replacement/signing remain open. The installed app and active
+settings were not changed. Details: [free-cloud audit](FREE_CLOUD_API_AUDIT.md).

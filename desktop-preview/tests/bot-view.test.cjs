@@ -21,7 +21,7 @@ test('Settings view acknowledges bot commands without visiting the engine contro
   const button={disabled:false,dataset:{engineAction:'start_bot',engineSession:sessionId}};
   const document={getElementById:()=>root,addEventListener:()=>{},querySelectorAll:selector=>selector.includes('start_bot')?[button]:[]};
   const window={previewShell:{getObserver:()=>snapshot,getBackend:()=>({status:'unavailable'}),getMode:()=> 'observer'},
-    detectorSettings:{render:()=>''},verseviewDesktop:{botControl:async()=>({id,action:'start_bot',outcome:'submitted'})}};
+    cloudSettings:{render:()=>''},detectorSettings:{render:()=>''},verseviewDesktop:{botControl:async()=>({id,action:'start_bot',outcome:'submitted'})}};
   vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../src/observer.js'),'utf8'),{window,document,Event,setTimeout:()=>{}});
   await listeners.click[0]({target:{closest:()=>button}});
   snapshot.session.control.results=[{id,action:'start_bot',outcome:'requested',reason:'Bot request acknowledged'}];
@@ -35,11 +35,11 @@ test('Settings view acknowledges bot commands without visiting the engine contro
 test('setup instructions distinguish the bundled host from an external detector and label saved Bible settings',()=>{
   const snapshot={connection:'connected',message:'Connected',sources:[],session:{session_id:'a'.repeat(32),pid:123,engine_state:'configured',config:{},
     host:{managed:true},control:{results:[],settings:{values:{bible_translation:'WEB'}}}}};
-  const window={previewShell:{getObserver:()=>snapshot,getBackend:()=>({status:'unavailable'})},detectorSettings:{render:()=>''}};
+  const window={previewShell:{getObserver:()=>snapshot,getBackend:()=>({status:'unavailable'})},cloudSettings:{render:()=>''},detectorSettings:{render:()=>''}};
   const document={getElementById:()=>({addEventListener:()=>{}}),addEventListener:()=>{}};
   vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../src/observer.js'),'utf8'),{window,document,Event,setTimeout:()=>{}});
   let html=window.observerView.settings(snapshot);
-  assert.match(html,/Close the backend before editing credentials/);
+  assert.match(html,/Cloud providers and credential sync can be configured above/);
   assert.match(html,/Saved Bible translation: WEB · applies on Start/);
   assert.doesNotMatch(html,/VERSEVIEW_OBSERVER|VERSEVIEW_DESKTOP_CONTROL/);
   snapshot.session.config.bible_translation='KJV';

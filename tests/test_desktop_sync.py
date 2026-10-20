@@ -48,6 +48,21 @@ class SyncTests(unittest.TestCase):
         sync.start();self.assertEqual(self.finish(sync)['status'],'unchanged')
         self.assertEqual(self.path.read_bytes(),written);self.assertEqual(self.path.stat().st_mtime_ns,mtime)
 
+    def test_cloudflare_credentials_sync_without_activating_or_changing_routes(self):
+        initial={**self.original,'free_cloud_enabled':False,
+                 'free_cloud_config':{'routes':{'summary':{'provider':'groq','model':'keep-local-choice'}}}}
+        self.path.write_text(json.dumps(initial))
+        remote={'cloudflare_api_token':'SECRET-CLOUDFLARE-TOKEN','cloudflare_account_id':'a'*32,
+                'free_cloud_enabled':True,'free_cloud_config':{'routes':{'summary':{'provider':'gemini'}}}}
+        sync,_=self.sync(remote);sync.start();snapshot=self.finish(sync)
+        saved=json.loads(self.path.read_text())
+        self.assertEqual(snapshot['status'],'applied');self.assertEqual(snapshot['updated_count'],2)
+        self.assertEqual(saved['cloudflare_api_token'],remote['cloudflare_api_token'])
+        self.assertEqual(saved['cloudflare_account_id'],remote['cloudflare_account_id'])
+        self.assertFalse(saved['free_cloud_enabled'])
+        self.assertEqual(saved['free_cloud_config'],initial['free_cloud_config'])
+        self.assertNotIn('SECRET-',str(snapshot))
+
     def test_raw_base64_and_url_gcp_transport_stays_private_and_reuses_immutable_file(self):
         payload=base64.b64encode(json.dumps(self.account).encode()).decode()
         for remote in (self.account,{config.GCP_CREDENTIALS_PAYLOAD_KEY:payload},{config.GCP_CREDENTIALS_URL_KEY:'https://sync.invalid/credential'}):

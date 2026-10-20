@@ -72,7 +72,7 @@ TICK_INTERVAL_SEC    = 1.0    # how often the async driver re-checks due streams
 LLM_TEMPERATURE      = 0.1    # low → deterministic JSON
 LLM_MAX_TOKENS       = 220    # enough for the JSON object, no more
 LLM_TIMEOUT_SEC      = 20.0   # soft cap so a hung call can't stall the loop
-PRIMARY_MODEL        = "llama-3.1-8b-instant"  # Groq fast model (mirrors extract_verse_with_llm)
+PRIMARY_MODEL        = "qwen/qwen3.8-27b"
 FALLBACK_MODEL       = "llama3.1-8b"           # Cerebras small model (mirrors _llm_semantic_match)
 
 # ── Deduplication ─────────────────────────────────────────────────────────────
@@ -115,6 +115,7 @@ class WatcherConfig:
     new_words_trigger:     int   = NEW_WORDS_TRIGGER
     new_lines_trigger:     int   = NEW_LINES_TRIGGER
     min_dispatch_gap_sec:  float = MIN_DISPATCH_GAP_SEC
+    global_dispatch_gap_sec: float = 0.0  # free profile: all triggers/streams share one floor
     min_words_to_reason:   int   = MIN_WORDS_TO_REASON
     tick_interval_sec:     float = TICK_INTERVAL_SEC
 
@@ -144,6 +145,7 @@ class WatcherConfig:
         self.new_words_trigger    = max(1, int(self.new_words_trigger))
         self.new_lines_trigger    = max(1, int(self.new_lines_trigger))
         self.min_dispatch_gap_sec = max(0.5, float(self.min_dispatch_gap_sec))
+        self.global_dispatch_gap_sec = max(0.0, float(self.global_dispatch_gap_sec))
         self.min_words_to_reason  = max(1, int(self.min_words_to_reason))
         self.tick_interval_sec    = max(0.25, float(self.tick_interval_sec))
         self.ctx_max_lines        = max(1, int(self.ctx_max_lines))
@@ -357,6 +359,8 @@ class ContextualVerseWatcher:
 
         self.enabled          = self._cfg.enabled   # bound to the settings toggle
         self._lock            = threading.Lock()
+        self._global_last_dispatch = float('-inf')
+        self._last_dispatched_role = None
 
         # ── Activity heartbeat (for a visible "is it running?" status in the GUI) ─
         # Every reasoning cycle records here so the panel can show a live pulse
@@ -549,7 +553,14 @@ class ContextualVerseWatcher:
         due = []
         now = self._now()
         with self._lock:
-            for role, st in self._streams.items():
+            if now - self._global_last_dispatch < self._cfg.global_dispatch_gap_sec:
+                return due
+            streams = list(self._streams.items())
+            if self._cfg.global_dispatch_gap_sec and self._last_dispatched_role:
+                # Give the other stream first refusal instead of starving it
+                # when primary and secondary both have continuous speech.
+                streams.sort(key=lambda item: item[0] == self._last_dispatched_role)
+            for role, st in streams:
                 if st.in_flight:
                     continue
 
@@ -584,6 +595,10 @@ class ContextualVerseWatcher:
                     language=st.language,
                     window_text=st.buffer.window_text(),
                 )))
+                self._global_last_dispatch = now
+                self._last_dispatched_role = role
+                if self._cfg.global_dispatch_gap_sec:
+                    break
         return due
 
     # ── Internal: one full LLM cycle ──────────────────────────────────────────
@@ -672,6 +687,7 @@ class ContextualVerseWatcher:
                     messages=messages,
                     temperature=self._cfg.llm_temperature,
                     max_tokens=self._cfg.llm_max_tokens,
+                    **({'language': snap.language} if getattr(client, 'free_cloud', False) is True else {}),
                 )
                 content = resp.choices[0].message.content
                 # Item 5: debug-level estimated token usage per successful call.

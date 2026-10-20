@@ -361,7 +361,9 @@ class BackendHost:
         self.sync.tick()
         if hasattr(self.runtime, 'autosave'): self.runtime.autosave()
         self.control.tick()
-        self.publisher.emit('host', value={'managed': True, 'notice': self.runtime.error or self.notice,
+        cloud = (self.runtime.engine.free_cloud_status() if hasattr(getattr(self.runtime, 'engine', None), 'free_cloud_status') else {})
+        cloud_notice = ' '.join(f'{role}: {state["message"]}' for role, state in cloud.items() if state['kind'] != 'ok')
+        self.publisher.emit('host', value={'managed': True, 'notice': self.runtime.error or cloud_notice or self.notice,
                                            'verification': self.runtime.verification,
                                            'warmup': self.runtime.warmup.snapshot() if hasattr(self.runtime, 'warmup') else None})
 

@@ -110,7 +110,9 @@ class DesktopSettings:
             with self.lock:
                 revision = self.view['revision'] if self.signature == signature and self.view else uuid.uuid4().hex
                 self.raw, self.signature = raw, signature
-                self.view = {'revision': revision, 'values': project(raw['values']), 'devices': devices}
+                from desktop_cloud_settings import project_cloud
+                self.view = {'revision': revision, 'values': project(raw['values']), 'devices': devices,
+                             'cloud': project_cloud(raw['values'])}
         except Exception:
             with self.lock:
                 self.raw, self.signature, self.view = None, None, None
@@ -126,7 +128,11 @@ class DesktopSettings:
                 raise SettingsError('Settings are unavailable. Check detector settings.')
             if revision != self.view['revision']:
                 raise SettingsError('Settings changed elsewhere. Reload the form before saving.')
-            checked = validate_changes(changes, self.view['values'], self.view['devices'])
+            if isinstance(changes, dict) and set(changes) == {'cloud_settings'}:
+                from desktop_cloud_settings import validate_cloud
+                checked = validate_cloud(changes['cloud_settings'], self.raw['values'])
+            else:
+                checked = validate_changes(changes, self.view['values'], self.view['devices'])
             storage_revision = self.raw.get('storage_revision')
         self.apply(checked, storage_revision)
         self.refresh()

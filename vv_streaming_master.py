@@ -21,6 +21,7 @@ import threading
 import datetime as _dt
 import json
 import uuid
+from free_cloud import FreeCloudRouter, UsageLedger, CloudError
 from observer_feed import begin as _observer_begin, emit as _observer_emit
 from collections import deque
 import subprocess
@@ -68,6 +69,17 @@ normalize_numbers_only = norm_eng
 # One model for Groq verse detection/semantic checks and existing Groq fallbacks.
 # Qwen instruct mode keeps the bounded 48-token verse response free of reasoning.
 GROQ_VERSE_MODEL = "qwen/qwen3.8-27b"
+_free_cloud_router = None
+
+
+def free_cloud_status():
+    return _free_cloud_router.snapshot() if _free_cloud_router else {}
+
+
+def _free_cloud_completion(role, **kwargs):
+    if not _free_cloud_router:
+        raise CloudError('configuration', 'Free cloud routing is not enabled.')
+    return _free_cloud_router.complete(role, **kwargs)
 class _GroqResponse:
     class _Choice:
         class _Msg:
@@ -1619,6 +1631,9 @@ def _role_completion(role: str, messages: list, cloud_client, cloud_model: str,
     Callers are already on daemon threads / executors, so a slow local model
     delays only that background task, never the STT pipeline.
     """
+    if _free_cloud_router:
+        return _free_cloud_completion(role, messages=messages, temperature=temperature,
+                                      max_tokens=max_tokens)
     if _local_llm_active_for(role):
         _client = _local_client_for(role)
         try:
@@ -1647,6 +1662,8 @@ def _role_completion(role: str, messages: list, cloud_client, cloud_model: str,
 def _role_has_llm(role: str, *cloud_clients) -> bool:
     """True when `role` can produce a result at all — either it is routed to a
     live local client, or at least one cloud client exists for it."""
+    if _free_cloud_router:
+        return _free_cloud_router.available(role)
     return _local_llm_active_for(role) or any(c is not None for c in cloud_clients)
 
 
@@ -2025,6 +2042,8 @@ def _watcher_clients_for_provider(provider: str):
     is always a different provider so a single-provider outage still yields a
     result. Unknown/blank → Groq (the fast default). Missing clients just resolve
     to None and the watcher degrades gracefully (skips that attempt)."""
+    if _free_cloud_router:
+        return (_free_cloud_router.watcher_client(), 'free-profile', None, '')
     p = (provider or "groq").lower().strip()
     if p == "local":
         # "Local LLM" chosen in the Watcher Provider dropdown. Honoured only when
@@ -2311,6 +2330,7 @@ async def live_points_loop(interval=90):
             # clients or start another fallback tier after cancellation.
             local_outline = _local_client_for('outline') if _local_llm_active_for('outline') else None
             outline_cerebras, outline_groq = cerebras_client, groq_client
+            free_outline = _free_cloud_router
             failure_policy = LOCAL_LLM_ON_FAILURE
             report_status('generating')
             def fetch_points():
@@ -2318,6 +2338,9 @@ async def live_points_loop(interval=90):
                 # Local LLM. Runs inside run_in_executor (below), so a slow local
                 # model delays only this 90s background loop.
                 if session_stop.is_set(): return None
+                if free_outline:
+                    return free_outline.complete('outline', messages=[{'role': 'user', 'content': prompt}]
+                                                  ).choices[0].message.content.strip()
                 if local_outline:
                     _oc = local_outline
                     try:
@@ -2360,8 +2383,9 @@ async def live_points_loop(interval=90):
                             f"🔄 Groq FALLBACK — live outline — {_dt_fb.datetime.now().strftime('%H:%M:%S')}"
                         )
                         response = outline_groq.chat.completions.create(
-                            model="llama-3.3-70b-versatile",
+                            model=GROQ_VERSE_MODEL,
                             messages=[{"role": "user", "content": prompt}],
+                            max_tokens=1500,
                         )
                         return response.choices[0].message.content.strip()
                     except Exception as e:
@@ -2386,31 +2410,36 @@ def generate_sermon_summary():
     global full_sermon_transcript, full_sermon_transcript_secondary, verses_cited, LLM_ENABLED
     global groq_client, cerebras_client, mistral_client
 
+    primary, secondary, cited = (full_sermon_transcript,
+                                 full_sermon_transcript_secondary, tuple(verses_cited))
+
     if not LLM_ENABLED or not _role_has_llm("summary", mistral_client, cerebras_client, groq_client):
+        if _free_cloud_router:
+            return '⚠️ Summary unavailable: ' + _free_cloud_router.snapshot().get('summary', {}).get('message', 'Check free provider settings.')
         return "⚠️ LLM disabled — add a Mistral, Cerebras, or Groq API key to generate summaries."
 
-    if len(full_sermon_transcript.strip()) < 100:
+    if len(primary.strip()) < 100:
         return "⚠️ Transcript is too short to generate a meaningful summary."
 
     import datetime
     today_str = datetime.datetime.now().strftime("%B %d, %Y  ·  %I:%M %p")
 
-    verse_list = "\n".join([f"- {v}" for v in verses_cited]) if verses_cited else "None detected"
+    verse_list = "\n".join([f"- {v}" for v in cited]) if cited else "None detected"
 
     # ── Dual-transcript prompt ──────────────────────────────────────────────
-    has_secondary = bool(full_sermon_transcript_secondary.strip())
+    has_secondary = bool(secondary.strip())
     if has_secondary:
         transcript_section = (
             f"PRIMARY TRANSCRIPT ({DEEPGRAM_LANGUAGE.upper() if not USE_SARVAM else 'Malayalam/translated'}):\n"
-            f"{full_sermon_transcript}\n\n"
+            f"{primary}\n\n"
             f"SECONDARY TRANSCRIPT ({SECONDARY_LANGUAGE.upper() if SECONDARY_LANGUAGE else 'secondary'}):\n"
-            f"{full_sermon_transcript_secondary}\n\n"
+            f"{secondary}\n\n"
             "Both transcripts are from the SAME sermon captured by two parallel STT engines. "
             "Synthesize the most accurate notes by using the best of both transcripts — "
             "prefer whichever transcript has clearer verse references or speech for each section."
         )
     else:
-        transcript_section = f"Transcript:\n{full_sermon_transcript}"
+        transcript_section = f"Transcript:\n{primary}"
 
     prompt = (
         "You are a precise sermon note-taker. Your ONLY job is to document what was ACTUALLY SAID "
@@ -2451,6 +2480,13 @@ def generate_sermon_summary():
 
     try:
         def fetch_summary():
+            if _free_cloud_router:
+                # Same complete bilingual input + references + route returns the
+                # cached summary even if the display timestamp has changed.
+                return _free_cloud_router.complete('summary',
+                    messages=[{'role': 'user', 'content': prompt}],
+                    cache_key=[primary, secondary,
+                               list(cited)]).choices[0].message.content.strip()
             # 0. Local LLM — ONLY when the "Sermon Summary" role is set to Local
             #    LLM. Summaries are long; the configured timeout applies.
             if _local_llm_active_for("summary"):
@@ -2496,10 +2532,11 @@ def generate_sermon_summary():
             # 3. Try Groq
             if groq_client:
                 try:
-                    logger.info("⏳ Generating Summary via Groq llama-3.3-70b-versatile...")
+                    logger.info(f"⏳ Generating Summary via Groq {GROQ_VERSE_MODEL}...")
                     r = groq_client.chat.completions.create(
-                        model="llama-3.3-70b-versatile",
+                        model=GROQ_VERSE_MODEL,
                         messages=[{"role": "user", "content": prompt}],
+                        max_tokens=6000,
                     )
                     return r.choices[0].message.content.strip()
                 except Exception as e:
@@ -2511,13 +2548,15 @@ def generate_sermon_summary():
         if not summary:
             return "⚠️ Summary failed: All LLM clients failed or none available."
 
-        verse_str = "\n".join([f"- {v}" for v in verses_cited])
+        verse_str = "\n".join([f"- {v}" for v in cited])
         if verse_str:
             summary += "\n\n### Verses Cited:\n" + verse_str
 
         logger.info("✅ Sermon Summary generated!")
         send_sermon_notes_to_discord(summary)
         return summary
+    except CloudError as e:
+        return f'⚠️ Summary stopped: {e}'
     except Exception as e:
         logger.error(f"❌ Failed to generate summary: {e}")
         return f"Error generating summary: {e}"
@@ -2790,6 +2829,10 @@ def configure(
     confirm_request_callback=None,
     bot_bridge_enabled=True,
     live_points_status_callback=None,
+    free_cloud_enabled=False,
+    free_cloud_config=None,
+    cloudflare_api_token='',
+    cloudflare_account_id='',
 ):
     global DEEPGRAM_API_KEY, GROQ_API_KEY, GEMINI_API_KEY, CEREBRAS_API_KEY, MISTRAL_API_KEY, SARVAM_API_KEY
     global SARVAM_API_KEY_BACKUP, _sarvam_using_backup
@@ -2800,6 +2843,7 @@ def configure(
     global show_malayalam_raw, MALAYALAM_TRANSLITERATION
     global DEDUP_WINDOW, COOLDOWN, LLM_ENABLED, BIBLE_TRANSLATION, USE_XPATH
     global groq_client, cerebras_client, mistral_client
+    global _free_cloud_router
     global local_llm_client, local_llm_clients, LOCAL_LLM_ENABLED, LOCAL_LLM_ENDPOINT
     global LOCAL_LLM_HOST, LOCAL_LLM_PORT
     global LOCAL_LLM_MODEL, LOCAL_LLM_TIMEOUT, LOCAL_LLM_ON_FAILURE, LOCAL_LLM_ROLES
@@ -2868,7 +2912,9 @@ def configure(
     CEREBRAS_API_KEY = cerebras_api_key
     MISTRAL_API_KEY  = mistral_api_key
     SARVAM_API_KEY   = sarvam_api_key
-    SARVAM_API_KEY_BACKUP = sarvam_api_key_backup
+    # A quota failure must stop this route in the free profile. Another key does
+    # not establish another allowance; retain the saved backup in legacy mode.
+    SARVAM_API_KEY_BACKUP = '' if free_cloud_enabled else sarvam_api_key_backup
     # Fresh session: always try the primary Sarvam key first. The provider flips
     # this to True (via _mark_sarvam_backup_active) only after a quota error.
     _sarvam_using_backup = False
@@ -2876,6 +2922,15 @@ def configure(
     GCP_CREDENTIALS_PATH = gcp_credentials_path
     LOCAL_WHISPER_ENDPOINT = local_whisper_endpoint
     ASSEMBLYAI_API_KEY = assemblyai_api_key
+    _free_cloud_router = None
+    if free_cloud_enabled:
+        # Free mode is explicitly selected. Missing configuration fails closed;
+        # it never falls back into the legacy key-presence provider cascade.
+        _free_cloud_router = FreeCloudRouter(free_cloud_config,
+            {'groq': GROQ_API_KEY, 'gemini': GEMINI_API_KEY,
+             'cloudflare': cloudflare_api_token, 'cloudflare_account_id': cloudflare_account_id},
+            UsageLedger(os.path.join(os.path.dirname(_log_file_path()), 'free-cloud-usage.sqlite3')))
+        logger.info('Free-only cloud profile enabled; local routes and legacy cloud fallbacks are bypassed.')
     # Normalize "assemblyai_pro" / "assemblyai_multilingual" → "assemblyai" so
     # main() STT_ENGINE == "assemblyai" branches always match.  The model variant
     # is conveyed via AAI_LANGUAGE: "multi" → universal-streaming-multilingual,
@@ -2896,7 +2951,7 @@ def configure(
         logger.warning("⚠️  No Groq key — LLM verse extraction disabled")
 
     # ── Cerebras: live outline + summary fallback ──
-    cerebras_client = _CerebrasClient(api_key=CEREBRAS_API_KEY) if CEREBRAS_API_KEY else None
+    cerebras_client = _CerebrasClient(api_key=CEREBRAS_API_KEY) if CEREBRAS_API_KEY and not _free_cloud_router else None
     if cerebras_client:
         logger.info("📋 Live Outline LLM   : Cerebras  gpt-oss-120b")
         # Bug 1: startup validation ping — runs in background to catch model errors early
@@ -2922,13 +2977,13 @@ def configure(
         threading.Thread(target=_validate_cerebras, daemon=True).start()
 
     # ── Mistral: sermon summary primary ──
-    mistral_client = _MistralClient(api_key=MISTRAL_API_KEY) if MISTRAL_API_KEY else None
+    mistral_client = _MistralClient(api_key=MISTRAL_API_KEY) if MISTRAL_API_KEY and not _free_cloud_router else None
     if mistral_client:
         logger.info("✍️  Sermon Summary LLM : Mistral  mistral-large-latest")
     elif cerebras_client:
         logger.info("✍️  Sermon Summary LLM : Cerebras  gpt-oss-120b  (no Mistral key)")
     elif groq_client:
-        logger.info("✍️  Sermon Summary LLM : Groq  llama-3.3-70b-versatile  (no Mistral/Cerebras key)")
+        logger.info(f"✍️  Legacy summary fallback: Groq {GROQ_VERSE_MODEL}; long inputs require free-profile Gemini routing")
     else:
         logger.warning("⚠️  No LLM keys at all — all LLM features disabled")
 
@@ -2938,7 +2993,7 @@ def configure(
     # guard (_local_llm_active_for) short-circuits on LOCAL_LLM_ENABLED, so no
     # local-LLM code runs, no socket is opened and the cloud paths are byte-for-
     # byte what they were before this feature existed.
-    LOCAL_LLM_ENABLED    = bool(local_llm_enabled)
+    LOCAL_LLM_ENABLED    = bool(local_llm_enabled) and not _free_cloud_router
     local_llm_client     = None
     local_llm_clients    = {}
     LOCAL_LLM_ROLES      = {}
@@ -3254,6 +3309,8 @@ def configure(
                 primary_model=_pm,
                 fallback_model=_fm,
                 llm_interval_sec=watcher_batch_interval,
+                global_dispatch_gap_sec=(max(10, float((_free_cloud_router.config or {}).get('watcher_min_gap', 20)))
+                                         if _free_cloud_router else 0),
                 ctx_max_lines=watcher_window_lines,
                 ctx_max_age_sec=watcher_window_seconds,
                 conf_high=watcher_auto_confidence,
@@ -4385,6 +4442,13 @@ def send_to_discord(verse: str):
 def translate_to_english(text: str) -> str:
     if not text.strip():
         return text
+    if _free_cloud_router:
+        try:
+            return _free_cloud_completion('translation', messages=[{'role': 'user', 'content':
+                'Translate this Malayalam text to English. Return only the translation:\n' + text}]
+                ).choices[0].message.content.strip()
+        except CloudError:
+            return text  # retain the raw source on quota/auth/transport failure
 
     def _is_bad_translation(original: str, result: str) -> bool:
         """Return True if result looks like a failed/offensive/nonsensical translation."""
@@ -4592,7 +4656,11 @@ def _llm_semantic_match(verse_text: str, transcript_excerpt: str, label: str = "
     _client_tag = "Groq" if _client is groq_client else "Cerebras"
     # Semantic match belongs to the "verse" role — when that role is routed to the
     # local LLM it is served locally (with the same fallback/skip policy).
-    if _local_llm_active_for("verse"):
+    if _free_cloud_router:
+        _client_tag = 'Free cloud verse route'
+        if not _free_cloud_router.available('verse'):
+            return False
+    elif _local_llm_active_for("verse"):
         _client_tag = "LocalLLM"
     elif not _client:
         return False

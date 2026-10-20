@@ -236,6 +236,7 @@
     const notice=root.querySelector('[data-connection-notice]');
     if(notice&&notice.textContent!==connectionNotice())notice.textContent=connectionNotice();
     window.detectorSettings?.updateAvailability(window.previewShell.getObserver());
+    window.cloudSettings?.updateAvailability(window.previewShell.getObserver());
     window.liveOutline?.updateAvailability(window.previewShell.getObserver());
     window.observerView.updateRecoveryAvailability(window.previewShell.getObserver());
     const selection=window.getSelection();

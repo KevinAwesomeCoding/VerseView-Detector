@@ -1,27 +1,27 @@
 # VerseView Desktop Preview
 
 A separate Electron dashboard for macOS and Windows, with local engine events,
-**optional start/stop, candidate approval, and non-secret settings**, and a separate sample demo. The
+**start/stop, candidate approval, speech settings and cloud-provider configuration**, and a separate sample demo. The
 Python companion owns microphone/STT, settings, and guarded delivery. Version
-0.11.3 bundles the native backend, recovery, warmup, watcher suggestions, editable outline notes, owned Discord bot controls and private credential sync; external-detector observation still works.
+0.11.6 bundles the native backend, recovery, warmup, watcher suggestions, editable outline notes, owned Discord bot controls and private credential sync, reviewed free cloud routing and consumer cloud Settings; external-detector observation still works.
 The installed detector remains unchanged. Physical acceptance and installation readiness remain open.
 
-## Standalone companion (milestone 6 in progress)
+## Standalone companion
 
 The Mac development artifact now includes a frozen Python companion. Press
 **Launch bundled backend** to create a private preview profile and start the
 host. On first use, existing detector settings and managed GCP credential files
 are copied into that profile, preserving unknown fields and the original files.
-Later launches retain the preview's own changes. Credentials never enter the
-renderer. **Launching does not start recognition**, even when copied settings
+Later launches retain the preview's own changes. Saved credentials never enter the
+observer feed or prefilled forms; replacement fields are write-only. **Launching does not start recognition**, even when copied settings
 have auto-start enabled. Normal launch enumerates input devices; verification
 uses synthetic devices instead.
 
 Press Start engine only when ready to use the configured microphone/provider and
-VerseVIEW target. This stage has used isolated verification only. Backend
+VerseVIEW target. Scoped real speech results and their limits are in PHYSICAL_VERIFICATION.md and SEMANTIC_QUEUE_VERIFICATION.md. Backend
 settings and logs live under `VerseView Desktop Preview/Backend` in the app's
 profile. The folder button exposes that fixed folder, without sending secret
-values to the renderer. Advanced settings remain in its private JSON file; no
+values to the renderer. Cloud providers, hidden key replacement, usage ceilings and Drive sync are available in Settings. Other advanced settings remain in its private JSON file; no
 legacy GUI is required for the supported core workflow.
 
 The host uses the existing engine configure/main, manual confirmation and

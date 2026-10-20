@@ -1,5 +1,125 @@
 # Verse delivery investigation
 
+## October20: cloud Settings integrated in packaged0.11.6
+
+The managed dashboard now exposes reviewed per-feature cloud routes, masked
+write-only credential updates, lower-only usage controls and Drive credential-sync
+configuration.174 Python/53 Node tests and package/archive/frozen startup checks
+pass. Computer Use exercised saved Drive settings, a fixture sync and dummy-key
+save against the actual isolated packaged backend while recognition stayed stopped.
+No real inference, microphone or presentation was started for this integration.
+See [Cloud Settings verification](../desktop-preview/CLOUD_SETTINGS_VERIFICATION.md)
+for exact build provenance, limitations and scoped test evidence. Existing provider
+work is still uncommitted; original installed app and production settings remain
+intact. Overall6/8,75%; original incident unresolved.
+
+## October 20: revised Drive credential JSON and Cloudflare sync support
+
+Validation: all 170 Python tests, page checks, package verification and extracted frozen startup passed for 0.11.5. Archive `2026-10-20T18-23-18-934Z-e039a0d2-darwin-arm64.tar.gz`; SHA-256 `f997a4dbc4437ff1d6d812a03bcb2c492c0b376a3af07b3a90b1aea8acd0b40f`. Runtime manifest source hashes match; no microphone or presentation started.
+
+A private revised JSON was saved outside the repository in Downloads. All 52
+existing Drive fields are preserved; the two added fields are the scoped
+Cloudflare API token and account ID. Existing Groq and Gemini credentials match
+the verified candidate profile. The Drive download succeeded without signing in:
+anyone possessing that link can read the credentials. No Drive upload or sharing
+permission change was performed.
+
+Credential sync now permits the two Cloudflare fields. A regression test verifies
+that syncing these credentials neither enables free-cloud mode nor replaces local
+provider routes. The replacement JSON therefore carries credentials; activating
+the reviewed provider configuration remains a separate local action. Production
+and normal preview settings remain untouched. Candidate version 0.11.5 includes
+this sync compatibility update; the earlier 0.11.4 artifact is retained.
+
+## October20: free cloud LLM routing and isolated candidate verified
+
+**[████████████░░░░] 75% —6/8 milestones, unchanged.** An opt-in free-only LLM
+profile now selects Groq Qwen3.8-27B for verse/semantic checks and the Malayalam
+watcher, Cloudflare Qwen3-30B-A3B for the English watcher, and Gemini
+Flash-Lite3.5 for summaries/outlines. The language split follows measured failures:
+Cloudflare Qwen missed a Malayalam Psalm paraphrase and returned Romans8:21 for
+spoken8:28; Groq passed all6 Malayalam watcher cases and10/10 verse/semantic cases.
+Flash3.8 returned503 for long and short summary probes; this is preserved as a
+transport result, not an invalid-key claim. Two synthetic bilingual Flash-Lite
+summaries retained the tested content, with recorded quote-section/formatting
+limitations. No private sermon or session transcript was uploaded.
+
+Actual personal-account recurring free plans, model quotas and saved-key suffixes
+were checked. The user approved the displayed Groq/Cloudflare terms and explicitly
+requested creation of an account-scoped Workers AI Read/Edit token. It is stored
+privately in an **inactive separate candidate profile**. No billing/payment was
+added. One browser sign-in result included a temporary authentication token in a
+redirect URL before filtering; the newly created API token was kept private, and
+no credential or such URL was saved in repository evidence.
+
+The implementation shares request/token/neuron budgets across streams/features,
+reserves Groq verse capacity, applies a20s global watcher floor to timer **and**
+volume triggers, alternates stream priority, caches unchanged work, checks complete
+bilingual summary token counts and surfaces safe actionable failures. No automatic
+paid/provider fallback or retry was introduced. Free mode suppresses Sarvam's
+quota-backup-key rotation at runtime. Saved production provider settings, local
+model opt-in state and delivery/manual/verification/dedup/semantic guards remain
+intact; local clients are bypassed in the explicit free profile.
+
+**PASS169 Python/50 Node tests**, syntax/offline-page and whitespace checks;
+separate0.11.4 Mac ARM64 frozen startup, package inventory/existing ad-hoc
+verification, archive extraction/extracted startup, and existing frozen fake-provider
+bilingual watcher/manual/duplicate/stopped-action checks. Runtime hashes match the
+frozen manifest. HEAD remains`e039a0d2`, with uncommitted runtime changes and prior
+uncommitted reports preserved. The prior all-platform CI pass is not extended to
+this source state. No real microphone or presentation command occurred.
+
+The [updated audit](FREE_CLOUD_API_AUDIT.md) records exact artifacts/hash, account
+checks, public fixtures, failures, privacy and capacity arithmetic. At20s globally,
+180 watcher calls/hour are shared by both streams: the measured sizes suggest up
+to6h40 English, about2h continuous Malayalam alone, or4h English+Malayalam before
+other optional Groq use. These are conditional estimates, not promised duration.
+Five usual summaries plus ten tests fit the configured20-attempt feature cap when
+token/minute/account capacity remains.
+
+Production settings retain hash
+`e1e2bc2198a328250fe8f3ca1b6b3c3f48928820750916fdc91cada8d26b9760`;
+active preview settings and `/Applications/VerseView Detector.app` were not written.
+The candidate was not activated or installed. A coordinated candidate microphone/
+outline test and recurring-free streaming STT integration remain separate gates:
+Deepgram/Sarvam signup grants do not establish perpetual free operation. Windows
+physical testing remains deferred; original intermittent delivery incident remains
+unresolved. No dependency install, signing configuration change or release.
+
+## October20 09:43–09:45 CDT: real spoken semantic queue release passed
+
+The user approved testing on the Mac's main screen with no external display and
+completed the actual microphone test, then stopped the engine. Deepgram recognized
+“John chapter three verse nineteen.” at09:43:21.138; candidate006ec6480792 was
+command-accepted at09:43:21.165227. The spoken contextual range queued John3:20.
+Repeating the range cancelled/replaced the first queue candidate as designed;
+replacement215db52966d4 reached semantic-ready QUEUED at09:43:49.749181.
+
+Groq rejected the range announcement and the first partial verse excerpt (NO).
+Deepgram then recognized “For everyone that doeth evil,”, “hateth the light,” and
+“neither cometh to the light,” at09:44:47.436,48.749 and50.772. Semantic matching
+returned YES at09:44:53.005. The same queue candidate215db52966d4 emitted
+DELIVERY_REQUESTED at09:44:53.010580 and COMMAND_ACCEPTED at09:44:53.021304,
+within its180-second lifetime. The remaining spoken text “lest his deeds should
+be reproved.” arrived at09:44:54.886. Shutdown completed at09:45:12.387.
+
+**PASS:** real microphone/STT → contextual range → ready queue → semantic match →
+same-candidate command acceptance. The user independently reports that reading
+the verse visibly worked. **Visual evidence limitation:** retrospective Computer
+Use reached VerseVIEW's controller, whose history includes John3:20 and3:19, but
+did not capture the actual presentation window/text during the transition. This
+is user-confirmed visible success, not an automated screenshot-confirmed transition.
+Do not equate controller history or command acceptance with presentation pixels.
+
+Scoped logs are preserved locally at
+`desktop-preview/test-results/semantic-queue-20261020/spoken-queue-events.log`;
+unrelated captured conversation is excluded. Recognition remains stopped; no
+settings changed during this inspection. The unrelated Cerebras402 startup result
+did not prevent the Groq semantic path. Discord empty-URL errors followed accepted
+commands and are a separate integration configuration issue. The aggregate
+“LLM calls:0” shutdown line contradicts detailed semantic calls and must not be
+used to infer zero semantic usage. Original intermittent incident remains unresolved.
+
 ## October20: semantic queue blocker corrected; live test prepared
 
 The user explicitly deferred interactive Windows physical testing and asked to

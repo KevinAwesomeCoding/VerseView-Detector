@@ -1,6 +1,7 @@
 /* Shared typed settings boundary for the renderer and Electron main process. */
 (function (root) {
   'use strict';
+  const cloud = typeof module !== 'undefined' && module.exports ? require('./cloud-policy.js') : root.cloudPolicy;
   const languages = { English: 'en', Malayalam: 'ml', Hindi: 'hi', 'Multi-Language': 'multi' };
   const providers = { deepgram: 'Deepgram', sarvam: 'Sarvam AI', assemblyai_pro: 'AssemblyAI (Universal-3 Pro)',
     assemblyai_multilingual: 'AssemblyAI (Universal-3 Multilingual)', gladia: 'Gladia', gcp: 'Google Cloud STT', local_whisper: 'Local Whisper' };
@@ -28,6 +29,7 @@
     return key === 'bible_translation' && bibles.includes(value);
   }
   function validatePatch(value) {
+    if (value && Object.keys(value).length === 1 && Object.hasOwn(value, 'cloud_settings')) return {cloud_settings: cloud.validate(value.cloud_settings)};
     if (!value || typeof value !== 'object' || Array.isArray(value) || !Object.keys(value).length
       || Object.keys(value).some(key => !fields.includes(key) || !validField(key, value[key]))) throw new Error('Invalid settings changes');
     return Object.fromEntries(Object.entries(value));
@@ -40,7 +42,7 @@
       // Invalid legacy values stay empty so the user can correct them without exporting arbitrary text.
       values[key] = validField(key, item) ? item : key === 'mic_index' ? -1 : key === 'secondary_language' ? null : key === 'dual_stt_enabled' ? false : '';
     }
-    return { revision: value.revision, values, devices: value.devices.slice(0, 256)
+    return { revision: value.revision, values, cloud: cloud.decode(value.cloud), devices: value.devices.slice(0, 256)
       .filter(item => item && Number.isSafeInteger(item.id) && item.id >= 0 && typeof item.label === 'string')
       .map(item => ({ id: item.id, label: item.label.slice(0, 160) })) };
   }

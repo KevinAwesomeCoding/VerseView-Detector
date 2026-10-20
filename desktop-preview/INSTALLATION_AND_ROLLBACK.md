@@ -3,7 +3,7 @@
 The Electron application is still a separate development preview. The original
 installed detector remains the operational app. These steps describe a manual
 preview installation/update; they do not authorize replacing the operational
-app or publishing a release. Physical Mac/Windows acceptance is deferred.
+app or publishing a release. Mac speech acceptance has scoped results in PHYSICAL_VERIFICATION.md and SEMANTIC_QUEUE_VERIFICATION.md. Windows physical acceptance remains deferred.
 
 ## Choose and verify a package
 
@@ -63,7 +63,7 @@ Check it before using that provider; retain its separately secured backup.
 Later launches use the preview's own settings. Changes to the original profile
 are not imported again, and preview changes are not written back to it. The
 dashboard's **Open backend settings folder** button opens its private backend
-directory. Credentials and advanced options stay there, outside the renderer.
+directory. In version0.11.6 and later, Settings → Cloud providers offers reviewed routes, write-only key replacement fields, free-use limits and a Drive download URL. Existing keys are represented only by presence indicators. Other advanced options remain in the private settings file.
 
 Recognition remains stopped after host launch even if copied `auto_start` is
 true. A saved `settings_sync_url` does opt into a credential pull at host launch;

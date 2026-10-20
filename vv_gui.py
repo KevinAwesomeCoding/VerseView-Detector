@@ -2233,6 +2233,10 @@ class VerseViewApp(ctk.CTk):
 
     def _collect_settings(self) -> dict:
         return {
+            # Private cloud profile fields have no editable legacy widgets.
+            # Preserve them through ordinary saves instead of dropping them.
+            **{key: self._s[key] for key in ('free_cloud_enabled', 'free_cloud_config',
+                'cloudflare_api_token', 'cloudflare_account_id') if key in self._s},
             "language":                   self.lang_var.get(),
             "bible_translation":          self.bible_var.get().lower(),
             "display_screen":             self.live_app.get_screen(),
@@ -3146,6 +3150,10 @@ class VerseViewApp(ctk.CTk):
                 local_llm_keep_alive_verse   = s.get("local_llm_keep_alive_verse", ""),
                 local_llm_keep_alive_outline = s.get("local_llm_keep_alive_outline", ""),
                 local_llm_keep_alive_summary = s.get("local_llm_keep_alive_summary", ""),
+                free_cloud_enabled        = s.get('free_cloud_enabled', False),
+                free_cloud_config         = s.get('free_cloud_config', {}),
+                cloudflare_api_token      = s.get('cloudflare_api_token', ''),
+                cloudflare_account_id     = s.get('cloudflare_account_id', ''),
             )
 
             # Fresh session → start with an empty Suggestions panel.

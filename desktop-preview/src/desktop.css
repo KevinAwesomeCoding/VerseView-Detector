@@ -50,6 +50,12 @@ html,body{margin:0;min-height:100%;background:transparent}
 #verseview-prototype .vv-settings-url{grid-column:1/-1}
 #verseview-prototype .vv-settings-message{margin:16px 0;min-height:22px}
 #verseview-prototype .vv-settings-grid :disabled{opacity:.6}
+#verseview-prototype [data-cloud-form] details{border-top:1px solid var(--vv-border);padding:16px 0}
+#verseview-prototype [data-cloud-form] summary{cursor:pointer;font-weight:600;line-height:1.6}
+#verseview-prototype [data-cloud-form] label{display:flex;flex-direction:column;gap:7px;font-size:12px;min-width:0}
+#verseview-prototype [data-cloud-form] .vv-settings-dual{flex-direction:row;align-items:center;margin:12px 0}
+#verseview-prototype [data-cloud-form] input:not([type=checkbox]),#verseview-prototype [data-cloud-form] select{box-sizing:border-box;width:100%;min-width:0;padding:10px;border:1px solid var(--vv-border);border-radius:8px;background:var(--vv-panel);color:var(--vv-ink);font:inherit}
+#verseview-prototype [data-cloud-form] :disabled{opacity:.6}
 @media(max-width:680px){#verseview-prototype .vv-settings-grid{grid-template-columns:minmax(0,1fr)}#verseview-prototype .vv-settings-grid>span{display:none}}
 
 #verseview-prototype .vv-backend-status{display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap;margin-bottom:18px;padding:14px 16px;border:1px solid var(--vv-border);border-radius:12px;background:var(--vv-panel);font-size:13px}
