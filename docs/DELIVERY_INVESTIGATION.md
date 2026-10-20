@@ -1,5 +1,35 @@
 # Verse delivery investigation
 
+## Bilingual physical check prepared — restoration pending
+
+The user explicitly approved preparation of a bounded English/Deepgram plus
+Malayalam/Sarvam test. Recognition was stopped in the same normal packaged0.11.2
+backend PID72557, with no pending candidate. A private baseline was recorded at
+`/tmp/verseview-bilingual-20261019/settings.before.json` (700 folder,600 file).
+Computer Use changed the existing Settings form and received saved acknowledgement
+`ebbc37e1f2f047a7be348d5b6ececcc9`: `dual_stt_enabled=true`,
+`secondary_language=ml`, `secondary_stt_engine=sarvam`. Primary English/Deepgram,
+confidence0.75, manual confirmation and verification remain as saved.
+
+The existing ProfileStore save merges defaults, so it also materialized five
+previously absent local-model default keys: `local_llm_host`, `local_llm_port`,
+and the verse/outline/summary `local_llm_keep_alive_*` keys. Their saved values
+match the defaults in settings.py. No model service was started. These incidental
+keys and their prior absence are recorded for restoration too; do not leave them
+behind or overwrite unrelated later edits. All eight changed keys must be restored
+to their baseline presence/value after recognition is stopped. Credential values
+were not exposed. Production profile and installed app unchanged.
+
+The app is left on Live session with Start enabled, recognition stopped. Provider
+connections and bilingual recognition remain UNVERIFIED until explicit user Start
+and actual spoken input. First test uses ordinary non-reference English/Malayalam
+phrases, so no presentation is requested by the plan. If Sarvam fails, stop and
+preserve evidence without provider/account substitution or blind retry.
+Local preparation/evidence: `desktop-preview/test-results/bilingual-20261019/`.
+No runtime changes, build or full test suites. **TEMPORARY SETTINGS RESTORATION
+PENDING.** Overall remains75%6/8; Windows/semantic/other physical gates remain open.
+
+
 ## 2026-10-19 23:36 CDT: real speech manual hold and approval command pass
 
 The user completed the prepared test in normal packaged **0.11.2**, source
