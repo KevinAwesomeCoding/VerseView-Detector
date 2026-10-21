@@ -46,11 +46,12 @@ jobs:
           cache: npm
           cache-dependency-path: desktop-preview/package-lock.json
       - run: npm ci --no-fund --no-audit
-      - run: npm test
-      - run: npm run check
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
+      - name: Check desktop regressions with retained diagnostics
+        run: python scripts/ci-run.py node-tests node --test "tests/*.test.cjs"
+      - run: npm run check
       - name: Install PortAudio for native Mac builds
         if: runner.os == 'macOS'
         run: brew install portaudio
