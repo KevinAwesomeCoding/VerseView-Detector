@@ -1,8 +1,16 @@
 name: Build VerseView Detector
 
-# Legacy GUI build/release stays available explicitly; main uses the desktop preview workflow.
+# Legacy GUI artifacts build on main; publishing requires an explicit manual choice.
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
+    inputs:
+      publish_release:
+        description: Publish a stable release of the legacy GUI after successful builds
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: write
@@ -162,6 +170,7 @@ jobs:
           path: dist/VerseView-Detector-Mac-Silicon-CrashDebug.zip
 
   release:
+    if: github.event_name == 'workflow_dispatch' && inputs.publish_release
     needs: [build-windows, build-mac-intel, build-mac-silicon]
     runs-on: ubuntu-latest
     permissions:
