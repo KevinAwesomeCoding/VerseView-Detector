@@ -1,5 +1,19 @@
 # Verse delivery investigation
 
+## October 21: optional paid signing and automated speech acceptance scope
+
+The user removed paid Apple/Windows publisher signing and notarization from the
+required project scope. They remain optional distribution choices. Existing
+ad-hoc Mac signing, integrity checks and OS protections were not changed.
+A coverage audit confirmed current Windows frozen smoke checks substitute STT
+and presentation. Known audio fixtures can test real recognition/transport and
+subsequent visible output without a person speaking each run; transcript text
+replay only covers stages after recognition. Automated real-provider/visible
+Windows audio acceptance remains to be implemented, while physical capture,
+device permissions/drivers and display routing retain their separate unverified
+status. No new provider request, credential transfer, install or presentation
+action occurred in this scope update. The original incident remains unresolved.
+
 ## October 21: centered transparent normal icon released in 0.15.1
 
 The normal desktop logo had unequal canvas padding. The unchanged transparent

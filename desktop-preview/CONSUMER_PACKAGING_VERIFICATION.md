@@ -1,5 +1,14 @@
 # Consumer packaging and theme integration — October 21, 2026
 
+## Current distribution scope — October 21, 2026
+
+Per the user's decision, paid Apple Developer ID signing/notarization and Windows
+publisher signing are optional distribution enhancements and no longer release
+blockers. Historical signing limitations below remain factual; they are not
+outstanding required work. Existing Mac ad-hoc signing, signatures/inventory checks
+and OS security protections are preserved. Real-provider audio-fixture acceptance
+and physical microphone/display coverage remain separate from packaging results.
+
 ## 0.15.1 centered transparent default icon
 
 The user reported that the normal icon appeared off-center and asked to use the

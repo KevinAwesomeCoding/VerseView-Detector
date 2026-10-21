@@ -1,5 +1,26 @@
 # Release readiness — October20,2026
 
+## Current release policy — October 21, 2026
+
+Current published application: 0.15.1. This policy supersedes the historical
+candidate/signing requirements below. The user explicitly removed paid Apple
+Developer ID/notarization and Windows publisher signing from the required scope.
+They are optional distribution enhancements, not release blockers. Existing Mac
+ad-hoc signing, package integrity checks and OS security protections remain in
+place; no signing/security settings are removed or weakened. OS prompts remain
+an informational distribution limitation rather than an unfinished feature.
+
+Automated speech acceptance should use known audio fixtures through the actual
+configured STT transport, followed by reference detection, guarded delivery and
+observation of the real VerseVIEW output. Text callback replay covers downstream
+logic only. The existing Windows frozen smoke tests use substituted STT/controller
+services and do not establish real-provider audio recognition or visible output.
+A person need not speak for each automated regression; prerecorded/synthesized
+voices can cover deterministic cases and selected accents, rates and noise.
+Physical microphone capture/device permissions/drivers and real display routing
+remain separate, explicitly unverified hardware checks. Automated audio/visible
+Windows acceptance is still to be implemented; it is not marked passed here.
+
 Current candidate: **0.11.6**, separate desktop preview, shared Mac/Windows source.
 The provider and consumer Settings changes are committed as
 `1e01b24fddc65e9e000b08335f891b7470b3006e` on `codex/desktop-backend` and pushed

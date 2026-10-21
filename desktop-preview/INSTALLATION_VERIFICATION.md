@@ -1,5 +1,16 @@
 # Isolated installation and rollback verification — preview 0.11.1
 
+## Updated scope — October 21, 2026
+
+The user has removed paid Developer ID/notarization and Windows publisher signing
+from release requirements. They are optional; the historical production-signing
+requirements below are superseded. Existing Mac ad-hoc signing/integrity checks
+and OS protections stay intact. Windows installer/runtime/uninstall acceptance
+passed in current native CI; physical Windows capture/display acceptance remains
+unverified. A future audio-fixture test can exercise real STT and visible output
+without requiring a person to speak each time; text injection cannot establish
+STT or microphone capture coverage.
+
 Overall migration: **[████████████░░░░] 75% — 6 of 8 milestones complete**.
 Milestone 6 is complete within its isolated scope. The portable Mac preview
 lifecycle below is verified; milestone 8 remains open for the distribution and
