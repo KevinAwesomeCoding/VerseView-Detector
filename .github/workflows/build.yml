@@ -1,8 +1,7 @@
 name: Build VerseView Detector
 
+# Legacy GUI build/release stays available explicitly; main uses the desktop preview workflow.
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 permissions:
