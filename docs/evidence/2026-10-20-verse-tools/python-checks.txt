@@ -332,4 +332,3 @@ test_sunday_exact_boundaries (test_service_schedule.ScheduleTests.test_sunday_ex
 Ran 203 tests in 6.276s
 
 OK
-
