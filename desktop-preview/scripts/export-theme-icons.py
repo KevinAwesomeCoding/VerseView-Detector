@@ -9,7 +9,7 @@ import subprocess
 from PIL import Image
 
 ROOT = Path(__file__).resolve().parents[1]
-THEMES = ('sage', 'midnight', 'galaxy', 'aurora', 'ember', 'glass')
+THEMES = ('original', 'sage', 'midnight', 'galaxy', 'aurora', 'ember', 'glass')
 DEST = ROOT / 'src/assets/icons'
 
 
@@ -17,9 +17,20 @@ def export():
     DEST.mkdir(parents=True, exist_ok=True)
     for theme in THEMES:
         stem = f'verseview-{theme}'
-        with Image.open(ROOT / 'assets/icon-masters' / f'{stem}.png') as source:
-            assert source.mode == 'RGBA' and source.width == source.height and source.width >= 1024
-            image = source.resize((1024, 1024), Image.Resampling.LANCZOS)
+        source_file = ROOT.parent / 'app_icon.png' if theme == 'original' else ROOT / 'assets/icon-masters' / f'{stem}.png'
+        with Image.open(source_file) as source:
+            assert source.mode == 'RGBA' and source.width == source.height
+            if theme == 'original':
+                # The legacy canvas has unequal padding. Center the unchanged
+                # transparent mark, sharing one canvas across PNG/ICNS/ICO.
+                mark = source.crop(source.getchannel('A').getbbox())
+                scale = 800 / max(mark.size)
+                mark = mark.resize((round(mark.width * scale), round(mark.height * scale)), Image.Resampling.LANCZOS)
+                image = Image.new('RGBA', (1024, 1024))
+                image.paste(mark, ((1024 - mark.width) // 2, (1024 - mark.height) // 2))
+            else:
+                assert source.width >= 1024
+                image = source.resize((1024, 1024), Image.Resampling.LANCZOS)
         image.save(DEST / f'{stem}.png')
         image.save(DEST / f'{stem}.ico', sizes=[(n, n) for n in (16, 20, 24, 32, 40, 48, 64, 128, 256)])
         with TemporaryDirectory() as folder:

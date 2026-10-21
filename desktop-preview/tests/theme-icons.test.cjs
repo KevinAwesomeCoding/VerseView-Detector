@@ -36,12 +36,19 @@ test('every native ICNS contains a decodable 1024px PNG representation', () => {
 });
 
 
-test('original icon assets retain the old app icon bytes', () => {
-  const path = require('node:path');
-  for (const extension of ['png', 'icns', 'ico']) {
-    assert.deepEqual(fs.readFileSync(iconPath('original', extension)),
-      fs.readFileSync(path.join(__dirname, '../..', `app_icon.${extension}`)));
-  }
+test('original transparent logo uses the same centered artwork in every native format', () => {
+  const png = fs.readFileSync(iconPath('original'));
+  const width = png.readUInt32BE(16), height = png.readUInt32BE(20);
+  assert.equal(width, 1024); assert.equal(height, 1024);
+  assert.equal(png[25], 6, 'RGBA color type retains transparency');
+  // Pixel equality, alpha bounds and the actual Dock payload are checked in
+  // the packaged native integration test (iconutil may recompress PNG chunks).
+  const image = loadICNS(iconPath('original', 'icns'), { createFromBuffer: bytes => ({
+    isEmpty: () => false, getSize: () => ({ width: bytes.readUInt32BE(16) })
+  }) });
+  assert.equal(image.getSize().width, 1024);
+  const ico = fs.readFileSync(iconPath('original', 'ico'));
+  assert.equal(ico.readUInt16LE(2), 1); assert.equal(ico.readUInt16LE(4), 9);
 });
 
 test('native startup defaults to the original icon and safely persists explicit theme choices', () => {

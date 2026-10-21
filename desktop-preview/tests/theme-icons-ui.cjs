@@ -38,7 +38,7 @@ fs.mkdirSync(output, { recursive: true });
     assert.ok(images.length >= 2, 'Both sidebar and narrow layout branding exist');
     for (const image of images) {
       assert.equal(image.source, `assets/icons/verseview-${icon}.png`);
-      assert.ok(image.complete && image.width === (icon === 'original' ? 240 : 1024));
+      assert.ok(image.complete && image.width === 1024);
     }
     const appearance = await page.evaluate(() => window.previewShell.getEnvironment().appearance);
     assert.deepEqual(appearance.nativeIcon, { theme: icon, format: 'icns', target: 'dock' });
@@ -49,6 +49,21 @@ fs.mkdirSync(output, { recursive: true });
     await launch();
     profile = await application.evaluate(({ app }) => app.getPath('userData'));
     await check('glass', 'original');
+    const originalLogo = await application.evaluate(({ app, nativeImage }) => {
+      const image = nativeImage.createFromPath(`${app.getAppPath()}/src/assets/icons/verseview-original.png`);
+      const bytes = image.toBitmap(), { width, height } = image.getSize();
+      let left=width, right=-1, top=height, bottom=-1;
+      for(let y=0;y<height;y++)for(let x=0;x<width;x++)if(bytes[(y*width+x)*4+3]>0){left=Math.min(left,x);right=Math.max(right,x);top=Math.min(top,y);bottom=Math.max(bottom,y);}
+      const original = app.dock.setIcon.bind(app.dock);
+      globalThis.originalLogoPayload = null;
+      app.dock.setIcon = image => {globalThis.originalLogoPayload=image.toPNG().toString('base64');return original(image);};
+      return {left,right,top,bottom,width,height,corners:[bytes[3],bytes[(width-1)*4+3],bytes[(height-1)*width*4+3],bytes[bytes.length-1]],expected:image.toPNG().toString('base64')};
+    });
+    assert.ok(Math.abs((originalLogo.left+originalLogo.right+1)/2-originalLogo.width/2)<=1);
+    assert.ok(Math.abs((originalLogo.top+originalLogo.bottom+1)/2-originalLogo.height/2)<=1);
+    assert.deepEqual(originalLogo.corners,[0,0,0,0]);
+    await page.evaluate(()=>window.verseviewDesktop.setTheme('glass',false));
+    assert.equal(await application.evaluate(()=>globalThis.originalLogoPayload),originalLogo.expected);
     assert.equal(await application.evaluate(({ app }) => app.getName()), 'VerseView Detector');
     assert.equal(await application.evaluate(({ app }) => app.isPackaged), Boolean(process.env.PREVIEW_EXECUTABLE));
     await page.screenshot({ path: path.join(output, 'first-launch.png') });
@@ -94,7 +109,7 @@ fs.mkdirSync(output, { recursive: true });
     const final = await page.evaluate(() => window.verseviewDesktop.environment());
     assert.equal(final.appearance.nativeIcon.theme, 'sage');
     assert.deepEqual(errors, []);
-    fs.writeFileSync(path.join(output, 'results.json'), JSON.stringify({ firstLaunchOriginal: 'passed', defaultRestartOriginal: 'passed', packaged: Boolean(process.env.PREVIEW_EXECUTABLE), executable: process.env.PREVIEW_EXECUTABLE || 'source', results, rapidChanges: 'passed', errors,
+    fs.writeFileSync(path.join(output, 'results.json'), JSON.stringify({ centeredTransparentOriginal: 'passed', firstLaunchOriginal: 'passed', defaultRestartOriginal: 'passed', packaged: Boolean(process.env.PREVIEW_EXECUTABLE), executable: process.env.PREVIEW_EXECUTABLE || 'source', results, rapidChanges: 'passed', errors,
       windows: 'Deferred; no Windows graphical testing', dock: 'Real macOS native setter and ICNS decode verified; screenshots recorded separately' }, null, 2));
     console.log(JSON.stringify(results, null, 2));
   } finally {

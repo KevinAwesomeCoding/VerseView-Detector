@@ -1,5 +1,29 @@
 # Consumer packaging and theme integration — October 21, 2026
 
+## 0.15.1 centered transparent default icon
+
+The user reported that the normal icon appeared off-center and asked to use the
+transparent original logo. The legacy PNG's visible bounds were (27,27)-(231,216)
+on a 240px canvas, and its ICNS inherited that unequal padding. The default
+PNG/ICO/ICNS now derive from the unchanged root app_icon.png, cropped to its alpha
+bounds and centered with balanced transparent padding on one 1024px canvas.
+The canonical PNG's bounds are (112,141)-(912,882): horizontal center 512px and
+vertical center 511.5px. Theme variants and runtime theme switching are unchanged.
+macOS can still draw its own rounded icon background; the assets do not contain it.
+
+A disposable signed app copy was tested with AppKit NSWorkspace.setIcon using the
+Galaxy PNG. The API returned success and created Icon\r/Finder metadata, but
+codesign --verify --deep --strict failed with "resource fork, Finder information,
+or similar detritus not allowed". The operational app was not touched. Per the
+user's explicit fallback, dynamic Finder/Applications-folder icons are not shipped;
+only the centered normal icon fix is applied. No native helper/dependency was added.
+
+81 Node tests, syntax/offline checks, packaged alpha/canvas centering, native Dock
+PNG-vs-ICNS pixel equality, first-launch/restart, six theme/restart cases, final
+package/signature and extracted frozen startup checks passed for the separate
+local candidate. All-platform release verification for 0.15.1 is pending.
+
+
 Version 0.15.0 integrates the previously local theme-icon work into the native
 release source. All three supported targets use the VerseView Detector product
 name. No original installed application or normal user settings were replaced.

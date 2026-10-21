@@ -18,3 +18,10 @@ Use case: precise-object-edit. Create the THEME variant of the supplied VerseVie
 - **aurora:** Deep teal #0d1e28, #126f84 globe and book, northern blue and green #58bfb5 light gradients confined inside the mark, pale mint-white dove.
 - **ember:** Warm amber #aa5a20 and gold pages, earthy brown #45301f cover, warm cream-white dove and muted bronze globe.
 - **glass:** Frosted blue #5281a7 and lavender #b8a0e1, translucent frosted-glass book and globe with restrained pearlescent edges, milky semi-transparent dove. Actual alpha transparency through parts of material and zero-alpha background.
+
+
+The `original` runtime exports are generated separately from the unchanged root
+`app_icon.png`. The exporter centers its visible alpha bounds on a transparent
+1024px canvas (800px maximum mark extent) and uses that same canvas for PNG, ICNS
+and ICO. This corrects the legacy canvas's unequal padding. Generated theme
+masters and their eighteen exports are unchanged.
