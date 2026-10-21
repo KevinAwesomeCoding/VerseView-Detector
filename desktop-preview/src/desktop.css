@@ -94,7 +94,7 @@ html,body{margin:0;min-height:100%;background:transparent}
 #verseview-prototype .vv-developer-label{padding:20px 12px 6px;font-size:10px;color:var(--vv-muted)}
 #verseview-prototype .vv-history-row{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:18px 22px;border-top:1px solid var(--vv-border)}
 #verseview-prototype .vv-history-row time{font-size:11px;color:var(--vv-muted);white-space:nowrap}
-#verseview-prototype .vv-layout-setting{display:flex;gap:14px;align-items:center;font-size:13px;margin:18px 0}
+#verseview-prototype .vv-layout-setting{display:flex;gap:14px;align-items:center;font-size:13px;margin:18px 17px}
 #verseview-prototype:not([data-developer="true"]) .vv-live-announcement:has([data-connection-notice]:empty){display:none}
 #verseview-prototype:not([data-developer="true"]) .vv-engine-control:empty{display:none}
 #verseview-prototype:not([data-developer="true"]) .vv-feedback:has([data-connection-notice]:empty){display:none}
@@ -108,3 +108,6 @@ html,body{margin:0;min-height:100%;background:transparent}
 #verseview-prototype:not([data-developer="true"]) .vv-live-announcement{position:static;inline-size:auto;block-size:auto;overflow:visible;clip-path:none;white-space:normal;padding:12px 14px;margin:0 0 16px;border:1px solid var(--vv-border);border-radius:10px;background:var(--vv-panel);font-size:13px}
 /* Keep Stop reachable when the page, rather than a transcript panel, scrolls. */
 #verseview-prototype .vv-topline{position:sticky;top:0;z-index:9;background:var(--vv-bg);padding:12px 14px;border:1px solid var(--vv-border);border-radius:12px}
+
+#verseview-prototype .vv-layout-setting{flex-wrap:wrap}#verseview-prototype .vv-layout-setting select{flex:1;min-width:180px}#verseview-prototype .vv-layout-setting{white-space:nowrap}
+#verseview-prototype .vv-stream-section+.vv-engine-control{margin-top:20px}

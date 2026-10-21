@@ -33,9 +33,11 @@
       return '';
     } catch { return 'Check the microphone, languages, providers and VerseVIEW URL. Use an HTTP or HTTPS URL without credentials or query parameters.'; }
   }
-  function render(snapshot) {
+  function render(snapshot, surface = 'all') {
     sync(snapshot);
     const settings = snapshot.session?.control?.settings;
+    if ((!settings || !draft) && surface === 'speech') return '<section class="vv-panel vv-detector-settings" aria-label="Live speech setup"><h2>Speech setup</h2><p class="vv-caption">Prepare your speech controls without starting listening.</p><button type="button" class="vv-btn" data-consumer-prepare="settings">Prepare speech setup</button></section>';
+    const speech = surface !== 'settings', connection = surface !== 'speech';
     if (!settings || !draft) return '<section class="vv-panel vv-detector-settings"><h2>Speech and VerseVIEW settings</h2><p class="vv-caption">Choose Prepare settings above to load your microphone, language and VerseVIEW options. Listening stays stopped.</p></section>';
     const values = draft.values, control = snapshot.session.control;
     const editable = snapshot.connection === 'connected' && control.state === 'stopped' && control.actions.includes('save_settings');
@@ -45,18 +47,18 @@
     const select = (key, label, items, disabled = false) => `<label>${label}<select data-detector-setting="${key}" ${locked || disabled ? 'disabled' : ''}>${options(items, values[key])}</select></label>`;
     const devices = settings.devices.map(item => [String(item.id), item.label]);
     if (!devices.some(([key]) => key === String(values.mic_index))) devices.unshift([String(values.mic_index), `Unavailable microphone (${values.mic_index})`]);
-    return `<section class="vv-panel vv-detector-settings" aria-label="Detector speech and connection settings"><div class="vv-panel-head"><h2>Speech and VerseVIEW settings</h2><span class="vv-badge">${editable ? 'Engine stopped' : 'Read only'}</span></div>
-      <p class="vv-caption">Save while the engine is stopped. Changes take effect on the next start. ${snapshot.session?.host?.managed ? "Provider credentials and sync are in Connections below; model tuning is available in Developer Mode." : "Credentials and advanced options remain in the detector window."}</p>
+    return `<section class="vv-panel vv-detector-settings" aria-label="${surface === 'speech' ? 'Live speech setup' : 'Detector speech and connection settings'}"><div class="vv-panel-head"><h2>${surface === 'speech' ? 'Speech setup' : surface === 'settings' ? 'Microphone and VerseVIEW' : 'Speech and VerseVIEW settings'}</h2><span class="vv-badge">${editable ? 'Engine stopped' : 'Read only'}</span></div>
+      <p class="vv-caption">Save while the engine is stopped. Changes take effect on the next start. ${surface === 'speech' ? 'Use Settings for microphone, credentials and VerseVIEW connection.' : snapshot.session?.host?.managed ? "Provider credentials and sync are in Connections below; model tuning is available in Developer Mode." : "Credentials and advanced options remain in the detector window."}</p>
       <form data-detector-settings-form novalidate><div class="vv-settings-grid">
-        ${select('mic_index', 'Microphone', devices)}
-        ${select('bible_translation', 'Bible translation', policy.bibles.map(value => [value, value]))}
-        ${select('language', 'Primary language', Object.keys(policy.languages).map(value => [value, value]))}
+        ${connection ? `${select('mic_index', 'Microphone', devices)}
+        ${select('bible_translation', 'Bible translation', policy.bibles.map(value => [value, value]))}` : ''}
+        ${speech ? `${select('language', 'Primary language', Object.keys(policy.languages).map(value => [value, value]))}
         ${select('stt_engine', 'Primary speech provider', policy.providersFor(policy.languages[values.language]).map(key => [key, policy.providers[key]]))}
         <label class="vv-settings-dual"><input type="checkbox" data-detector-setting="dual_stt_enabled" ${values.dual_stt_enabled ? 'checked' : ''} ${locked ? 'disabled' : ''}> Enable a second speech stream</label><span></span>
         ${select('secondary_language', 'Secondary language', ['en', 'ml', 'hi'].map(code => [code, Object.keys(policy.languages).find(name => policy.languages[name] === code)]), !values.dual_stt_enabled)}
-        ${select('secondary_stt_engine', 'Secondary speech provider', policy.providersFor(values.secondary_language || 'en').map(key => [key, policy.providers[key]]), !values.dual_stt_enabled)}
-        <label class="vv-settings-url">VerseVIEW control URL<input type="url" autocomplete="off" spellcheck="false" maxlength="512" data-detector-setting="remote_url" value="${escape(values.remote_url)}" ${locked ? 'disabled' : ''}></label>
-      </div><p class="vv-caption">${snapshot.session?.host?.managed ? "If a microphone is missing, reconnect it and use Runtime in Developer Mode to restart the stopped service." : "The device list comes from the detector. Refresh microphones in its window if hardware changes."} Saving does not open a microphone or test the connection.</p>
+        ${select('secondary_stt_engine', 'Secondary speech provider', policy.providersFor(values.secondary_language || 'en').map(key => [key, policy.providers[key]]), !values.dual_stt_enabled)}` : ''}
+        ${connection ? `<label class="vv-settings-url">VerseVIEW control URL<input type="url" autocomplete="off" spellcheck="false" maxlength="512" data-detector-setting="remote_url" value="${escape(values.remote_url)}" ${locked ? 'disabled' : ''}></label>` : ''}
+      </div><p class="vv-caption">${surface === 'speech' ? 'Stop listening to change speech setup. Changes apply on the next start.' : snapshot.session?.host?.managed ? "If a microphone is missing, reconnect it and use Runtime in Developer Mode to restart the stopped service." : "The device list comes from the detector. Refresh microphones in its window if hardware changes."} Saving does not open a microphone or test the connection.</p>
       <p class="vv-caption vv-settings-message" role="status" aria-live="polite" data-settings-status>${escape(draft.conflict ? 'Settings changed elsewhere. Reload to review the latest values before saving.' : draft.submission ? 'Saving settings; waiting for the detector to acknowledge.' : draft.notice || error || (changed() ? 'Unsaved changes.' : 'No unsaved changes.'))}</p>
       <div class="vv-control-actions"><button type="submit" class="vv-btn vv-btn-primary" data-save-settings ${locked || !changed() || draft.conflict || error ? 'disabled' : ''}>Save settings</button><button type="button" class="vv-btn" data-reload-settings ${draft.submission ? 'disabled' : ''}>Reload settings</button></div></form></section>`;
   }

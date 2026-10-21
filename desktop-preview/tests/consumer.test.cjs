@@ -17,6 +17,7 @@ test('normal Live keeps approvals, truthful delivery and transcript switch witho
  const h=observerHarness();let text=visible(h.view.session(h.s,'vv-studio'));
  for(const expected of ['John 3:16','Command sent','Approve','Dismiss','John 3:18','Full transcript'])assert.match(text,new RegExp(expected));
  assert.doesNotMatch(text,/INTERNAL|FAST-PATH|SEMANTIC-EXTRACT|PID|Standalone backend|Local feed|മലയാളം/);
+ const live=h.view.session(h.s,'vv-studio');assert.ok(live.indexOf('Reference result')<live.indexOf('Observed speech streams'));assert.ok(live.indexOf('Observed speech streams')<live.indexOf('Reference decisions'));
  assert.doesNotMatch(text,/verse.*visible|screen.*verified/i);
  h.s.session.config.streams.secondary.enabled=true;
  assert.match(h.view.session(h.s,'vv-studio'),/data-speech-stream="secondary"/);
@@ -104,4 +105,18 @@ test('normal Connections submits only write-only replacements and sync URL, pres
 test('an explicitly closed backend can be prepared again even while its last snapshot is fresh',async()=>{
  const h=flowHarness();h.s.session.control.state='closed';h.backend({status:'closed',owned:false});
  await h.flow.prepare(false);assert.deepEqual(h.calls,['launch']);
+});
+
+test('Live speech setup contains languages and stream controls, Settings keeps microphone and target, both remain locked when running',()=>{
+ const root=events(),s=snapshot(),policy=require('../src/settings-policy.js');
+ root.querySelectorAll=()=>[];
+ s.session.control.settings={revision:'c'.repeat(32),devices:[{id:0,label:'Test microphone'}],values:{language:'English',stt_engine:'deepgram',dual_stt_enabled:true,secondary_language:'ml',secondary_stt_engine:'sarvam',mic_index:0,remote_url:'http://127.0.0.1:50010/control.html',bible_translation:'KJV'}};
+ s.session.control.state='stopped';s.session.control.actions=['save_settings'];
+ const window={settingsPolicy:policy,previewShell:{getMode:()=> 'observer'}};
+ vm.runInNewContext(source('settings.js'),{window,document:{getElementById:()=>root},Event,setTimeout});
+ const speech=window.detectorSettings.render(s,'speech'),connection=window.detectorSettings.render(s,'settings');
+ for(const key of ['language','stt_engine','dual_stt_enabled','secondary_language','secondary_stt_engine']){assert.match(speech,new RegExp('data-detector-setting="'+key+'"'));assert.doesNotMatch(connection,new RegExp('data-detector-setting="'+key+'"'));}
+ for(const key of ['mic_index','remote_url','bible_translation']){assert.match(connection,new RegExp('data-detector-setting="'+key+'"'));assert.doesNotMatch(speech,new RegExp('data-detector-setting="'+key+'"'));}
+ s.session.control.state='running';const locked=window.detectorSettings.render(s,'speech');
+ assert.match(locked,/data-detector-setting="language" disabled/);assert.match(locked,/data-detector-setting="dual_stt_enabled"[^>]*disabled/);
 });
