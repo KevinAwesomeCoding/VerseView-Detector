@@ -21,7 +21,20 @@ only the centered normal icon fix is applied. No native helper/dependency was ad
 81 Node tests, syntax/offline checks, packaged alpha/canvas centering, native Dock
 PNG-vs-ICNS pixel equality, first-launch/restart, six theme/restart cases, final
 package/signature and extracted frozen startup checks passed for the separate
-local candidate. All-platform release verification for 0.15.1 is pending.
+local candidate. [Native CI run 236](https://github.com/KevinAwesomeCoding/VerseView-Detector/actions/runs/39648630616)
+then passed all three platforms, including Windows install/runtime/uninstall and
+both Mac app-only ZIP/signature/extracted startup checks. The updated
+[0.15.1 beta](https://github.com/KevinAwesomeCoding/VerseView-Detector/releases/tag/desktop-beta-236-1)
+is published from source 13111dae. All three actual downloads passed SHA256 checks;
+a temporary CDN timeout was resolved by streaming verification without rebuilding
+or changing the published packages. Both downloaded Mac apps passed native
+inventory/signature checks, and their original PNG bytes matched committed source.
+Computer Use independently inspected the local extracted app's centered Finder
+icon; macOS still adds its rounded background. The test copy/window was removed
+or closed, original installed application/settings were not changed, and no new
+dependency, security setting or real microphone/presentation action was used.
+[Release evidence](../docs/evidence/releases/desktop-beta-236-1/verification.json)
+records exact platform builds, hashes and the rejected Finder-icon experiment.
 
 
 Version 0.15.0 integrates the previously local theme-icon work into the native

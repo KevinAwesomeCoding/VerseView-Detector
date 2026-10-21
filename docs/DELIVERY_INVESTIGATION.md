@@ -1,5 +1,25 @@
 # Verse delivery investigation
 
+## October 21: centered transparent normal icon released in 0.15.1
+
+The normal desktop logo had unequal canvas padding. The unchanged transparent
+source logo now feeds centered PNG/ICO/ICNS exports for all three targets; theme
+variants and runtime Dock/window switching remain intact. A disposable Finder
+custom-icon experiment failed strict signature verification, so the user's
+fallback was followed: Applications/Finder stays static. Computer Use verified
+centering in Finder and confirmed macOS still draws its own rounded background.
+81 Node tests and packaged alpha/centering/Dock/theme/restart checks passed.
+[CI run 236](https://github.com/KevinAwesomeCoding/VerseView-Detector/actions/runs/39648630616)
+passed Apple Silicon, Intel Mac and Windows builds, tests, signatures/archives and
+Windows installer lifecycle. The published
+[0.15.1 beta](https://github.com/KevinAwesomeCoding/VerseView-Detector/releases/tag/desktop-beta-236-1)
+uses source 13111dae. All published asset hashes and downloaded Mac inventories,
+signatures and icon source bytes were verified. Current installed app/settings
+remain untouched; no live speech, output delivery, dependency install or security
+change occurred. Production signing and physical Windows acceptance remain
+incomplete. The original intermittent delivery incident is still unresolved.
+
+
 ## October 21: branded 0.15.0 beta published with verified local ARM packaging
 
 The user authorized a local Apple Silicon build after both hosted ARM attempts
