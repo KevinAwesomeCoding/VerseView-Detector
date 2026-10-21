@@ -20,9 +20,7 @@ fs.writeFileSync(path.join(source,'settings.json'),JSON.stringify({language:'Eng
   const preview=async ref=>{await tab('reference');await d.locator('[data-verse-field="reference"]').fill(ref);await d.locator('[data-verse-form="preview"] button').click();await page.waitForFunction(r=>{const v=window.previewShell.getObserver().session.control.verses;return v.selected?.reference===r&&v.selected.status==='ready';},ref);};
   const context=async ref=>{await tab('context');await click('reload');await d.locator('[data-verse-field="context"]').fill(ref);await d.locator('[data-verse-form="context"] button[type="submit"]').click();};
   await open();await preview('John 3:21');assert.match(await d.locator('.vv-verse-text').innerText(),/QA fixture KJV/);assert.equal(await d.locator('[data-verse="send"]').isEnabled(),false);assert.equal(await count(),0);
-  await context('John 4:2');await page.waitForFunction(()=>window.previewShell.getObserver().session.control.verses.context.staged);assert.equal(await count(),0);
-  await context('John 3');await page.waitForFunction(()=>window.previewShell.getObserver().session.control.verses.context.chapter==='3');
-  checks.push('Stopped context stages for Start; exact-translation fixture preview stays read-only and cannot send while stopped.');
+  checks.push('Exact-translation fixture preview stays read-only and cannot send while stopped.');
   await tab('chapter');await d.locator('[data-verse-form="chapter"] button').click();await page.waitForFunction(()=>window.previewShell.getObserver().session.control.verses.chapter?.rows.length===8);
   await d.locator('[data-verse="page"][data-page="1"]').click();await page.waitForFunction(()=>window.previewShell.getObserver().session.control.verses.chapter.page===1);
   await d.locator('[data-verse="select"]').first().click();await page.waitForFunction(()=>window.previewShell.getObserver().session.control.verses.selected.reference==='John 3:9');assert.equal(await count(),0);
@@ -44,6 +42,7 @@ fs.writeFileSync(path.join(source,'settings.json'),JSON.stringify({language:'Eng
   await context('John 4');await page.waitForFunction(()=>window.previewShell.getObserver().session.control.verses.context.chapter==='4');assert.equal(await count(),accepted);
   checks.push('Draft survives incoming updates; Worship suppresses manual Send; live context updates present nothing.');
   await d.locator('[data-live-stop]').click();await page.waitForFunction(()=>window.previewShell.getObserver().session.control.state==='stopped');await tab('reference');assert.equal(await d.locator('[data-verse="send"]').isEnabled(),false);
+  await context('John 5:2');await page.waitForFunction(()=>window.previewShell.getObserver().session.control.verses.context.staged&&window.previewShell.getObserver().session.control.verses.context.chapter==='5');assert.equal(await count(),accepted);checks.push('Stopped context stages for next Start without presenting.');
   assert.equal(await d.locator('[data-operator="emergency"]').isEnabled(),true);await d.locator('[data-operator="emergency"]').click();await page.waitForFunction(()=>window.previewShell.getObserver().session.control.operator.status==='saved'&&window.previewShell.getObserver().session.control.operator.emergency,{timeout:30000});checks.push('Stop invalidates selection; emergency saving remains accessible and confirms saved state.');
   await page.screenshot({path:path.join(out,'verse-tools-stopped.png')});assert.deepEqual(errors,[]);
   const processInfo=await app.evaluate(({app})=>({packaged:app.isPackaged,executable:process.execPath}));
