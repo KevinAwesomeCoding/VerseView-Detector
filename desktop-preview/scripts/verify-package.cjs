@@ -29,7 +29,7 @@ const { verify: verifyBackend } = require('./backend-integrity.cjs');
     assert.equal(digest, build.sourceFiles[relative], `Packaged bytes differ: ${relative}`);
   }
   for (const required of ['main.cjs', 'preload.cjs', 'outline-output.cjs', 'outline-preload.cjs', 'src/outline.js', 'src/outline-display.html', 'src/outline-display.js', 'src/outline-display.css', 'appearance.cjs', 'backend-manager.cjs', 'engine-feed.cjs', 'engine-commands.cjs', 'src/index.html', 'src/dashboard.js',
-    'src/transcript-view.js', 'src/operator.js', 'src/consumer.js', 'src/cloud-policy.js', 'src/cloud-settings.js', 'src/settings-policy.js', 'src/settings.js', 'src/desktop.js', 'src/desktop.css', 'src/dashboard.css', 'src/vendor/lucide.min.js', 'src/vendor/lucide.LICENSE']) {
+    'src/verse-tools.js', 'src/verse-tools.css', 'src/transcript-view.js', 'src/operator.js', 'src/consumer.js', 'src/cloud-policy.js', 'src/cloud-settings.js', 'src/settings-policy.js', 'src/settings.js', 'src/desktop.js', 'src/desktop.css', 'src/dashboard.css', 'src/vendor/lucide.min.js', 'src/vendor/lucide.LICENSE']) {
     assert.ok(read(required).length, required);
   }
   if (build.backend) {

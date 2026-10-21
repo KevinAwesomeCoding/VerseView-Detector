@@ -17,9 +17,10 @@ function feedDirectory({ platform, appData, home }) {
 function decodeControl(value) {
   if (!value || !/^[a-f0-9]{32}$/.test(value.id) || !['stopped', 'starting', 'running', 'stopping', 'closed'].includes(value.state)) return null;
   return { id: value.id, state: value.state,
-    actions: Array.isArray(value.actions) ? value.actions.filter(action => ['start', 'stop', 'save_settings', 'panic', 'restore_session', 'discard_session', 'send_suggestion', 'edit_outline', 'start_bot', 'stop_bot', 'pull_settings', 'list_sessions', 'preview_session', 'resume_saved', 'save_session', 'set_worship', 'emergency_save'].includes(action)) : [],
+    actions: Array.isArray(value.actions) ? value.actions.filter(action => ['start', 'stop', 'save_settings', 'panic', 'restore_session', 'discard_session', 'send_suggestion', 'edit_outline', 'start_bot', 'stop_bot', 'pull_settings', 'list_sessions', 'preview_session', 'resume_saved', 'save_session', 'set_worship', 'emergency_save', 'set_context', 'verse_preview', 'chapter_browse', 'send_reference'].includes(action)) : [],
     recovery: decodeRecovery(value.recovery),
     operator: decodeOperator(value.operator),
+    verses: decodeVerses(value.verses),
     suggestions: decodeSuggestions(value.suggestions),
     outline:decodeOutline(value.outline),
     bot:decodeBot(value.bot),
@@ -33,6 +34,21 @@ function decodeControl(value) {
     results: (Array.isArray(value.results) ? value.results : []).slice(-32)
       .filter(item => item && /^[a-f0-9]{32}$/.test(item.id))
       .map(item => ({ id: item.id, action: text(item.action, 16), outcome: text(item.outcome, 24), reason: text(item.reason, 200) })) };
+}
+
+function decodeVerses(v){
+  const id=x=>/^[a-f0-9]{32}$/.test(x||'')?x:null;
+  if(!v||!id(v.context?.revision))return null;
+  const status=x=>['loading','ready','unavailable','stale'].includes(x)?x:'unavailable';
+  const selected=v.selected,chapter=v.chapter,sent=v.last_send;
+  return {context:{revision:v.context.revision,book:text(v.context.book,64),chapter:text(v.context.chapter,3),verse:text(v.context.verse,3),staged:v.context.staged===true},
+    translation:text(v.translation,64),message:text(v.message,400),lookup_busy:v.lookup_busy===true,send_busy:v.send_busy===true,
+    books:(Array.isArray(v.books)?v.books:[]).slice(0,66).filter(b=>b&&text(b.name,64)&&Number.isInteger(b.chapters)&&b.chapters>0&&b.chapters<=150).map(b=>({name:text(b.name,64),chapters:b.chapters})),
+    history:(Array.isArray(v.history)?v.history:[]).slice(-128).filter(r=>r&&text(r.reference,128)).map(r=>({reference:text(r.reference,128),time:text(r.time,32)})),
+    selected:selected&&id(selected.id)?{id:selected.id,reference:text(selected.reference,128),translation:text(selected.translation,64),text:text(selected.text,6000),status:status(selected.status)}:null,
+    chapter:chapter?{reference:text(chapter.reference,128),translation:text(chapter.translation,64),page:Number.isInteger(chapter.page)?Math.max(0,Math.min(24,chapter.page)):0,more:chapter.more===true,status:status(chapter.status),
+      rows:(Array.isArray(chapter.rows)?chapter.rows:[]).slice(0,8).filter(r=>r&&text(r.reference,128)).map(r=>({reference:text(r.reference,128),text:text(r.text,6000)}))}:null,
+    last_send:sent&&id(sent.candidate_id)?{candidate_id:sent.candidate_id,reference:text(sent.reference,128),outcome:text(sent.outcome,64),reason:text(sent.reason,400)}:null};
 }
 
 function decodeOperator(v){

@@ -22,6 +22,12 @@ def verification_download(url,cancelled):
                 language='Hindi',remote_url='https://unsupported.invalid/should-not-apply',dedup_window=0,future='unsupported')
 
 
+def verification_chapter(book, chapter, translation):
+    """Plain fixture text only. Frozen QA must never fetch a live Bible service."""
+    return [{'num': n, 'text': f'QA fixture {translation.upper()} {book} {chapter}:{n}. Synthetic preview text; no live Bible lookup.'}
+            for n in range(1, 37)]
+
+
 def verification_time():
     """Fixed Sunday Malayalam service; selected only by the explicit QA host."""
     return dt.datetime(2026, 10, 18, 12)

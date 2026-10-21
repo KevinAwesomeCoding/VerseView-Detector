@@ -138,6 +138,33 @@ class DeliveryTests(unittest.TestCase):
             worker.join(timeout=2)
             self.assertFalse(worker.is_alive())
 
+    def test_desktop_manual_tools_use_real_worship_duplicate_and_epoch_guards(self):
+        from types import SimpleNamespace
+        from desktop_verses import VerseTools
+        engine._controller = self.ctrl
+        runtime = SimpleNamespace(engine=engine, state=lambda:'running', stop_requested=threading.Event())
+        tools = VerseTools(runtime, lambda *args:[{'num':16,'text':'Synthetic fixture'}])
+        self.addCleanup(tools.join)
+        def preview_send():
+            tools.preview('John 3:16'); tools.lookup_worker.join(2)
+            tools.send(tools.selected['id']); tools.send_worker.join(2)
+            return tools.snapshot()['last_send']
+        engine.set_delivery_mode(worship=True)
+        sent = preview_send()
+        self.assertEqual(sent['outcome'], 'SUPPRESSED')
+        self.assertTrue(any(e['stage']=='worship' and e['candidate_id']==sent['candidate_id'] for e in self.events()))
+        self.ctrl.driver.execute_script.assert_not_called()
+        engine.set_delivery_mode(worship=False)
+        self.assertEqual(preview_send()['outcome'], 'COMMAND_ACCEPTED')
+        count = self.ctrl.driver.execute_script.call_count
+        self.assertEqual(preview_send()['outcome'], 'SUPPRESSED')
+        self.assertEqual(self.ctrl.driver.execute_script.call_count, count)
+        old_epoch = engine._delivery_epoch
+        engine.set_delivery_mode(worship=False)
+        self.assertFalse(engine.deliver_verse('John 3:17', self.ctrl, source='DESKTOP-MANUAL', expected_epoch=old_epoch))
+        self.assertEqual(self.ctrl.driver.execute_script.call_count, count)
+        self.assertEqual(self.events()[-1]['outcome'], 'CANCELLED')
+
     def test_accepted_candidate_reaches_browser_with_one_id(self):
         self.assertTrue(self.send())
         self.assertEqual(self.ctrl.driver.execute_script.call_count, 2)

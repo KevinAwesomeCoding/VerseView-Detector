@@ -158,6 +158,11 @@ class EngineRuntime:
         self.outline = SessionOutline()
         from desktop_operator import OperatorTools
         self.operator = OperatorTools(self)
+        from desktop_verses import VerseTools
+        if verification:
+            from backend_verification import verification_chapter
+            self.verses = VerseTools(self, lookup=verification_chapter)
+        else: self.verses = VerseTools(self)
 
     def state(self):
         if not self.thread or not self.thread.is_alive(): return 'stopped'
@@ -192,6 +197,7 @@ class EngineRuntime:
             # configure resets anchor/quarantine and the secondary buffer.
             # Restore after it, before any recognition tasks can be launched.
             self.engine.restore_session_snapshot(restored)
+        if hasattr(self, 'verses'): self.verses.prepare_start()
         self.recovery.started()
         self.has_started = True
         self.checkpoint_due = time.monotonic() + 15
@@ -205,6 +211,7 @@ class EngineRuntime:
 
     def stop(self):
         self.stop_requested.set()
+        if hasattr(self, 'verses'): self.verses.cancel()
         self.warmup.cancel()
         self.suggestions.cancel()
         self.outline.cancel()
@@ -259,6 +266,7 @@ class EngineRuntime:
             self.outline.cancel()
             self.suggestions.join()
             if hasattr(self,'bot'):self.bot.drain_delivery()
+            if hasattr(self,'verses'):self.verses.join()
             pending = asyncio.all_tasks(self.loop)
             for task in pending: task.cancel()
             if pending: self.loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
@@ -320,6 +328,7 @@ class BackendHost:
         self.clock = clock
         self.store = ProfileStore(config, self.state, lambda: self.devices)
         self.settings = DesktopSettings(self.store.read, self.store.apply)
+        if hasattr(runtime, 'verses'): runtime.verses.translation = lambda: self.store.load()[0].get('bible_translation', 'kjv')
         from desktop_bot import DesktopBot
         self.bot = DesktopBot(runtime,self.store.load)
         runtime.bot = self.bot
@@ -334,7 +343,7 @@ class BackendHost:
         self.publisher.begin({'streams': {}}, origin='callback-replay' if runtime.verification else 'engine')
         self.control = DesktopControl(publisher, self.state, self.start, runtime.stop, enabled=True, settings=self.settings,
                                       panic=runtime.panic, recovery=getattr(runtime, 'recovery', None),
-                                      suggestions=getattr(runtime, 'suggestions', None), outline=getattr(runtime, 'outline', None),bot=self.bot,sync=self.sync,operator=getattr(runtime,'operator',None))
+                                      suggestions=getattr(runtime, 'suggestions', None), outline=getattr(runtime, 'outline', None),bot=self.bot,sync=self.sync,operator=getattr(runtime,'operator',None),verses=getattr(runtime,'verses',None))
 
     def sync_ready(self):
         return self.state()=='stopped' and self.bot.snapshot()['status'] in ('stopped','failed')
@@ -384,6 +393,8 @@ class BackendHost:
         sync_closed=self.sync.close()
         self.control.close()
         if self.runtime.thread: self.runtime.thread.join(timeout=25)
+        verses = getattr(self.runtime, 'verses', None)
+        if verses: verses.join()
         worker = getattr(getattr(self.runtime,'operator',None),'worker',None)
         if not bot_closed or not sync_closed or self.runtime.thread and self.runtime.thread.is_alive() or worker and worker.is_alive(): return False
         self.publisher.close()

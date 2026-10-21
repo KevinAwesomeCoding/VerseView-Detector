@@ -16,6 +16,7 @@ from desktop_recovery import RecoveryError
 from desktop_outline import OutlineError
 from desktop_bot import BotError
 from desktop_sync import SyncError
+from desktop_verses import VerseError
 
 _HEX = re.compile(r"^[a-f0-9]{32}$")
 
@@ -25,7 +26,7 @@ def now_seconds():
 
 
 class DesktopControl:
-    def __init__(self, publisher, state, start, stop, *, enabled=False, clock=now_seconds, settings=None, panic=None, recovery=None, suggestions=None, outline=None, bot=None, sync=None, operator=None):
+    def __init__(self, publisher, state, start, stop, *, enabled=False, clock=now_seconds, settings=None, panic=None, recovery=None, suggestions=None, outline=None, bot=None, sync=None, operator=None, verses=None):
         self.publisher, self.state = publisher, state
         self.start, self.stop, self.enabled, self.clock = start, stop, enabled, clock
         self.settings, self.panic = settings, panic
@@ -35,6 +36,7 @@ class DesktopControl:
         self.bot = bot
         self.sync = sync
         self.operator = operator
+        self.verses = verses
         self.control_id = uuid.uuid4().hex
         self.directory = publisher.directory / f"control-{os.getpid()}-{self.control_id}"
         self.session_id = None
@@ -92,10 +94,15 @@ class DesktopControl:
                 if state == 'stopped' and not operator['busy']: actions.append('resume_saved')
                 if state in ('starting', 'running', 'stopping', 'stopped') and not (operator['busy'] and operator['emergency']): actions.append('emergency_save')
                 if operator['busy']: actions = [a for a in actions if a not in ('start', 'restore_session', 'discard_session')]
+            verses = self.verses.snapshot() if self.verses else None
+            if verses and state in ('stopped', 'running'):
+                if not verses['lookup_busy']: actions.extend(['verse_preview', 'chapter_browse'])
+                if (not verses['send_busy'] and not (operator and operator['busy']) and (not recovery or recovery['status'] not in ('available', 'invalid'))): actions.append('set_context')
+                if state == 'running' and not verses['send_busy'] and not (operator and operator['emergency']): actions.append('send_reference')
             self.publisher.emit('control', value={
                 'id': self.control_id, 'state': state, 'actions': actions, 'settings': settings, 'recovery': recovery, 'suggestions': suggestions,
                 'outline': self.outline.snapshot() if self.outline else None,
-                'bot': bot, 'operator': operator,
+                'bot': bot, 'operator': operator, 'verses': verses,
                 'sync': sync,
                 'pending': [{key: item[key] for key in ('candidate_id', 'reference', 'confidence', 'stream', 'source')}
                             for item in self.pending.values()], 'results': self.results[-32:]})
@@ -143,7 +150,17 @@ class DesktopControl:
             outcome = 'rejected'
             reason = 'Invalid, expired, or stale command'
             created = request.get('created_at')
-            valid = (set(request) <= {'id', 'control_id', 'session_id', 'created_at', 'action', 'candidate_id', 'settings_revision', 'changes', 'recovery_revision', 'suggestion_id', 'outline_revision', 'outline_text', 'record_id', 'record_revision', 'page', 'enabled'}
+            fields = {
+                'approve': {'candidate_id'}, 'reject': {'candidate_id'},
+                'save_settings': {'settings_revision', 'changes'},
+                'restore_session': {'recovery_revision'}, 'discard_session': {'recovery_revision'},
+                'send_suggestion': {'suggestion_id'}, 'edit_outline': {'outline_revision', 'outline_text'},
+                'list_sessions': {'page'}, 'preview_session': {'record_id', 'page'},
+                'resume_saved': {'record_id', 'record_revision'}, 'set_worship': {'enabled'},
+                'set_context': {'reference', 'context_revision'}, 'verse_preview': {'reference'},
+                'chapter_browse': {'reference', 'page'}, 'send_reference': {'selection_id'},
+            }.get(action, set())
+            valid = (set(request) <= {'id', 'control_id', 'session_id', 'created_at', 'action'} | fields
                      and request.get('control_id') == self.control_id
                      and request.get('session_id') == self.session_id
                      and isinstance(created, (float, int)) and not isinstance(created, bool)
@@ -151,10 +168,23 @@ class DesktopControl:
             if valid:
                 try:
                     state = self.state()
-                    if action in ('list_sessions', 'preview_session', 'resume_saved', 'save_session', 'set_worship', 'emergency_save') and self.operator and action in self.publisher.snapshot()['control']['actions']:
+                    if action in ('set_context', 'verse_preview', 'chapter_browse', 'send_reference') and self.verses and action in self.publisher.snapshot()['control']['actions']:
+                        if action == 'set_context':
+                            self.verses.set_context(request.get('context_revision'), request.get('reference'))
+                            self._cancel_pending()
+                            outcome, reason = 'prepared', 'Context updated or staged. No presentation requested.'
+                        elif action == 'send_reference':
+                            self.verses.send(request.get('selection_id'))
+                            outcome, reason = 'requested', 'Send requested through the delivery guards. Observe its outcome.'
+                        else:
+                            self.verses.preview(request.get('reference'), chapter=action == 'chapter_browse', page=request.get('page', 0))
+                            outcome, reason = 'requested', 'Read-only lookup requested. Nothing was presented.'
+                    elif action in ('list_sessions', 'preview_session', 'resume_saved', 'save_session', 'set_worship', 'emergency_save') and self.operator and action in self.publisher.snapshot()['control']['actions']:
                         if action == 'list_sessions': self.operator.library.refresh(request.get('page', 0))
                         elif action == 'preview_session': self.operator.library.preview(request.get('record_id'), request.get('page', 0))
-                        elif action == 'resume_saved': self.operator.resume(request.get('record_id'), request.get('record_revision'))
+                        elif action == 'resume_saved':
+                            self.operator.resume(request.get('record_id'), request.get('record_revision'))
+                            if self.verses: self.verses.reset_context()
                         elif action == 'set_worship':
                             self._cancel_pending()
                             self.operator.set_worship(request.get('enabled'))
@@ -175,6 +205,7 @@ class DesktopControl:
                         if action == 'discard_session' and self.operator and self.recovery.record:
                             self.operator.library.save(self.operator.pending_restore or {'data': self.recovery.record['data']}, 'before start new')
                         self.recovery.choose(request.get('recovery_revision'), action == 'restore_session')
+                        if self.verses: self.verses.reset_context()
                         outcome = 'prepared' if action == 'restore_session' else 'discarded'
                         reason = 'Saved context prepared. Press Start to resume; nothing was presented.' if action == 'restore_session' else 'Recovery checkpoint discarded. Recognition remains stopped.'
                     elif action == 'panic' and state == 'running' and self.panic:
@@ -206,11 +237,11 @@ class DesktopControl:
                             reason = 'Candidate is no longer awaiting approval'
                     else:
                         reason = 'Action unavailable in the current engine state'
-                except (SettingsError, RecoveryError, OutlineError, BotError, SyncError) as exc:
+                except (SettingsError, RecoveryError, OutlineError, BotError, SyncError, VerseError) as exc:
                     outcome, reason = 'rejected', str(exc)
                 except Exception:
                     outcome, reason = 'failed', 'Detector control failed; inspect the detector log'
-            self.results.append(dict(id=command_id, action=action if action in ('start', 'stop', 'approve', 'reject', 'save_settings', 'panic', 'restore_session', 'discard_session', 'send_suggestion', 'edit_outline', 'start_bot', 'stop_bot', 'pull_settings', 'list_sessions', 'preview_session', 'resume_saved', 'save_session', 'set_worship', 'emergency_save') else 'unknown',
+            self.results.append(dict(id=command_id, action=action if action in ('start', 'stop', 'approve', 'reject', 'save_settings', 'panic', 'restore_session', 'discard_session', 'send_suggestion', 'edit_outline', 'start_bot', 'stop_bot', 'pull_settings', 'list_sessions', 'preview_session', 'resume_saved', 'save_session', 'set_worship', 'emergency_save', 'set_context', 'verse_preview', 'chapter_browse', 'send_reference') else 'unknown',
                                      outcome=outcome, reason=reason))
             self.results = self.results[-32:]
             self.refresh()

@@ -114,7 +114,7 @@ for (const [channel, action] of [['preview:start-engine', 'start'], ['preview:st
   });
 }
 ipcMain.handle('preview:operator', (event, sessionId, action, value) => {
-  if(!trusted(event)||!['list_sessions','preview_session','resume_saved','save_session','set_worship','emergency_save'].includes(action))throw new Error('Invalid operator request');
+  if(!trusted(event)||!['list_sessions','preview_session','resume_saved','save_session','set_worship','emergency_save','set_context','verse_preview','chapter_browse','send_reference'].includes(action))throw new Error('Invalid operator request');
   return commands.submit(sessionId,action,undefined,undefined,undefined,undefined,undefined,value);
 });
 ipcMain.handle('preview:window-pin', (event, enabled) => {

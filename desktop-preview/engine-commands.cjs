@@ -8,7 +8,7 @@ const { randomUUID } = require('node:crypto');
 class EngineCommands {
   constructor(reader, { clock = Date.now } = {}) { this.reader = reader; this.clock = clock; }
   async submit(sessionId, action, candidateId, settingsChange, recoveryRevision, suggestionId, outlineChange, operatorChange) {
-    if (!['start', 'stop', 'approve', 'reject', 'save_settings', 'panic', 'restore_session', 'discard_session', 'send_suggestion', 'edit_outline', 'start_bot', 'stop_bot', 'pull_settings', 'list_sessions', 'preview_session', 'resume_saved', 'save_session', 'set_worship', 'emergency_save'].includes(action) || !/^[a-f0-9]{32}$/.test(sessionId || '')) {
+    if (!['start', 'stop', 'approve', 'reject', 'save_settings', 'panic', 'restore_session', 'discard_session', 'send_suggestion', 'edit_outline', 'start_bot', 'stop_bot', 'pull_settings', 'list_sessions', 'preview_session', 'resume_saved', 'save_session', 'set_worship', 'emergency_save', 'set_context', 'verse_preview', 'chapter_browse', 'send_reference'].includes(action) || !/^[a-f0-9]{32}$/.test(sessionId || '')) {
       throw new Error('Invalid detector command');
     }
     if (['approve', 'reject'].includes(action) && (typeof candidateId !== 'string' || !candidateId || candidateId.length > 128)) {
@@ -36,6 +36,17 @@ class EngineCommands {
       if(['list_sessions','preview_session'].includes(action)&&(!Number.isInteger(value.page)||value.page<0||value.page>(action==='list_sessions'?499:8388608)))throw new Error('Invalid session page');
       operatorPayload=value;
     }
+    const verseActions=['set_context','verse_preview','chapter_browse','send_reference'];
+    if(verseActions.includes(action)){
+      const v=operatorChange||{};
+      const keys=action==='set_context'?['reference','context_revision']:action==='send_reference'?['selection_id']:action==='chapter_browse'?['reference','page']:['reference'];
+      if(!v||typeof v!=='object'||Array.isArray(v)||Object.keys(v).some(k=>!keys.includes(k)))throw new Error('Invalid verse tool request');
+      if(action!=='send_reference'&&(typeof v.reference!=='string'||!v.reference.trim()||v.reference.length>128||v.reference.includes('\0')))throw new Error('Enter a bounded Bible reference');
+      if(action==='set_context'&&!/^[a-f0-9]{32}$/.test(v.context_revision||''))throw new Error('Reload the current context');
+      if(action==='send_reference'&&!/^[a-f0-9]{32}$/.test(v.selection_id||''))throw new Error('Preview a reference before sending');
+      if(action==='chapter_browse'&&(!Number.isInteger(v.page)||v.page<0||v.page>24))throw new Error('Invalid chapter page');
+      operatorPayload=v;
+    }
     const snapshot = await this.reader.poll();
     const session = snapshot.session;
     const control = session?.control;
@@ -43,7 +54,7 @@ class EngineCommands {
       || this.clock() - Date.parse(session.updated_at) > 6000 || control.state === 'closed') {
       throw new Error('Detector session unavailable; refresh before acting');
     }
-    if (['start', 'stop', 'save_settings', 'panic', 'restore_session', 'discard_session', 'send_suggestion', 'edit_outline', 'start_bot', 'stop_bot', 'pull_settings', 'list_sessions', 'preview_session', 'resume_saved', 'save_session', 'set_worship', 'emergency_save'].includes(action) ? !control.actions.includes(action)
+    if (['start', 'stop', 'save_settings', 'panic', 'restore_session', 'discard_session', 'send_suggestion', 'edit_outline', 'start_bot', 'stop_bot', 'pull_settings', 'list_sessions', 'preview_session', 'resume_saved', 'save_session', 'set_worship', 'emergency_save', 'set_context', 'verse_preview', 'chapter_browse', 'send_reference'].includes(action) ? !control.actions.includes(action)
       : control.state !== 'running' || !control.pending.some(item => item.candidate_id === candidateId)) {
       throw new Error('Action is no longer available');
     }
