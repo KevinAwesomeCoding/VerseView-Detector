@@ -107,12 +107,10 @@ wrapper so a repeat failure exposes the actual assertion in check annotations.
 The rerun [39550861376](https://github.com/KevinAwesomeCoding/VerseView-Detector/actions/runs/39550861376)
 passed Windows JavaScript tests and proceeded to the native build. The initial
 assertion remains unavailable; no application change is attributed to that failure.
-Windows x64 and Mac ARM64 completed successfully, including native frozen checks,
-packaging, archive extraction and startup verification. Intel Mac passed the earlier
-run with identical application code; at this report checkpoint its rerun is still
-installing dependencies. The workflow-only rerun is therefore not labelled fully
-green. `native-ci.json` preserves the run/job checkpoint; Windows physical testing
-remains unverified.
+The rerun is now **fully green on Windows x64, Mac ARM64 and Intel Mac**, including
+desktop/Python tests, native frozen checks, packaging, archive extraction and
+startup verification. `native-ci.json` records all three successful jobs. This closes
+the pending CI check; physical Windows UI/audio and live output remain unverified.
 
 ## Cleanup and remaining work
 
