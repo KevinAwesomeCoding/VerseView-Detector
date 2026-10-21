@@ -120,3 +120,11 @@ test('Live speech setup contains languages and stream controls, Settings keeps m
  s.session.control.state='running';const locked=window.detectorSettings.render(s,'speech');
  assert.match(locked,/data-detector-setting="language" disabled/);assert.match(locked,/data-detector-setting="dual_stt_enabled"[^>]*disabled/);
 });
+
+test('emergency state replaces stale preparation notices and reports stopped after saving',()=>{
+ const h=observerHarness();h.s.session.control.state='stopped';
+ h.s.session.control.operator={emergency:true,busy:false,status:'saved',message:'Session saved. Listening is stopped.'};
+ h.window.consumerFlow.state=()=>({notice:'Start requested. Waiting for speech readiness.'});
+ assert.equal(h.view.consumerNotice(h.s),'Session saved. Listening is stopped.');
+ assert.match(h.view.compactControls(h.s),/>Stopped</);
+});

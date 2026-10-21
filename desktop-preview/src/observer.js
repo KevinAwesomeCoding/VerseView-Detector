@@ -26,7 +26,7 @@
     const s=snapshot.session,c=s?.control,backend=window.previewShell.getBackend();
     const flow=window.consumerFlow?.state()||{},connected=snapshot.connection==='connected';
     const running=['running','starting','stopping'].includes(c?.state),error=Object.values(s?.streams||{}).some(v=>v.state==='error');
-    const label=flow.busy?'Preparing…':!connected&&backend.owned?'Connection unavailable':error?'Needs attention':running?c.state==='running'?'Listening':c.state==='stopping'?'Stopping…':'Starting…':connected?'Ready':'Stopped';
+    const label=flow.busy?'Preparing…':!connected&&backend.owned?'Connection unavailable':c?.operator?.emergency?c.operator.busy?'Stopping & saving…':'Stopped':error?'Needs attention':running?c.state==='running'?'Listening':c.state==='stopping'?'Stopping…':'Starting…':connected?'Ready':'Stopped';
     const disabled=flow.busy||command?.outcome==='submitted';
     return `<div class="vv-consumer-status" aria-label="Listening controls"><span class="vv-badge ${running&&!error?'vv-ok':''}"><span class="vv-dot"></span>${label}</span><div class="vv-control-actions">${running?`<button class="vv-btn vv-btn-primary" type="button" data-live-stop ${!connected||!c.actions.includes('stop')?'disabled':''}>Stop listening</button>`:`<button class="vv-btn vv-btn-primary" type="button" data-consumer-prepare="start" ${disabled||!window.verseviewDesktop?'disabled':''}>Start listening</button>`}${flow.busy?'<button class="vv-btn" type="button" data-consumer-cancel>Cancel preparation</button>':''}${c?.actions.includes('panic')?`<button class="vv-btn" type="button" data-engine-action="panic" data-engine-session="${s.session_id}" ${!connected?'disabled':''}>Clear output</button>`:''}${window.operatorTools?.safety(snapshot)||''}</div></div>`;
   }
@@ -34,6 +34,8 @@
     const c=snapshot.session?.control,flow=window.consumerFlow?.state();
     if(flow?.busy)return flow.notice;
     if(snapshot.connection!=='connected'&&window.previewShell.getBackend().owned)return 'Connection lost. Listening status is unknown; reconnect before sending commands.';
+    if(c?.operator?.emergency||c?.operator?.status==='failed')return c.operator.message;
+    if(c?.state==='stopped'&&c?.operator?.message)return c.operator.message;
     if(c?.sync&&['pulling','failed','conflict'].includes(c.sync.status))return c.sync.message;
     const error=Object.entries(snapshot.session?.streams||{}).find(([,v])=>v.state==='error');
     if(error)return `${streamName(snapshot.session,error[0])}: speech recognition needs attention. Check the provider connection and allowance in Settings.`;
