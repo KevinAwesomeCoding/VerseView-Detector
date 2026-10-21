@@ -1,240 +1,60 @@
 name: Build VerseView Detector
 
-# Legacy GUI artifacts build on main; publishing requires an explicit manual choice.
+# Every main push builds the current desktop app and publishes a verified beta.
 on:
   push:
     branches: [main]
   workflow_dispatch:
-    inputs:
-      publish_release:
-        description: Publish a stable release of the legacy GUI after successful builds
-        type: boolean
-        required: false
-        default: false
 
 permissions:
-  contents: write
-
-env:
-  # Transitional flag from the Node 20 -> 24 actions migration. The pinned
-  # actions below (@v4/@v5) run on their declared Node runtime and are Node 24
-  # compatible, so this is forward-compatible and harmless. Safe to drop once
-  # every action natively targets Node 24.
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  contents: read
 
 jobs:
-
-  build-windows:
-    runs-on: windows-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Python 3.11
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install pyaudio
-          pip install pyinstaller customtkinter selenium webdriver-manager certifi requests websockets charset-normalizer sarvamai pynput deepgram-sdk PyATEMMax zeroconf discord.py aiohttp "assemblyai>=0.41.0" "google-cloud-speech>=2.21.0"
-
-      - name: Verify tkinter
-        run: python -c "import tkinter; print('tkinter OK')"
-
-      - name: Write version
-        shell: pwsh
-        run: echo "build-$($env:GITHUB_SHA.Substring(0,7))-${{ github.run_number }}" | Out-File -FilePath version.txt -Encoding utf8 -NoNewline
-
-      - name: Build EXE
-        run: pyinstaller --clean verseview.spec
-
-      - name: Upload Windows artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: VerseView-Detector-Windows
-          path: dist/VerseView_Detector.exe
-
-
-  build-mac-intel:
-    runs-on: macos-15-intel
-    env:
-      MACOSX_DEPLOYMENT_TARGET: "10.15"
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Python 3.11
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Install PortAudio
-        run: brew install portaudio
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          # PyAudio builds from source on macOS and must find Homebrew's PortAudio.
-          # `brew --prefix` resolves to /usr/local on Intel and /opt/homebrew on
-          # Apple Silicon, so this is correct on both runners.
-          export LDFLAGS="-L$(brew --prefix portaudio)/lib"
-          export CFLAGS="-I$(brew --prefix portaudio)/include"
-          pip install --no-cache-dir pyaudio
-          pip install pyinstaller customtkinter selenium webdriver-manager certifi requests websockets charset-normalizer sarvamai pynput deepgram-sdk PyATEMMax zeroconf discord.py aiohttp "assemblyai>=0.41.0" "google-cloud-speech>=2.21.0"
-
-      - name: Write version
-        run: echo "build-${GITHUB_SHA::7}-${{ github.run_number }}" > version.txt
-
-      - name: Build App
-        run: pyinstaller --clean verseview.spec
-
-      - name: Rename App
-        run: mv "dist/VerseView_Detector.app" "dist/VerseView Detector.app"
-
-      - name: Ad-hoc sign App
-        run: codesign --force --deep --sign - "dist/VerseView Detector.app"
-
-      - name: Zip the Intel App and Raw UNIX Folder
-        run: |
-          cd dist
-          mkdir "VerseView-Mac-Intel-Release"
-          mv "VerseView Detector.app" "VerseView-Mac-Intel-Release/"
-          mv "VerseView_Detector" "VerseView-Mac-Intel-Release/VerseView Detector (Raw Executable)"
-          zip -ry "VerseView-Detector-Mac-Intel.zip" "VerseView-Mac-Intel-Release"
-
-      - name: Upload Mac Intel Zip
-        uses: actions/upload-artifact@v4
-        with:
-          name: VerseView-Detector-Mac-Intel
-          path: dist/VerseView-Detector-Mac-Intel.zip
-
-  build-mac-silicon:
-    runs-on: macos-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Python 3.11
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Install PortAudio
-        run: brew install portaudio
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          # On Apple Silicon, Homebrew lives under /opt/homebrew (not /usr/local),
-          # so PyAudio's source build needs these flags to locate PortAudio.
-          export LDFLAGS="-L$(brew --prefix portaudio)/lib"
-          export CFLAGS="-I$(brew --prefix portaudio)/include"
-          pip install --no-cache-dir pyaudio
-          pip install pyinstaller customtkinter selenium webdriver-manager certifi requests websockets charset-normalizer sarvamai pynput deepgram-sdk PyATEMMax zeroconf discord.py aiohttp "assemblyai>=0.41.0" "google-cloud-speech>=2.21.0"
-
-      - name: Write version
-        run: echo "build-${GITHUB_SHA::7}-${{ github.run_number }}" > version.txt
-
-      - name: Build App
-        run: pyinstaller --clean verseview.spec
-
-      - name: Rename App
-        run: mv "dist/VerseView_Detector.app" "dist/VerseView Detector.app"
-
-      - name: Ad-hoc sign App
-        run: codesign --force --deep --sign - "dist/VerseView Detector.app"
-
-      - name: Zip the Final App
-        run: |
-          cd dist
-          zip -ry "VerseView-Detector-Mac-Silicon-App.zip" "VerseView Detector.app"
-
-      - name: Zip the Raw Crash/Debug Folder
-        run: |
-          cd dist
-          zip -ry "VerseView-Detector-Mac-Silicon-CrashDebug.zip" "VerseView_Detector/"
-
-      - name: Upload Mac Silicon App
-        uses: actions/upload-artifact@v4
-        with:
-          name: VerseView-Detector-Mac-Silicon-App
-          path: dist/VerseView-Detector-Mac-Silicon-App.zip
-
-      - name: Upload Mac Silicon Crash File
-        uses: actions/upload-artifact@v4
-        with:
-          name: VerseView-Detector-Mac-Silicon-CrashDebug
-          path: dist/VerseView-Detector-Mac-Silicon-CrashDebug.zip
+  desktop:
+    name: Desktop app
+    uses: ./.github/workflows/desktop-preview.yml
 
   release:
-    if: github.event_name == 'workflow_dispatch' && inputs.publish_release
-    needs: [build-windows, build-mac-intel, build-mac-silicon]
+    name: Publish desktop beta
+    needs: desktop
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
+          python-version: '3.13'
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: VerseView-Desktop-Preview-*
           path: ./artifacts
-
-      - name: Get short SHA
-        id: sha
-        run: echo "short=$(echo $GITHUB_SHA | cut -c1-7)" >> $GITHUB_OUTPUT
-
-      - name: Get commit message
-        id: commit
-        run: |
-          MSG=$(git log -1 --pretty=%B | head -20)
-          echo "message<<EOF" >> $GITHUB_OUTPUT
-          echo "$MSG" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
-
-      - name: Create Release
+      - name: Verify and stage all three native downloads
+        run: python desktop-preview/scripts/prepare-release.py --artifacts ./artifacts --output ./release
+      - name: Publish beta downloads
         uses: softprops/action-gh-release@v2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          tag_name: build-${{ steps.sha.outputs.short }}-${{ github.run_number }}
-          name: VerseView Detector Build ${{ steps.sha.outputs.short }}
+          tag_name: desktop-beta-${{ github.run_number }}-${{ github.run_attempt }}
+          name: VerseView Desktop Beta ${{ github.run_number }}.${{ github.run_attempt }}
+          prerelease: true
+          make_latest: false
+          fail_on_unmatched_files: true
+          generate_release_notes: true
           body: |
-            ## 📝 What's Changed
-            ${{ steps.commit.outputs.message }}
+            Automated beta of the current desktop app with its bundled Python backend.
+            Source commit: `${{ github.sha }}`
 
-            ---
-            **Commit:** `${{ github.sha }}`
+            Downloads: Windows x64 (`win32-x64.zip`), Apple Silicon Mac (`darwin-arm64.tar.gz`),
+            and Intel Mac (`darwin-x64.tar.gz`). Full filenames include their build timestamp.
+            SHA256 checksums and extracted-runtime verification reports are included.
 
-            **Standard Downloads:**
-            - `VerseView_Detector.exe` → Windows
-            - `VerseView-Detector-Mac-Intel.zip` → Older Macs (Intel chips) — *Includes the .app AND the raw UNIX executable folder.*
-            - `VerseView-Detector-Mac-Silicon-App.zip` → Newer Macs (M1/M2/M3/M4 chips)
-
-            **Crash/Debug Versions (Only use if the app crashes!):**
-            - `VerseView-Detector-Mac-Silicon-CrashDebug.zip`
-
-            ---
-            ### 🍎 Mac: "app is damaged" / "can't be opened" on first launch
-            These builds are ad-hoc signed but **not notarized**, so macOS Gatekeeper
-            quarantines them after download. To open:
-
-            1. Unzip the app.
-            2. In Terminal, clear the quarantine flag (replace the path with where you put it):
-               ```
-               xattr -cr "/Applications/VerseView Detector.app"
-               ```
-            3. Double-click to launch (or right-click → **Open** the first time).
-
-            On first run, allow **Microphone** access when prompted (or enable it later
-            under System Settings → Privacy & Security → Microphone).
+            Beta status: production signing/notarization and remaining physical microphone,
+            visible VerseVIEW output and Windows UI acceptance are still incomplete.
+            The original intermittent delivery incident remains unresolved.
           files: |
-            ./artifacts/VerseView-Detector-Windows/VerseView_Detector.exe
-            ./artifacts/VerseView-Detector-Mac-Intel/VerseView-Detector-Mac-Intel.zip
-            ./artifacts/VerseView-Detector-Mac-Silicon-App/VerseView-Detector-Mac-Silicon-App.zip
-            ./artifacts/VerseView-Detector-Mac-Silicon-CrashDebug/VerseView-Detector-Mac-Silicon-CrashDebug.zip
-          draft: false
-          prerelease: false
+            ./release/*.zip
+            ./release/*.tar.gz
+            ./release/*.sha256
+            ./release/*-archive-verification.json

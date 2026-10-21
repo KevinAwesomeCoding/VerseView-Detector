@@ -1,21 +1,9 @@
 name: Build desktop preview
 
-# Deliberately separate from production builds/releases. No publishing or signing credentials.
+# Reusable native desktop build. Release publishing belongs to the caller.
 on:
+  workflow_call:
   workflow_dispatch:
-  push:
-    branches:
-      - main
-      - codex/desktop-backend
-    paths:
-      - '*.py'
-      - 'stt_providers/**'
-      - 'tests/**'
-      - 'verseview.spec'
-      - 'requirements.txt'
-      - '.github/workflows/desktop-preview.yml'
-      - 'desktop-preview/**'
-      - '!desktop-preview/*.md'
 
 permissions:
   contents: read

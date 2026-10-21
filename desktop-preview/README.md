@@ -332,9 +332,19 @@ npm run package:mac
 npm run package:windows
 ```
 
-The previously approved local dependencies are pinned in the lockfile. The
-manual `desktop-preview.yml` workflow builds Windows x64, Mac ARM64, and Mac
-Intel independently of the production workflow. It does not publish releases.
+The previously approved local dependencies are pinned in the lockfile. Every push
+to `main` now runs **Build VerseView Detector** (`.github/workflows/build.yml`). It
+calls the reusable `desktop-preview.yml` workflow to test and build the current
+Electron app with its frozen Python backend on Windows x64, Mac ARM64 and Mac Intel.
+The reusable workflow can also be run manually without publishing.
+
+After all three platforms pass, the main workflow verifies the extracted-runtime
+reports and archive checksums again, then automatically publishes a **GitHub beta
+release** containing the native packages, SHA256 files and verification reports.
+A missing, failed or corrupt package prevents publishing. Beta releases do not
+replace the existing stable release. These remain preview builds; production
+signing/notarization and the remaining physical acceptance gates are incomplete.
+Uncommitted local changes are not included in GitHub builds.
 Other architectures can be selected explicitly:
 
 ```sh
