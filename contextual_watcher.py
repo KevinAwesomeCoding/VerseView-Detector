@@ -198,6 +198,7 @@ class WatcherSuggestion:
     window_text:         str            # the transcript window the LLM reasoned over
     created_at:          float
     raw:                 dict           # the parsed JSON, verbatim, for debugging
+    delivery_epoch:      Optional[int] = None
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -376,6 +377,8 @@ class ContextualVerseWatcher:
 
         # One stream state per active STT role. The secondary is only created
         # when a secondary language is supplied (mirrors DUAL_STT_ENABLED).
+        self._generation = 0
+        self.delivery_epoch = lambda: None
         self._streams: dict[str, _StreamState] = {
             "primary": self._make_stream("primary", primary_language or "en"),
         }
@@ -432,6 +435,7 @@ class ContextualVerseWatcher:
         self._primary_model  = self._cfg.primary_model
         self._fallback_model = self._cfg.fallback_model
         with self._lock:
+            self._generation += 1
             for st in self._streams.values():
                 st.buffer = _RollingContextBuffer(
                     max_lines=self._cfg.ctx_max_lines,
@@ -594,6 +598,8 @@ class ContextualVerseWatcher:
                     role=role,
                     language=st.language,
                     window_text=st.buffer.window_text(),
+                    generation=self._generation,
+                    delivery_epoch=self.delivery_epoch(),
                 )))
                 self._global_last_dispatch = now
                 self._last_dispatched_role = role
@@ -615,8 +621,9 @@ class ContextualVerseWatcher:
         except Exception as e:
             self._log.debug(f"🔭 watcher LLM error ({role}): {e} — cycle skipped")
         finally:
-            self._clear_in_flight(role)
+            if snap.generation == self._generation: self._clear_in_flight(role)
 
+        if snap.generation != self._generation: return
         if not raw_text:
             # No usable reply (no client wired / timeout / provider error /
             # rate-limited). Still a "cycle" for heartbeat purposes so the GUI
@@ -647,6 +654,7 @@ class ContextualVerseWatcher:
                 discarded=True,
             )
             return
+        result.delivery_epoch = snap.delivery_epoch
         self._record_cycle(f"suggested {result.suggested_reference}", suggested=True)
         self._emit(result)
 
@@ -951,3 +959,5 @@ class _Snapshot:
     role:        str
     language:    str
     window_text: str
+    generation:  int = 0
+    delivery_epoch: Optional[int] = None

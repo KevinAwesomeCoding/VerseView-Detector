@@ -26,9 +26,9 @@
     const s=snapshot.session,c=s?.control,backend=window.previewShell.getBackend();
     const flow=window.consumerFlow?.state()||{},connected=snapshot.connection==='connected';
     const running=['running','starting','stopping'].includes(c?.state),error=Object.values(s?.streams||{}).some(v=>v.state==='error');
-    const label=flow.busy?'Preparing…':!connected&&backend.owned?'Connection unavailable':error?'Needs attention':running?c.state==='running'?'Listening':'Starting…':connected?'Ready':'Stopped';
+    const label=flow.busy?'Preparing…':!connected&&backend.owned?'Connection unavailable':error?'Needs attention':running?c.state==='running'?'Listening':c.state==='stopping'?'Stopping…':'Starting…':connected?'Ready':'Stopped';
     const disabled=flow.busy||command?.outcome==='submitted';
-    return `<div class="vv-consumer-status" aria-label="Listening controls"><span class="vv-badge ${running&&!error?'vv-ok':''}"><span class="vv-dot"></span>${label}</span><div class="vv-control-actions">${running?`<button class="vv-btn vv-btn-primary" type="button" data-live-stop ${!connected||!c.actions.includes('stop')?'disabled':''}>Stop listening</button>`:`<button class="vv-btn vv-btn-primary" type="button" data-consumer-prepare="start" ${disabled||!window.verseviewDesktop?'disabled':''}>Start listening</button>`}${flow.busy?'<button class="vv-btn" type="button" data-consumer-cancel>Cancel preparation</button>':''}${c?.actions.includes('panic')?`<button class="vv-btn" type="button" data-engine-action="panic" data-engine-session="${s.session_id}" ${!connected?'disabled':''}>Clear output</button>`:''}</div></div>`;
+    return `<div class="vv-consumer-status" aria-label="Listening controls"><span class="vv-badge ${running&&!error?'vv-ok':''}"><span class="vv-dot"></span>${label}</span><div class="vv-control-actions">${running?`<button class="vv-btn vv-btn-primary" type="button" data-live-stop ${!connected||!c.actions.includes('stop')?'disabled':''}>Stop listening</button>`:`<button class="vv-btn vv-btn-primary" type="button" data-consumer-prepare="start" ${disabled||!window.verseviewDesktop?'disabled':''}>Start listening</button>`}${flow.busy?'<button class="vv-btn" type="button" data-consumer-cancel>Cancel preparation</button>':''}${c?.actions.includes('panic')?`<button class="vv-btn" type="button" data-engine-action="panic" data-engine-session="${s.session_id}" ${!connected?'disabled':''}>Clear output</button>`:''}${window.operatorTools?.safety(snapshot)||''}</div></div>`;
   }
   function consumerNotice(snapshot){
     const c=snapshot.session?.control,flow=window.consumerFlow?.state();
@@ -43,7 +43,7 @@
   function consumerDecisions(snapshot){
     const s=snapshot.session,c=s?.control;if(!c)return '<section class="vv-engine-control"></section>';
     reconcileCommand(snapshot);const disabled=snapshot.connection!=='connected'||command?.outcome==='submitted';
-    return `<section class="vv-engine-control" aria-label="Reference decisions">${recoveryPanel(snapshot,disabled)}${c.pending.length?`<section class="vv-panel vv-consumer-decisions"><h2>Needs your approval</h2>${c.pending.map(item=>`<div class="vv-pending-candidate"><div><strong>${escape(item.reference)}</strong><p class="vv-caption">${Math.round(item.confidence*100)}% confidence · ${escape(languageNames[item.language]||streamName(s,item.stream))}</p></div><div class="vv-control-actions">${['approve','reject'].map(a=>`<button class="vv-btn ${a==='approve'?'vv-btn-primary':''}" type="button" data-engine-action="${a}" data-engine-session="${s.session_id}" data-candidate="${escape(item.candidate_id)}" ${disabled?'disabled':''}>${a==='approve'?'Approve':'Dismiss'} ${escape(item.reference)}</button>`).join('')}</div></div>`).join('')}</section>`:''}${suggestionPanel(snapshot,disabled)}</section>`;
+    return `<section class="vv-engine-control" aria-label="Reference decisions">${c.operator?'':recoveryPanel(snapshot,disabled)}${c.pending.length?`<section class="vv-panel vv-consumer-decisions"><h2>Needs your approval</h2>${c.pending.map(item=>`<div class="vv-pending-candidate"><div><strong>${escape(item.reference)}</strong><p class="vv-caption">${Math.round(item.confidence*100)}% confidence · ${escape(languageNames[item.language]||streamName(s,item.stream))}</p></div><div class="vv-control-actions">${['approve','reject'].map(a=>`<button class="vv-btn ${a==='approve'?'vv-btn-primary':''}" type="button" data-engine-action="${a}" data-engine-session="${s.session_id}" data-candidate="${escape(item.candidate_id)}" ${disabled?'disabled':''}>${a==='approve'?'Approve':'Dismiss'} ${escape(item.reference)}</button>`).join('')}</div></div>`).join('')}</section>`:''}${suggestionPanel(snapshot,disabled)}</section>`;
   }
   function consumerOutput(session){
     const latest=session?.delivery_events.filter(e=>e.reference).at(-1);
@@ -163,7 +163,7 @@
     const roles=!developer()&&session?.config.streams.secondary.enabled===false?['primary']:['primary','secondary'];
     const transcripts = `<section class="vv-stream-section" aria-label="Observed speech streams"><div class="vv-dual-grid ${roles.length===1?'vv-single-stream':''}">${roles.map(role=>streamPanel(session,role)).join('')}</div></section>`;
     const unknown = session?.transcripts.filter(row => row.stream === 'unknown').slice(-3) || [];
-    if(!developer())return (window.transcriptView?.isFull()?'':consumerOutput(session))+(window.transcriptView?.controls(session)||'')+transcripts+controlPanel(snapshot)+window.detectorSettings.render(snapshot,'speech');
+    if(!developer())return (window.transcriptView?.isFull()?'':consumerOutput(session))+(window.transcriptView?.controls(session)||'')+transcripts+(window.operatorTools?.render(snapshot)||'')+controlPanel(snapshot)+window.detectorSettings.render(snapshot,'speech');
     return (window.transcriptView?.isFull()?'':output(session))+(window.transcriptView?.controls(session)||'')+transcripts+controlPanel(snapshot)+window.detectorSettings.render(snapshot,'speech')+status(snapshot)
       + (unknown.length ? `<section class="vv-panel vv-observer-unknown"><h2>Unattributed speech</h2>${unknown.map(row => `<p>${escape(row.text)}</p>`).join('')}</section>` : '')
       + `<p class="vv-caption vv-observer-note">${session?.host?.managed ? 'The bundled detector owns recognition and delivery. Advanced queue and presentation options are in its private backend settings file.' : 'The detector owns recognition and delivery. Queue and presentation settings remain in its existing window.'}</p>`;
@@ -235,7 +235,7 @@
     }
     return 'Bundled backend connected. Use the engine controls to start or stop.';
   }
-  window.observerView = Object.freeze({ compactControls, consumerNotice, history,
+  window.observerView = Object.freeze({ compactControls, consumerNotice, history, recovery:recoveryPanel,
     runtime: snapshot=>status(snapshot)+controlPanel(snapshot)+botPanel(snapshot),
     cloud: snapshot=>window.cloudSettings.render(snapshot,true)+syncPanel(snapshot),
     start: snapshot=>submitAction({disabled:false,dataset:{engineAction:'start',engineSession:snapshot.session.session_id}}),

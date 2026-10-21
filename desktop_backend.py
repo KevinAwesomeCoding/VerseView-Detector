@@ -156,6 +156,8 @@ class EngineRuntime:
         self.warmup = SessionWarmup()
         self.suggestions = WatcherInbox(engine, lambda: self.state() == 'running')
         self.outline = SessionOutline()
+        from desktop_operator import OperatorTools
+        self.operator = OperatorTools(self)
 
     def state(self):
         if not self.thread or not self.thread.is_alive(): return 'stopped'
@@ -169,6 +171,7 @@ class EngineRuntime:
         problem = start_problem(values)
         if problem: raise BackendError(problem)
         self.error = ''
+        if hasattr(self, 'operator'): self.operator.prepare_start(self.recovery.fresh_start)
         self.stop_requested.clear()
         if self.recovery.fresh_start:
             self.engine.clear_sermon_buffer()
@@ -181,6 +184,7 @@ class EngineRuntime:
             mapped.update(live_points_callback=callback, live_points_get_current_cb=current,
                           live_points_status_callback=status, live_points_enabled=bool(values.get('live_points_llm_enabled')))
         self.engine.configure(**mapped)
+        if hasattr(self, 'operator'): self.operator.apply_mode()
         if hasattr(self, 'outline'):
             self.outline.provider_ready = bool(self.engine.LLM_ENABLED and
                 self.engine._role_has_llm('outline', self.engine.cerebras_client, self.engine.groq_client))
@@ -238,7 +242,8 @@ class EngineRuntime:
             self.outline.cancel()
             self.stop_requested.set()
             self.checkpoint('stopped')
-            if not self.verification:
+            if hasattr(self, 'operator'): self.operator.normal_stop_save()
+            if not self.verification and not (hasattr(self, 'operator') and self.operator.emergency):
                 self._save_session(values)
         except Exception:
             self.warmup.cancel()
@@ -263,17 +268,20 @@ class EngineRuntime:
             self.loop.close()
             self.loop = None
 
+    def session_snapshot(self):
+        snapshot = self.engine.get_session_snapshot() if self.has_started else {}
+        snapshot['stream_languages'] = {'primary': self.engine.PRIMARY_LANGUAGE, 'secondary': self.engine.SECONDARY_LANGUAGE}
+        feed = self.publisher.snapshot() or {}
+        snapshot['raw_preview'] = {role: '\n'.join(row['text'] for row in feed.get('transcripts', [])
+            if row['stream'] == role and row['is_final'])[-2000:] for role in ('primary', 'secondary')}
+        return snapshot
+
     def checkpoint(self, reason):
         if not self.has_started: return
         try:
             with self.recovery.lock:
                 if reason == 'autosave' and self.stop_requested.is_set(): return
-                snapshot = self.engine.get_session_snapshot()
-                snapshot['stream_languages'] = {'primary': self.engine.PRIMARY_LANGUAGE,
-                                                'secondary': self.engine.SECONDARY_LANGUAGE}
-                feed = self.publisher.snapshot() or {}
-                snapshot['raw_preview'] = {role: '\n'.join(row['text'] for row in feed.get('transcripts', [])
-                    if row['stream'] == role and row['is_final'])[-2000:] for role in ('primary', 'secondary')}
+                snapshot = self.session_snapshot()
                 self.recovery.save(snapshot, reason)
         except Exception:
             logging.getLogger(__name__).exception('Session recovery checkpoint failed')
@@ -283,6 +291,8 @@ class EngineRuntime:
         if self.state() in ('starting', 'running') and time.monotonic() >= self.checkpoint_due:
             self.checkpoint_due = time.monotonic() + 15
             self.checkpoint('autosave')
+            if hasattr(self, 'operator') and not self.operator.snapshot()['busy']:
+                self.operator.save(autosave=True)
 
     def _save_session(self, values):
         transcript = self.engine.full_sermon_transcript or ''
@@ -324,7 +334,7 @@ class BackendHost:
         self.publisher.begin({'streams': {}}, origin='callback-replay' if runtime.verification else 'engine')
         self.control = DesktopControl(publisher, self.state, self.start, runtime.stop, enabled=True, settings=self.settings,
                                       panic=runtime.panic, recovery=getattr(runtime, 'recovery', None),
-                                      suggestions=getattr(runtime, 'suggestions', None), outline=getattr(runtime, 'outline', None),bot=self.bot,sync=self.sync)
+                                      suggestions=getattr(runtime, 'suggestions', None), outline=getattr(runtime, 'outline', None),bot=self.bot,sync=self.sync,operator=getattr(runtime,'operator',None))
 
     def sync_ready(self):
         return self.state()=='stopped' and self.bot.snapshot()['status'] in ('stopped','failed')
@@ -374,7 +384,8 @@ class BackendHost:
         sync_closed=self.sync.close()
         self.control.close()
         if self.runtime.thread: self.runtime.thread.join(timeout=25)
-        if not bot_closed or not sync_closed or self.runtime.thread and self.runtime.thread.is_alive(): return False
+        worker = getattr(getattr(self.runtime,'operator',None),'worker',None)
+        if not bot_closed or not sync_closed or self.runtime.thread and self.runtime.thread.is_alive() or worker and worker.is_alive(): return False
         self.publisher.close()
         return True
 

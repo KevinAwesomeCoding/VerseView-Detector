@@ -47,6 +47,18 @@ class DesktopControlTests(unittest.TestCase):
         self.assertIn(candidate, self.broker.pending)
         return thread, answer
 
+    def test_start_queued_before_emergency_cannot_restart_after_save_finishes(self):
+        operator = Mock()
+        operator.start_after = 1000
+        operator.snapshot.return_value = {'busy': False, 'emergency': True}
+        self.broker.operator = operator
+        self.broker.execute(self.request())
+        self.start.assert_not_called()
+        self.assertEqual(self.result()['outcome'], 'rejected')
+        operator.start_after = 999
+        self.broker.execute(self.request())
+        self.start.assert_called_once()
+
     def test_start_once_and_scheduling_ack(self):
         request = self.request()
         self.broker.execute(request)

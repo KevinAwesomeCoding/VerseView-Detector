@@ -175,3 +175,24 @@ test('outline edits are typed, bounded and bound to the current revision and sta
   assert.equal(request.outline_revision,revision);assert.equal(request.outline_text,'കുറിപ്പുകൾ <script>plain text</script>');
   f.session.control.state='starting';await assert.rejects(send({revision,text:'Unavailable'}));
 });
+
+test('session commands carry only bounded opaque identities and reject arbitrary paths, fields and stale permissions',async t=>{
+  const f=setup(t);f.session.control.actions=['list_sessions','preview_session','resume_saved','set_worship','save_session','emergency_save'];
+  const submit=(action,value)=>f.client.submit(f.sessionId,action,undefined,undefined,undefined,undefined,undefined,value);
+  await assert.rejects(submit('preview_session',{record_id:'../../settings',page:0}));
+  await assert.rejects(submit('list_sessions',{page:0,path:'/private'}));
+  await assert.rejects(submit('list_sessions',{page:-1}));
+  await assert.rejects(submit('set_worship',{enabled:'true'}));
+  const result=await submit('resume_saved',{record_id:'e'.repeat(32),record_revision:'f'.repeat(32)});
+  const request=JSON.parse(fs.readFileSync(path.join(f.inbox,`command-${result.id}.json`)));
+  assert.equal(request.record_id,'e'.repeat(32));assert.equal(request.record_revision,'f'.repeat(32));
+  assert.equal(f.reader.commandTransition,undefined,'Resume never starts recognition');
+  f.session.control.actions=[];await assert.rejects(submit('emergency_save',{}));
+});
+test('operator decoder bounds archived content and removes private fields',t=>{
+  const f=setup(t),fixture={...f.session,schema:1,revision:1,origin:'engine',started_at:new Date(f.now).toISOString(),config:{streams:{primary:{enabled:true},secondary:{enabled:false}}},transcripts:[],delivery_events:[]};
+  fixture.control.operator={worship:true,emergency:true,status:'failed',message:'Save failed',key:'PRIVATE',library:{rows:[],selected:{id:'e'.repeat(32),revision:'f'.repeat(32),kind:'session',primary:'x'.repeat(6000),secondary:'മലയാളം',outline:'Notes',sources:{primary:'speech'},languages:{primary:'en'},settings:{key:'PRIVATE'}}}};
+  const op=decodeSnapshot(fixture).control.operator;
+  assert.equal(op.library.selected.primary.length,4000);assert.equal(op.library.selected.secondary,'മലയാളം');assert.equal(op.worship,true);
+  assert.equal(JSON.stringify(op).includes('PRIVATE'),false);
+});

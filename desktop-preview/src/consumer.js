@@ -41,7 +41,7 @@
       if(cancelled||window.previewShell.getMode()!=='observer')throw new Error('Preparation cancelled. Listening stays stopped.');
       const control=snapshot.session.control;
       if(['failed','conflict'].includes(control.sync?.status))throw new Error('Credential sync needs attention. Review Connections in Settings before starting.');
-      if(['available','invalid'].includes(control.recovery?.status)){notice='Choose Resume saved session or Start new on Live, then press Start listening.';return;}
+      if(['available','invalid'].includes(control.recovery?.status)){notice='Open Saved sessions on Live to choose Resume or Start new, then press Start listening.';return;}
       if(snapshot.connection!=='connected'||!control.actions.includes('start'))throw new Error('Not ready to listen. Review your speech and connection settings.');
       await window.observerView.start(snapshot);
       notice='Start requested. Waiting for speech readiness.';

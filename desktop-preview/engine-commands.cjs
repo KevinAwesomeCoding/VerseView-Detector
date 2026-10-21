@@ -7,8 +7,8 @@ const { randomUUID } = require('node:crypto');
 // Only the main process writes commands. No renderer paths, URLs, or arbitrary IPC.
 class EngineCommands {
   constructor(reader, { clock = Date.now } = {}) { this.reader = reader; this.clock = clock; }
-  async submit(sessionId, action, candidateId, settingsChange, recoveryRevision, suggestionId, outlineChange) {
-    if (!['start', 'stop', 'approve', 'reject', 'save_settings', 'panic', 'restore_session', 'discard_session', 'send_suggestion', 'edit_outline', 'start_bot', 'stop_bot', 'pull_settings'].includes(action) || !/^[a-f0-9]{32}$/.test(sessionId || '')) {
+  async submit(sessionId, action, candidateId, settingsChange, recoveryRevision, suggestionId, outlineChange, operatorChange) {
+    if (!['start', 'stop', 'approve', 'reject', 'save_settings', 'panic', 'restore_session', 'discard_session', 'send_suggestion', 'edit_outline', 'start_bot', 'stop_bot', 'pull_settings', 'list_sessions', 'preview_session', 'resume_saved', 'save_session', 'set_worship', 'emergency_save'].includes(action) || !/^[a-f0-9]{32}$/.test(sessionId || '')) {
       throw new Error('Invalid detector command');
     }
     if (['approve', 'reject'].includes(action) && (typeof candidateId !== 'string' || !candidateId || candidateId.length > 128)) {
@@ -24,6 +24,18 @@ class EngineCommands {
       if (!/^[a-f0-9]{32}$/.test(settingsChange?.revision || '')) throw new Error('Invalid settings revision');
       changes = settingsPolicy.validatePatch(settingsChange.changes);
     }
+    const operatorActions=['list_sessions','preview_session','resume_saved','save_session','set_worship','emergency_save'];
+    let operatorPayload={};
+    if(operatorActions.includes(action)){
+      const value=operatorChange||{};
+      const allowed=action==='list_sessions'?['page']:action==='preview_session'?['record_id','page']:action==='resume_saved'?['record_id','record_revision']:action==='set_worship'?['enabled']:[];
+      if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).some(k=>!allowed.includes(k)))throw new Error('Invalid operator request');
+      if(['preview_session','resume_saved'].includes(action)&&!/^[a-f0-9]{32}$/.test(value.record_id||''))throw new Error('Invalid saved-session identity');
+      if(action==='resume_saved'&&!/^[a-f0-9]{32}$/.test(value.record_revision||''))throw new Error('Preview this session before resuming');
+      if(action==='set_worship'&&typeof value.enabled!=='boolean')throw new Error('Invalid Worship choice');
+      if(['list_sessions','preview_session'].includes(action)&&(!Number.isInteger(value.page)||value.page<0||value.page>(action==='list_sessions'?499:8388608)))throw new Error('Invalid session page');
+      operatorPayload=value;
+    }
     const snapshot = await this.reader.poll();
     const session = snapshot.session;
     const control = session?.control;
@@ -31,7 +43,7 @@ class EngineCommands {
       || this.clock() - Date.parse(session.updated_at) > 6000 || control.state === 'closed') {
       throw new Error('Detector session unavailable; refresh before acting');
     }
-    if (['start', 'stop', 'save_settings', 'panic', 'restore_session', 'discard_session', 'send_suggestion', 'edit_outline', 'start_bot', 'stop_bot', 'pull_settings'].includes(action) ? !control.actions.includes(action)
+    if (['start', 'stop', 'save_settings', 'panic', 'restore_session', 'discard_session', 'send_suggestion', 'edit_outline', 'start_bot', 'stop_bot', 'pull_settings', 'list_sessions', 'preview_session', 'resume_saved', 'save_session', 'set_worship', 'emergency_save'].includes(action) ? !control.actions.includes(action)
       : control.state !== 'running' || !control.pending.some(item => item.candidate_id === candidateId)) {
       throw new Error('Action is no longer available');
     }
@@ -57,7 +69,7 @@ class EngineCommands {
       ...(action === 'save_settings' ? { settings_revision: settingsChange.revision, changes } : {}),
       ...(recoveryAction ? { recovery_revision: recoveryRevision } : {}),
       ...(action === 'send_suggestion' ? { suggestion_id:suggestionId } : {}),
-      ...(action==='edit_outline'?{outline_revision:outlineChange.revision,outline_text:outlineChange.text}:{}) };
+      ...(action==='edit_outline'?{outline_revision:outlineChange.revision,outline_text:outlineChange.text}:{}), ...operatorPayload };
     const temporary = path.join(directory, `.command-${id}.tmp`);
     try {
       await fs.promises.writeFile(temporary, JSON.stringify(request), { encoding: 'utf8', mode: 0o600, flag: 'wx' });

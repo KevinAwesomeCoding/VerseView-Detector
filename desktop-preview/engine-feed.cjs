@@ -17,8 +17,9 @@ function feedDirectory({ platform, appData, home }) {
 function decodeControl(value) {
   if (!value || !/^[a-f0-9]{32}$/.test(value.id) || !['stopped', 'starting', 'running', 'stopping', 'closed'].includes(value.state)) return null;
   return { id: value.id, state: value.state,
-    actions: Array.isArray(value.actions) ? value.actions.filter(action => ['start', 'stop', 'save_settings', 'panic', 'restore_session', 'discard_session', 'send_suggestion', 'edit_outline', 'start_bot', 'stop_bot', 'pull_settings'].includes(action)) : [],
+    actions: Array.isArray(value.actions) ? value.actions.filter(action => ['start', 'stop', 'save_settings', 'panic', 'restore_session', 'discard_session', 'send_suggestion', 'edit_outline', 'start_bot', 'stop_bot', 'pull_settings', 'list_sessions', 'preview_session', 'resume_saved', 'save_session', 'set_worship', 'emergency_save'].includes(action)) : [],
     recovery: decodeRecovery(value.recovery),
+    operator: decodeOperator(value.operator),
     suggestions: decodeSuggestions(value.suggestions),
     outline:decodeOutline(value.outline),
     bot:decodeBot(value.bot),
@@ -32,6 +33,21 @@ function decodeControl(value) {
     results: (Array.isArray(value.results) ? value.results : []).slice(-32)
       .filter(item => item && /^[a-f0-9]{32}$/.test(item.id))
       .map(item => ({ id: item.id, action: text(item.action, 16), outcome: text(item.outcome, 24), reason: text(item.reason, 200) })) };
+}
+
+function decodeOperator(v){
+  if(!v||typeof v.worship!=='boolean')return null;
+  const id=s=>/^[a-f0-9]{32}$/.test(s||'')?s:null;
+  const kind=s=>['session','transcript','invalid'].includes(s)?s:'invalid';
+  const l=v.library||{},p=l.selected;
+  return {worship:v.worship,emergency:v.emergency===true,busy:v.busy===true,status:text(v.status,20),message:text(v.message,500),
+    saved:v.saved&&id(v.saved.id)?{id:v.saved.id,saved_at:timestamp(v.saved.saved_at)}:null,
+    library:{page:Number.isInteger(l.page)?Math.max(0,Math.min(499,l.page)):0,more:l.more===true,message:text(l.message,400),
+      rows:(Array.isArray(l.rows)?l.rows:[]).slice(0,20).filter(r=>r&&id(r.id)).map(r=>({id:r.id,revision:id(r.revision),kind:kind(r.kind),saved_at:timestamp(r.saved_at),reason:text(r.reason,40),resumable:r.resumable===true&&r.kind==='session'})),
+      selected:p&&id(p.id)&&id(p.revision)?{id:p.id,revision:p.revision,kind:kind(p.kind),saved_at:timestamp(p.saved_at),offset:Number.isInteger(p.offset)?p.offset:0,more:p.more===true,
+        primary:text(p.primary,4000),secondary:text(p.secondary,4000),outline:text(p.outline,4000),languages:{primary:text(p.languages?.primary,10),secondary:text(p.languages?.secondary,10)},
+        sources:{primary:p.sources?.primary==='speech'?'speech':'context',secondary:p.sources?.secondary==='speech'?'speech':'context'},
+        references:(Array.isArray(p.references)?p.references:[]).slice(-20).map(x=>text(x,128)),resumable:p.resumable===true&&p.kind==='session'}:null}};
 }
 
 function decodeSync(value){

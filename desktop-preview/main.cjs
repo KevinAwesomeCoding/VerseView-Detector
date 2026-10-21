@@ -113,6 +113,22 @@ for (const [channel, action] of [['preview:start-engine', 'start'], ['preview:st
     return commands.submit(sessionId, action);
   });
 }
+ipcMain.handle('preview:operator', (event, sessionId, action, value) => {
+  if(!trusted(event)||!['list_sessions','preview_session','resume_saved','save_session','set_worship','emergency_save'].includes(action))throw new Error('Invalid operator request');
+  return commands.submit(sessionId,action,undefined,undefined,undefined,undefined,undefined,value);
+});
+ipcMain.handle('preview:window-pin', (event, enabled) => {
+  if(!trusted(event)||typeof enabled!=='boolean')throw new Error('Invalid window preference');
+  const file=path.join(app.getPath('userData'),'window-preferences.json');
+  fs.mkdirSync(path.dirname(file),{recursive:true});
+  const temporary=file+'.tmp';
+  try{fs.writeFileSync(temporary,JSON.stringify({alwaysOnTop:enabled}),{mode:0o600});fs.renameSync(temporary,file);}finally{if(fs.existsSync(temporary))fs.unlinkSync(temporary);}
+  window.setAlwaysOnTop(enabled);
+  return {alwaysOnTop:window.isAlwaysOnTop()};
+});
+ipcMain.handle('preview:window-state',event=>{
+  if(!trusted(event))throw new Error('Untrusted preview sender');return {alwaysOnTop:window.isAlwaysOnTop()};
+});
 ipcMain.handle('preview:resolve-candidate', (event, sessionId, candidateId, approved) => {
   if (!trusted(event) || typeof approved !== 'boolean') throw new Error('Invalid approval request');
   return commands.submit(sessionId, approved ? 'approve' : 'reject', candidateId);
@@ -188,6 +204,7 @@ function createWindow() {
     webPreferences: { preload: path.join(__dirname, 'preload.cjs'), nodeIntegration: false, contextIsolation: true,
       sandbox: true, webSecurity: true, spellcheck: false, devTools: !app.isPackaged }
   });
+  try{const value=JSON.parse(fs.readFileSync(path.join(app.getPath('userData'),'window-preferences.json'),'utf8'));if(value.alwaysOnTop===true)window.setAlwaysOnTop(true);}catch{}
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   window.webContents.on('will-navigate', event => event.preventDefault());
   window.webContents.on('will-attach-webview', event => event.preventDefault());

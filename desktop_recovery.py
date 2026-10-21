@@ -124,7 +124,7 @@ class SessionRecovery:
     def snapshot(self):
         with self.lock:
             self.refresh()
-            data = self.record['data'] if self.record else None
+            data = self.staged or (self.record['data'] if self.record else None)
             status = 'staged' if self.staged else 'invalid' if self.pending and not self.record else 'available' if self.pending else 'saved' if self.record else 'none'
             # Historical previews stay separate from live STT and acceptance.
             return {'status': status, 'revision': self.revision, 'message': self.error,
@@ -148,18 +148,31 @@ class SessionRecovery:
                 self.pending = False
                 self.fresh_start = False
             else:
-                try: self.path.unlink()
+                try: self.path.unlink(missing_ok=True)
                 except OSError: raise RecoveryError('Could not discard the recovery file. It was retained.') from None
                 self.staged, self.record, self.revision = None, None, None
                 self._signature = None
                 self.pending, self.error = False, ''
                 self.fresh_start = True
 
+    def stage_saved(self, raw):
+        """Stage a validated library record without deleting the existing checkpoint."""
+        with self.lock:
+            self.refresh()
+            if self.active: raise RecoveryError('Stop listening before resuming a saved session.')
+            data = sermon_data(raw)
+            self.staged = copy.deepcopy(data)
+            import uuid
+            self.revision = uuid.uuid4().hex
+            self.record = {'schema': 1, 'saved_at': dt.datetime.now(dt.timezone.utc).isoformat(), 'reason': 'library', 'data': data}
+            self.pending = False
+            self.fresh_start = False
+
     def for_start(self):
         with self.lock:
             self.refresh()
             if self.pending: raise RecoveryError('Choose Restore or Discard for the saved session before starting.')
-            return copy.deepcopy(self.staged)
+            return copy.deepcopy(self.staged or (self.record['data'] if self.record and not self.fresh_start else None))
 
     def started(self):
         with self.lock:
@@ -195,4 +208,5 @@ class SessionRecovery:
                     except OSError: pass
             self._signature = self._stat()
             self.record, self.revision, self.error = value, hashlib.sha256(encoded).hexdigest()[:32], ''
+            if reason in ('stopped', 'error'): self.active = False
             return True

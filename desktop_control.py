@@ -25,7 +25,7 @@ def now_seconds():
 
 
 class DesktopControl:
-    def __init__(self, publisher, state, start, stop, *, enabled=False, clock=now_seconds, settings=None, panic=None, recovery=None, suggestions=None, outline=None, bot=None, sync=None):
+    def __init__(self, publisher, state, start, stop, *, enabled=False, clock=now_seconds, settings=None, panic=None, recovery=None, suggestions=None, outline=None, bot=None, sync=None, operator=None):
         self.publisher, self.state = publisher, state
         self.start, self.stop, self.enabled, self.clock = start, stop, enabled, clock
         self.settings, self.panic = settings, panic
@@ -34,6 +34,7 @@ class DesktopControl:
         self.outline = outline
         self.bot = bot
         self.sync = sync
+        self.operator = operator
         self.control_id = uuid.uuid4().hex
         self.directory = publisher.directory / f"control-{os.getpid()}-{self.control_id}"
         self.session_id = None
@@ -82,10 +83,19 @@ class DesktopControl:
             if sync and sync['busy']:actions=[action for action in actions if action not in ('start','start_bot','save_settings')]
             if sync and sync['configured'] and not sync['busy'] and state=='stopped' and (not bot or bot['status'] in ('stopped','failed')):
                 actions.append('pull_settings')
+            operator = self.operator.snapshot() if self.operator else None
+            if operator and state != 'closed':
+                actions.extend(['list_sessions', 'preview_session'])
+                if state in ('stopped', 'running'):
+                    actions.append('set_worship')
+                    if not operator['busy']: actions.append('save_session')
+                if state == 'stopped' and not operator['busy']: actions.append('resume_saved')
+                if state in ('starting', 'running', 'stopping', 'stopped') and not (operator['busy'] and operator['emergency']): actions.append('emergency_save')
+                if operator['busy']: actions = [a for a in actions if a not in ('start', 'restore_session', 'discard_session')]
             self.publisher.emit('control', value={
                 'id': self.control_id, 'state': state, 'actions': actions, 'settings': settings, 'recovery': recovery, 'suggestions': suggestions,
                 'outline': self.outline.snapshot() if self.outline else None,
-                'bot': bot,
+                'bot': bot, 'operator': operator,
                 'sync': sync,
                 'pending': [{key: item[key] for key in ('candidate_id', 'reference', 'confidence', 'stream', 'source')}
                             for item in self.pending.values()], 'results': self.results[-32:]})
@@ -133,7 +143,7 @@ class DesktopControl:
             outcome = 'rejected'
             reason = 'Invalid, expired, or stale command'
             created = request.get('created_at')
-            valid = (set(request) <= {'id', 'control_id', 'session_id', 'created_at', 'action', 'candidate_id', 'settings_revision', 'changes', 'recovery_revision', 'suggestion_id', 'outline_revision', 'outline_text'}
+            valid = (set(request) <= {'id', 'control_id', 'session_id', 'created_at', 'action', 'candidate_id', 'settings_revision', 'changes', 'recovery_revision', 'suggestion_id', 'outline_revision', 'outline_text', 'record_id', 'record_revision', 'page', 'enabled'}
                      and request.get('control_id') == self.control_id
                      and request.get('session_id') == self.session_id
                      and isinstance(created, (float, int)) and not isinstance(created, bool)
@@ -141,16 +151,29 @@ class DesktopControl:
             if valid:
                 try:
                     state = self.state()
-                    if action=='pull_settings' and self.sync and action in self.publisher.snapshot()['control']['actions']:
+                    if action in ('list_sessions', 'preview_session', 'resume_saved', 'save_session', 'set_worship', 'emergency_save') and self.operator and action in self.publisher.snapshot()['control']['actions']:
+                        if action == 'list_sessions': self.operator.library.refresh(request.get('page', 0))
+                        elif action == 'preview_session': self.operator.library.preview(request.get('record_id'), request.get('page', 0))
+                        elif action == 'resume_saved': self.operator.resume(request.get('record_id'), request.get('record_revision'))
+                        elif action == 'set_worship':
+                            self._cancel_pending()
+                            self.operator.set_worship(request.get('enabled'))
+                        else:
+                            if action == 'emergency_save': self._cancel_pending()
+                            self.operator.save(emergency=action == 'emergency_save')
+                        outcome, reason = 'requested', 'Operator request accepted; observe its acknowledged state and save result.'
+                    elif action=='pull_settings' and self.sync and action in self.publisher.snapshot()['control']['actions']:
                         self.sync.start();outcome,reason='requested','Credential pull requested; observe settings sync status.'
                     elif action in ('start_bot','stop_bot') and self.bot and action in self.publisher.snapshot()['control']['actions']:
                         (self.bot.start if action=='start_bot' else self.bot.stop)()
                         outcome,reason='requested','Bot lifecycle requested; observe its status. Recognition is unchanged.'
-                    elif action == 'start' and state == 'stopped':
+                    elif action == 'start' and state == 'stopped' and (not self.operator or created > self.operator.start_after):
                         outcome = 'requested' if 'start' in self.publisher.snapshot()['control']['actions'] and self.start() else 'failed'
                         reason = 'Start requested; observe engine status' if outcome == 'requested' else 'Start did not begin; check the detector'
                     elif (action in ('restore_session', 'discard_session') and state == 'stopped' and self.recovery
                           and action in self.publisher.snapshot()['control']['actions']):
+                        if action == 'discard_session' and self.operator and self.recovery.record:
+                            self.operator.library.save(self.operator.pending_restore or {'data': self.recovery.record['data']}, 'before start new')
                         self.recovery.choose(request.get('recovery_revision'), action == 'restore_session')
                         outcome = 'prepared' if action == 'restore_session' else 'discarded'
                         reason = 'Saved context prepared. Press Start to resume; nothing was presented.' if action == 'restore_session' else 'Recovery checkpoint discarded. Recognition remains stopped.'
@@ -187,7 +210,7 @@ class DesktopControl:
                     outcome, reason = 'rejected', str(exc)
                 except Exception:
                     outcome, reason = 'failed', 'Detector control failed; inspect the detector log'
-            self.results.append(dict(id=command_id, action=action if action in ('start', 'stop', 'approve', 'reject', 'save_settings', 'panic', 'restore_session', 'discard_session', 'send_suggestion', 'edit_outline', 'start_bot', 'stop_bot', 'pull_settings') else 'unknown',
+            self.results.append(dict(id=command_id, action=action if action in ('start', 'stop', 'approve', 'reject', 'save_settings', 'panic', 'restore_session', 'discard_session', 'send_suggestion', 'edit_outline', 'start_bot', 'stop_bot', 'pull_settings', 'list_sessions', 'preview_session', 'resume_saved', 'save_session', 'set_worship', 'emergency_save') else 'unknown',
                                      outcome=outcome, reason=reason))
             self.results = self.results[-32:]
             self.refresh()

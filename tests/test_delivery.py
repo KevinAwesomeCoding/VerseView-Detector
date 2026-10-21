@@ -34,6 +34,7 @@ class DeliveryTests(unittest.TestCase):
         engine.CONFIRM_REQUEST_CALLBACK = None
         engine.CONFIDENCE_THRESHOLD = .75
         engine.WORSHIP_MODE = False
+        engine.DELIVERY_HOLD = False
         engine.VERSE_INTERRUPT_ENABLED = False
         engine.SCRIPTURE_READ_MODE = False
         engine.COOLDOWN = 3
@@ -77,6 +78,46 @@ class DeliveryTests(unittest.TestCase):
             worker.join(timeout=2)
             self.assertFalse(worker.is_alive(), 'Worker failed to finish')
         engine._active_bg_threads.clear()
+
+    def test_operator_mode_cancels_queues_and_worship_keeps_detection_without_presentation(self):
+        self.queue()
+        engine.set_delivery_mode(worship=True)
+        self.assertEqual(list(engine.verse_queue), [])
+        engine.VERSE_INTERRUPT_ENABLED = True
+        self.assertFalse(self.send())
+        self.assertTrue(self.events('DETECTED'))
+        self.assertTrue(any(e['stage'] == 'worship' for e in self.events('SUPPRESSED')))
+        self.assertIsNone(engine._vtc_pending_ref)
+        self.ctrl.driver.execute_script.assert_not_called()
+        engine.set_delivery_mode(worship=False)
+        self.assertEqual(list(engine.verse_queue), [])
+
+    def test_old_approval_cannot_replay_after_worship_is_switched_on_then_off(self):
+        finished = threading.Event()
+        def approve(*args):
+            engine.set_delivery_mode(worship=True)
+            engine.set_delivery_mode(worship=False)
+            finished.set()
+            return True
+        engine.CONFIRM_REQUEST_CALLBACK = approve
+        self.assertFalse(self.ctrl.send_verse('John 3:18', confidence=.2))
+        self.assertTrue(finished.wait(2))
+        deadline = __import__('time').monotonic() + 2
+        while self.ctrl._confirm_pending and __import__('time').monotonic() < deadline:
+            threading.Event().wait(.005)
+        self.ctrl.driver.execute_script.assert_not_called()
+        self.assertTrue(any(e['outcome'] == 'CANCELLED' for e in engine.get_delivery_events()))
+
+    def test_emergency_hold_or_mode_change_before_click_cannot_present(self):
+        engine.set_delivery_mode(worship=False, hold=True)
+        self.assertFalse(self.send()); self.ctrl.driver.execute_script.assert_not_called()
+        engine.set_delivery_mode(worship=False)
+        self.ctrl.driver.execute_script.side_effect = lambda *args: engine.set_delivery_mode(worship=True)
+        self.assertFalse(self.send())
+        self.assertEqual(self.ctrl.driver.execute_script.call_count, 1)
+        self.assertFalse(self.events('COMMAND_ACCEPTED'))
+        self.assertTrue(self.events('CANCELLED'))
+        engine.set_delivery_mode(worship=False)
 
     def events(self, outcome=None):
         return [e for e in engine.get_delivery_events() if outcome is None or e['outcome'] == outcome]

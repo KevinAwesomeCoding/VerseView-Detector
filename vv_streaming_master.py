@@ -1314,6 +1314,8 @@ _smart_amen_timer: threading.Timer | None = None
 VERSE_INTERRUPT_ENABLED  = False
 SPOKEN_NUMERAL_MODE      = False
 WORSHIP_MODE             = False
+DELIVERY_HOLD            = False
+_delivery_epoch          = 0
 _verse_history: list     = []
 
 # ── SCRIPTURE-READ MODE ───────────────────────────────────────────────────────
@@ -2087,6 +2089,8 @@ def _handle_watcher_suggestion(sug) -> None:
     """
     try:
         ref = getattr(sug, "suggested_reference", None)
+        suggestion_epoch = getattr(sug, "delivery_epoch", None)
+        if suggestion_epoch is not None and suggestion_epoch != _delivery_epoch: return
 
         if (WatcherStatus is not None
                 and sug.status == WatcherStatus.AUTO_SUGGEST
@@ -2103,11 +2107,13 @@ def _handle_watcher_suggestion(sug) -> None:
                 # quarantine just like source="LLM").
                 _conf   = sug.confidence
                 _stream = getattr(sug, "stream", None)   # "primary" | "secondary"
+                dispatch_epoch = _delivery_epoch
 
                 def _present(_ref=ref, _c=_conf, _ctrl=ctrl, _st=_stream):
                     try:
+                        if dispatch_epoch != _delivery_epoch: return
                         deliver_verse(_ref, _ctrl, bypass_cooldown=False,
-                                      confidence=_c, source="WATCHER", stream=_st)
+                                      confidence=_c, source="WATCHER", stream=_st, expected_epoch=dispatch_epoch)
                     except Exception as e:
                         logger.error(f"🔭 watcher auto-present failed: {e}")
 
@@ -3325,6 +3331,7 @@ def configure(
                 on_suggestion=_handle_watcher_suggestion,
                 config=_wcfg,
             )
+            _verse_watcher.delivery_epoch = lambda: _delivery_epoch
             logger.info(
                 f"🔭 Contextual Verse Watcher : ON  "
                 f"(provider={_wcfg.provider}, primary={PRIMARY_LANGUAGE}"
@@ -3613,7 +3620,20 @@ def fetch_verse_text(ref: str) -> str | None:
 
 
 # ── VERSE INTERRUPT (wait for speaker to say verse, then display; 60s timeout; cancel on new ref) ─
-def deliver_verse(ref: str, controller, bypass_cooldown=False, confidence=1.0, source="UNKNOWN", stream=None, candidate_id=None):
+def set_delivery_mode(*, worship, hold=False):
+    """Invalidate queued/timed work on either mode transition; never replay it."""
+    global WORSHIP_MODE, DELIVERY_HOLD, _delivery_epoch, onwards_active
+    _delivery_epoch += 1
+    WORSHIP_MODE, DELIVERY_HOLD = bool(worship), bool(hold)
+    _cancel_vtc()
+    with verse_queue_lock:
+        _clear_verse_queue('Operator delivery mode changed')
+    _stop_onwards()
+    if _verse_watcher is not None: _verse_watcher.reset()
+    if _smart_amen_timer: _smart_amen_timer.cancel()
+
+
+def deliver_verse(ref: str, controller, bypass_cooldown=False, confidence=1.0, source="UNKNOWN", stream=None, candidate_id=None, expected_epoch=None):
     """Validate and route a candidate through scripture/quarantine and interrupt gates.
 
     Explicit, queue, LLM and watcher sources bypass quarantine as before.
@@ -3640,6 +3660,10 @@ def deliver_verse(ref: str, controller, bypass_cooldown=False, confidence=1.0, s
     if controller is None:
         _delivery_event(candidate_id, ref, source, stream, "controller", "DELIVERY_FAILED",
                         "Controller unavailable")
+        return False
+
+    if expected_epoch is not None and expected_epoch != _delivery_epoch:
+        _delivery_event(candidate_id, ref, source, stream, "operator", "CANCELLED", "Delivery mode changed while work was pending")
         return False
 
     # ── CONTEXTUAL WATCHER: record the fast-path reference for conflict gating ──
@@ -3675,10 +3699,13 @@ def deliver_verse(ref: str, controller, bypass_cooldown=False, confidence=1.0, s
                         "Waiting for fresh spoken evidence after system action",
                         guard="CONTEXT_FLOOR_MANUAL_CONTEXT_BYPASS")
         return False
+    if WORSHIP_MODE or DELIVERY_HOLD:
+        return controller.send_verse(ref, bypass_cooldown=bypass_cooldown, confidence=confidence,
+                                     source=source, stream=stream, candidate_id=candidate_id, expected_epoch=expected_epoch)
     if VERSE_INTERRUPT_ENABLED:
         return _start_vtc(ref, controller, source=source, stream=stream, candidate_id=candidate_id)
     return controller.send_verse(ref, bypass_cooldown=bypass_cooldown, confidence=confidence,
-                                 source=source, stream=stream, candidate_id=candidate_id)
+                                 source=source, stream=stream, candidate_id=candidate_id, expected_epoch=expected_epoch)
 
 
 def get_verse_history() -> list:
@@ -4163,6 +4190,7 @@ def _check_onwards_advance(text, controller) -> bool:
             
         current_ref = onwards_target_ref
         current_text = onwards_target_text
+        onwards_epoch = _delivery_epoch
         _onwards_semantic_in_flight = True
         _onwards_last_excerpt = excerpt
         _onwards_last_check_time = now
@@ -4176,10 +4204,10 @@ def _check_onwards_advance(text, controller) -> bool:
                 if _shutdown_flag.is_set():
                     return
                 if matched:
-                    if onwards_target_ref == current_ref:
+                    if onwards_epoch == _delivery_epoch and onwards_active and onwards_target_ref == current_ref:
                         _onwards_consecutive_no = 0  # reset mismatch counter on success
                         logger.info(f"🎯 ONWARDS ADVANCE: {current_ref} (Cerebras)")
-                        if not controller.send_verse(current_ref, bypass_cooldown=True, source="ONWARDS"):
+                        if not controller.send_verse(current_ref, bypass_cooldown=True, source="ONWARDS", expected_epoch=onwards_epoch):
                             return
                         _mark_advance_offset()
                         onwards_verse += 1
@@ -4356,6 +4384,7 @@ def check_verse_queue(transcript, controller) -> bool:
             return False
             
         current_ref = next_ref
+        queue_epoch = _delivery_epoch
         _queue_semantic_in_flight = True
         _queue_last_excerpt = excerpt
         _queue_last_check_time = now
@@ -4375,7 +4404,7 @@ def check_verse_queue(transcript, controller) -> bool:
                             return  # Queue advanced while we were checking
                     logger.info(f"🎯 AUTO-ADVANCE: {current_ref}")
                     if controller.send_verse(current_ref, bypass_cooldown=True, source="QUEUE",
-                                             stream=stream, candidate_id=candidate_id):
+                                             stream=stream, candidate_id=candidate_id, expected_epoch=queue_epoch):
                         _mark_advance_offset()
             except Exception as exc:
                 _delivery_event(candidate_id, current_ref, "QUEUE", stream, "range_queue", "ERROR",
@@ -4953,7 +4982,7 @@ class VerseController:
         except Exception as e:
             logger.debug(f"Could not click close button (maybe already closed): {e}")
 
-    def send_verse(self, ref, bypass_cooldown=False, confidence=1.0, source="UNKNOWN", stream=None, candidate_id=None):
+    def send_verse(self, ref, bypass_cooldown=False, confidence=1.0, source="UNKNOWN", stream=None, candidate_id=None, expected_epoch=None):
         with self._send_lock:
             global current_book, current_chapter, current_verse, verses_cited
             global _session_verse_high_water
@@ -4972,6 +5001,9 @@ class VerseController:
             if ref is None or _reject_verse_out_of_range(ref):
                 event("validation", "INVALID", "Malformed or out-of-range reference")
                 return False
+            if expected_epoch is not None and expected_epoch != _delivery_epoch:
+                event("operator", "CANCELLED", "Delivery mode changed while work was pending")
+                return False
             if _shutdown_flag.is_set():
                 event("controller", "CANCELLED", "Engine stopping")
                 return False
@@ -4981,6 +5013,10 @@ class VerseController:
                 logger.info(f"🎵 [WORSHIP MODE] Detected but suppressed: {ref}")
                 event("worship", "SUPPRESSED", "Worship mode active", guard="WORSHIP_MODE")
                 return False
+            if DELIVERY_HOLD:
+                event("operator", "CANCELLED", "Emergency delivery hold active")
+                return False
+            delivery_epoch = _delivery_epoch
             now = time.time()
             logger.debug(f"VerseController.send_verse: ref={ref}, bypass={bypass_cooldown}")
 
@@ -5046,11 +5082,11 @@ class VerseController:
                                 if ref not in self._confirm_pending:
                                     return  # cleanup already recorded cancellation
                             if approved:
-                                if _shutdown_flag.is_set():
-                                    event("manual_confirm", "CANCELLED", "Engine stopped before approval")
+                                if _shutdown_flag.is_set() or delivery_epoch != _delivery_epoch:
+                                    event("manual_confirm", "CANCELLED", "Engine stopped or delivery mode changed before approval")
                                 else:
                                     self.send_verse(ref, bypass_cooldown=True, confidence=1.0,
-                                                    source=source, stream=stream, candidate_id=candidate_id)
+                                                    source=source, stream=stream, candidate_id=candidate_id, expected_epoch=delivery_epoch)
                             else:
                                 event("manual_confirm", "CANCELLED", "Operator rejected candidate")
                         except Exception as exc:
@@ -5157,6 +5193,9 @@ class VerseController:
 
                 event("browser_command", "DELIVERY_REQUESTED", "Setting reference and clicking PRESENT")
                 self.driver.execute_script("arguments[0].value = arguments[1];", self.box, ref)
+                if _shutdown_flag.is_set() or WORSHIP_MODE or DELIVERY_HOLD or delivery_epoch != _delivery_epoch:
+                    event("operator", "CANCELLED", "Delivery mode changed before PRESENT; no click requested")
+                    return False
                 click_attempted = True
                 self.driver.execute_script("arguments[0].click();", self.btn)
                 command_accepted = True
@@ -6699,6 +6738,7 @@ def detect_verse_hybrid(text, controller, confidence=1.0, parser=None) -> bool:
         # threaded llm_task below can attribute the detection to the right STT
         # stream (a worker thread's fresh context would otherwise read None).
         _llm_stream = _safe_stream_role()
+        _llm_epoch = _delivery_epoch
 
         def llm_task():
             global _llm_in_flight, _last_explicit_ref_time
@@ -6706,6 +6746,9 @@ def detect_verse_hybrid(text, controller, confidence=1.0, parser=None) -> bool:
                 verse = extract_verse_with_llm(text)
                 if verse:
                     candidate_id = _delivery_candidate(verse, "LLM", _llm_stream)
+                    if _shutdown_flag.is_set() or _llm_epoch != _delivery_epoch:
+                        _delivery_event(candidate_id, verse, "LLM", _llm_stream, "operator", "CANCELLED", "Delivery mode changed while model request was in flight")
+                        return
                     # Bug 5 fix (refined): Suppress LLM verses that are genuinely stale —
                     # i.e. the sermon has moved well past them AND they are not a valid
                     # backreference within the *current* sermon passage.
@@ -6776,7 +6819,7 @@ def detect_verse_hybrid(text, controller, confidence=1.0, parser=None) -> bool:
                                         "Sermon moved past candidate in a different passage", guard="stale_llm_anchor")
                     if not _suppress_stale_llm:
                         _last_explicit_ref_time = time.time()
-                        deliver_verse(verse, controller, bypass_cooldown=False, confidence=confidence, source="LLM", stream=_llm_stream, candidate_id=candidate_id)
+                        deliver_verse(verse, controller, bypass_cooldown=False, confidence=confidence, source="LLM", stream=_llm_stream, candidate_id=candidate_id, expected_epoch=_llm_epoch)
                         trigger_onwards_if_needed(verse, text)
                         check_and_queue_range(text, verse, controller)
             except Exception as exc:
