@@ -4,7 +4,7 @@ const {_electron}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
 const fs=require('node:fs'),path=require('node:path'),os=require('node:os'),assert=require('node:assert/strict');
 const root=path.resolve(__dirname,'..'),out=path.join(root,'test-results');fs.mkdirSync(out,{recursive:true});
 const tmp=fs.mkdtempSync(path.join(os.tmpdir(),'vv-verse-ui-')),source=path.join(tmp,'source');fs.mkdirSync(source);
-fs.writeFileSync(path.join(source,'settings.json'),JSON.stringify({language:'English',stt_engine:'deepgram',deepgram_api_key:'SYNTHETIC-ONLY',mic_index:0,remote_url:'http://127.0.0.1:50010/control.html',bible_translation:'KJV',confidence:.75,manual_confirm:true,verify:false,llm_enabled:false,auto_save_notes:false,auto_start:false,settings_sync_url:''}));
+fs.writeFileSync(path.join(source,'settings.json'),JSON.stringify({language:'English',stt_engine:'deepgram',deepgram_api_key:'SYNTHETIC-ONLY',mic_index:0,remote_url:'http://127.0.0.1:50010/control.html',bible_translation:'KJV',confidence:.75,manual_confirm:true,verify:false,cooldown:3,dedup_window:60,llm_enabled:false,auto_save_notes:false,auto_start:false,settings_sync_url:''}));
 (async()=>{
  let app,page;const checks=[],errors=[];
  try{
@@ -32,6 +32,8 @@ fs.writeFileSync(path.join(source,'settings.json'),JSON.stringify({language:'Eng
   await page.locator('[data-consumer-prepare="start"]').click();await page.waitForFunction(()=>window.previewShell.getObserver().session.control.state==='running');
   await page.waitForFunction(()=>window.previewShell.getObserver().session.delivery_events.some(e=>e.reference==='John 3:17'&&e.outcome==='COMMAND_ACCEPTED'));
   await open();await page.waitForFunction(()=>window.previewShell.getObserver().session.control.pending.length>0);await d.locator('[data-engine-action="reject"]').first().click();await page.waitForFunction(()=>!window.previewShell.getObserver().session.control.pending.length);
+  // Respect the configured 3-second cooldown after the synthetic STT command.
+  await page.waitForTimeout(3500);
   await preview('John 3:21');await click('send');await page.waitForFunction(()=>window.previewShell.getObserver().session.control.verses.last_send?.outcome==='COMMAND_ACCEPTED');
   const sent=await page.evaluate(()=>window.previewShell.getObserver().session.control.verses.last_send),accepted=await count();
   await page.waitForFunction(()=>window.previewShell.getObserver().session.control.actions.includes('send_reference'));await click('send');await page.waitForFunction(id=>{const x=window.previewShell.getObserver().session.control.verses.last_send;return x.candidate_id!==id&&x.outcome==='SUPPRESSED';},sent.candidate_id);assert.equal(await count(),accepted);
