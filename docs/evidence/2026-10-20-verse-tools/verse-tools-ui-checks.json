@@ -1,0 +1,33 @@
+{
+  "result": "PASS",
+  "checks": [
+    "Exact-translation fixture preview stays read-only and cannot send while stopped.",
+    "Chapter paging/selection sends nothing. Narrow popup scrolls without horizontal overflow; Escape restores launcher focus.",
+    "Packaged manual Send reaches real delivery logic and fake controller with one candidate ID; duplicate suppressed, history selection read-only, held decision reachable in popup.",
+    "Draft survives incoming updates; Worship suppresses manual Send; live context updates present nothing.",
+    "Stopped context stages for next Start without presenting.",
+    "Stop invalidates selection; emergency saving remains accessible and confirms saved state."
+  ],
+  "backend": {
+    "status": "ready",
+    "message": "Isolated verification backend · no microphone or live services",
+    "pid": 62135,
+    "owned": true,
+    "frozen": true,
+    "guiImported": false,
+    "verification": true
+  },
+  "processInfo": {
+    "packaged": true,
+    "executable": "/Users/kevinanil/.codex/worktrees/verse-tools-verification/VerseView-Detector/desktop-preview/out/2026-10-21T03-03-23-008Z-1efd4700-darwin-arm64/VerseView Desktop Preview-darwin-arm64/VerseView Desktop Preview.app/Contents/MacOS/VerseView Desktop Preview"
+  },
+  "errors": [],
+  "manualCandidate": {
+    "candidate_id": "b79481a2f6d94b5194c1ba115ec8ca7e",
+    "reference": "John 3:21",
+    "outcome": "COMMAND_ACCEPTED",
+    "reason": "Browser executed PRESENT click; visible presentation is unverified"
+  },
+  "microphoneSTT": "UNVERIFIED; synthetic callbacks",
+  "visibleVerseVIEW": "UNVERIFIED; fake controller and fixture text"
+}

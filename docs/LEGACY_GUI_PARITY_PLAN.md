@@ -193,3 +193,13 @@ of the earlier 0.12.1 baseline, not the current implementation status.
 The next group is limited to four verse tools: context editing, manual reference
 entry, selectable history and chapter browsing/preview. No next-group implementation
 was included in this delivery. Overall engineering milestone count stays6/8,75%.
+
+## Second group implementation — October 20–21, 2026
+
+Preview 0.14.0 now implements context editing, manual reference entry, selectable
+accepted-command history and chapter browsing/preview in a compact Live popup.
+[VERSE_TOOLS_VERIFICATION.md](VERSE_TOOLS_VERIFICATION.md) records packaged Mac
+results, retained guard-related harness failures, native CI and physical-test limits.
+All Send actions use the shared delivery guards; selecting or previewing sends
+nothing. Overall engineering milestones remain6/8 (75%); full settings/operator
+parity and production/physical acceptance remain outstanding.

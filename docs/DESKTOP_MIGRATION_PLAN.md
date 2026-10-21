@@ -141,3 +141,12 @@ while older text files remain read-only archives. See
 CI status and the remaining recovery/live-journal limitations. Physical microphone,
 visible-output, production signing and replacement gates are not newly passed.
 Overall remains6/8,75%; this feature group is4/4 within its isolated test scope.
+
+### Second legacy-parity group — October 20–21, 2026
+
+The 0.14.0 preview adds context editing, manual reference entry, selectable history
+and chapter browsing/preview through shared delivery guards. Packaged Mac checks
+pass with fixture text and synthetic speech; no microphone or visible VerseVIEW
+claim is added. See [VERSE_TOOLS_VERIFICATION.md](VERSE_TOOLS_VERIFICATION.md).
+These bounded parity groups do not close physical or production-release gates;
+overall migration remains6/8,75%.

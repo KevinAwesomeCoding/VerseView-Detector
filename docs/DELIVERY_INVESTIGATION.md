@@ -1368,3 +1368,16 @@ original incident's cause. The original intermittent incident remains unresolved
 Detailed provenance, evidence, CI state and limits are recorded in
 [OPERATOR_CONTROLS_VERIFICATION.md](OPERATOR_CONTROLS_VERIFICATION.md). Installed
 production app and normal settings remain untouched; overall progress6/8,75%.
+
+## Guarded verse-tools follow-up — October 20–21, 2026
+
+The second four-feature parity group is implemented in a separately packaged 0.14.0
+preview: context editing, manual reference entry, selectable accepted history and
+chapter browsing/preview. See [VERSE_TOOLS_VERIFICATION.md](VERSE_TOOLS_VERIFICATION.md)
+for provenance, candidate evidence, screenshots, tests and CI disposition. Explicit
+manual sends retain delivery/epoch, Worship, verification and duplicate guards;
+context changes and all previews present nothing. Initial harness requests correctly
+hit context quarantine and global cooldown; the harness was corrected without
+changing those guards. These findings do not connect the original incident to a
+proven cause. Microphone/STT transport, live VerseVIEW output and live semantic
+queue release were not retested in this isolated fixture-based feature group.

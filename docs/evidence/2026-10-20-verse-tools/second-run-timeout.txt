@@ -1,0 +1,5 @@
+page.waitForFunction: Timeout 30000ms exceeded.
+    at /Users/kevinanil/.codex/worktrees/verse-tools-verification/VerseView-Detector/desktop-preview/tests/verse-tools-ui.cjs:35:61 {
+  log: [],
+  name: 'TimeoutError'
+}

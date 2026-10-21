@@ -1,0 +1,628 @@
+{
+  "id": 39550861376,
+  "head_sha": "e6a10e4eb76ff9fc52b631fe4e42b52997ea506e",
+  "status": "in_progress",
+  "conclusion": null,
+  "html_url": "https://github.com/KevinAwesomeCoding/VerseView-Detector/actions/runs/39550861376",
+  "jobs": [
+    {
+      "id": 119059489517,
+      "name": "preview (macos-15-intel, darwin, x64)",
+      "status": "in_progress",
+      "conclusion": null,
+      "html_url": "https://github.com/KevinAwesomeCoding/VerseView-Detector/actions/runs/39550861376/job/119059489517",
+      "steps": [
+        {
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 1,
+          "started_at": "2026-10-21T05:40:23Z",
+          "completed_at": "2026-10-21T05:40:27Z"
+        },
+        {
+          "name": "Run actions/checkout@v4",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 2,
+          "started_at": "2026-10-21T05:40:27Z",
+          "completed_at": "2026-10-21T05:40:31Z"
+        },
+        {
+          "name": "Run actions/setup-node@v4",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 3,
+          "started_at": "2026-10-21T05:40:31Z",
+          "completed_at": "2026-10-21T05:40:36Z"
+        },
+        {
+          "name": "Run npm ci --no-fund --no-audit",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 4,
+          "started_at": "2026-10-21T05:40:36Z",
+          "completed_at": "2026-10-21T05:40:49Z"
+        },
+        {
+          "name": "Run actions/setup-python@v5",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 5,
+          "started_at": "2026-10-21T05:40:49Z",
+          "completed_at": "2026-10-21T05:40:49Z"
+        },
+        {
+          "name": "Check desktop regressions with retained diagnostics",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 6,
+          "started_at": "2026-10-21T05:40:49Z",
+          "completed_at": "2026-10-21T05:40:52Z"
+        },
+        {
+          "name": "Run npm run check",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 7,
+          "started_at": "2026-10-21T05:40:52Z",
+          "completed_at": "2026-10-21T05:41:01Z"
+        },
+        {
+          "name": "Install PortAudio for native Mac builds",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 8,
+          "started_at": "2026-10-21T05:41:01Z",
+          "completed_at": "2026-10-21T05:41:15Z"
+        },
+        {
+          "name": "Install native backend build dependencies",
+          "status": "in_progress",
+          "conclusion": null,
+          "number": 9,
+          "started_at": "2026-10-21T05:41:15Z",
+          "completed_at": null
+        },
+        {
+          "name": "Check backend and engine regressions",
+          "status": "pending",
+          "conclusion": null,
+          "number": 10,
+          "started_at": null,
+          "completed_at": null
+        },
+        {
+          "name": "Build native companion with the existing spec",
+          "status": "pending",
+          "conclusion": null,
+          "number": 11,
+          "started_at": null,
+          "completed_at": null
+        },
+        {
+          "name": "Smoke-test the frozen companion without devices",
+          "status": "pending",
+          "conclusion": null,
+          "number": 12,
+          "started_at": null,
+          "completed_at": null
+        },
+        {
+          "name": "Check frozen recovery with mocked services",
+          "status": "pending",
+          "conclusion": null,
+          "number": 13,
+          "started_at": null,
+          "completed_at": null
+        },
+        {
+          "name": "Check frozen watcher suggestions with mocked services",
+          "status": "pending",
+          "conclusion": null,
+          "number": 14,
+          "started_at": null,
+          "completed_at": null
+        },
+        {
+          "name": "Check frozen outline revisions with mocked services",
+          "status": "pending",
+          "conclusion": null,
+          "number": 15,
+          "started_at": null,
+          "completed_at": null
+        },
+        {
+          "name": "Check frozen owned Discord bot with mocked services",
+          "status": "pending",
+          "conclusion": null,
+          "number": 16,
+          "started_at": null,
+          "completed_at": null
+        },
+        {
+          "name": "Check frozen private settings sync with mocked downloads",
+          "status": "pending",
+          "conclusion": null,
+          "number": 17,
+          "started_at": null,
+          "completed_at": null
+        },
+        {
+          "name": "Package dashboard with the native companion",
+          "status": "pending",
+          "conclusion": null,
+          "number": 18,
+          "started_at": null,
+          "completed_at": null
+        },
+        {
+          "name": "Verify final dashboard and backend package",
+          "status": "pending",
+          "conclusion": null,
+          "number": 19,
+          "started_at": null,
+          "completed_at": null
+        },
+        {
+          "name": "Archive and verify extracted native deliverable",
+          "status": "pending",
+          "conclusion": null,
+          "number": 20,
+          "started_at": null,
+          "completed_at": null
+        },
+        {
+          "name": "Run actions/upload-artifact@v4",
+          "status": "pending",
+          "conclusion": null,
+          "number": 21,
+          "started_at": null,
+          "completed_at": null
+        },
+        {
+          "name": "Post Run actions/setup-python@v5",
+          "status": "pending",
+          "conclusion": null,
+          "number": 40,
+          "started_at": null,
+          "completed_at": null
+        },
+        {
+          "name": "Post Run actions/setup-node@v4",
+          "status": "pending",
+          "conclusion": null,
+          "number": 41,
+          "started_at": null,
+          "completed_at": null
+        },
+        {
+          "name": "Post Run actions/checkout@v4",
+          "status": "pending",
+          "conclusion": null,
+          "number": 42,
+          "started_at": null,
+          "completed_at": null
+        }
+      ]
+    },
+    {
+      "id": 119059489717,
+      "name": "preview (macos-latest, darwin, arm64)",
+      "status": "completed",
+      "conclusion": "success",
+      "html_url": "https://github.com/KevinAwesomeCoding/VerseView-Detector/actions/runs/39550861376/job/119059489717",
+      "steps": [
+        {
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 1,
+          "started_at": "2026-10-21T05:40:22Z",
+          "completed_at": "2026-10-21T05:40:23Z"
+        },
+        {
+          "name": "Run actions/checkout@v4",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 2,
+          "started_at": "2026-10-21T05:40:23Z",
+          "completed_at": "2026-10-21T05:40:25Z"
+        },
+        {
+          "name": "Run actions/setup-node@v4",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 3,
+          "started_at": "2026-10-21T05:40:25Z",
+          "completed_at": "2026-10-21T05:40:27Z"
+        },
+        {
+          "name": "Run npm ci --no-fund --no-audit",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 4,
+          "started_at": "2026-10-21T05:40:27Z",
+          "completed_at": "2026-10-21T05:40:29Z"
+        },
+        {
+          "name": "Run actions/setup-python@v5",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 5,
+          "started_at": "2026-10-21T05:40:29Z",
+          "completed_at": "2026-10-21T05:40:29Z"
+        },
+        {
+          "name": "Check desktop regressions with retained diagnostics",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 6,
+          "started_at": "2026-10-21T05:40:29Z",
+          "completed_at": "2026-10-21T05:40:30Z"
+        },
+        {
+          "name": "Run npm run check",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 7,
+          "started_at": "2026-10-21T05:40:30Z",
+          "completed_at": "2026-10-21T05:40:32Z"
+        },
+        {
+          "name": "Install PortAudio for native Mac builds",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 8,
+          "started_at": "2026-10-21T05:40:32Z",
+          "completed_at": "2026-10-21T05:40:37Z"
+        },
+        {
+          "name": "Install native backend build dependencies",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 9,
+          "started_at": "2026-10-21T05:40:37Z",
+          "completed_at": "2026-10-21T05:41:10Z"
+        },
+        {
+          "name": "Check backend and engine regressions",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 10,
+          "started_at": "2026-10-21T05:41:10Z",
+          "completed_at": "2026-10-21T05:41:55Z"
+        },
+        {
+          "name": "Build native companion with the existing spec",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 11,
+          "started_at": "2026-10-21T05:41:55Z",
+          "completed_at": "2026-10-21T05:42:33Z"
+        },
+        {
+          "name": "Smoke-test the frozen companion without devices",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 12,
+          "started_at": "2026-10-21T05:42:33Z",
+          "completed_at": "2026-10-21T05:42:33Z"
+        },
+        {
+          "name": "Check frozen recovery with mocked services",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 13,
+          "started_at": "2026-10-21T05:42:33Z",
+          "completed_at": "2026-10-21T05:42:50Z"
+        },
+        {
+          "name": "Check frozen watcher suggestions with mocked services",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 14,
+          "started_at": "2026-10-21T05:42:50Z",
+          "completed_at": "2026-10-21T05:42:57Z"
+        },
+        {
+          "name": "Check frozen outline revisions with mocked services",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 15,
+          "started_at": "2026-10-21T05:42:57Z",
+          "completed_at": "2026-10-21T05:43:10Z"
+        },
+        {
+          "name": "Check frozen owned Discord bot with mocked services",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 16,
+          "started_at": "2026-10-21T05:43:10Z",
+          "completed_at": "2026-10-21T05:43:14Z"
+        },
+        {
+          "name": "Check frozen private settings sync with mocked downloads",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 17,
+          "started_at": "2026-10-21T05:43:14Z",
+          "completed_at": "2026-10-21T05:43:33Z"
+        },
+        {
+          "name": "Package dashboard with the native companion",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 18,
+          "started_at": "2026-10-21T05:43:33Z",
+          "completed_at": "2026-10-21T05:43:38Z"
+        },
+        {
+          "name": "Verify final dashboard and backend package",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 19,
+          "started_at": "2026-10-21T05:43:38Z",
+          "completed_at": "2026-10-21T05:43:39Z"
+        },
+        {
+          "name": "Archive and verify extracted native deliverable",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 20,
+          "started_at": "2026-10-21T05:43:39Z",
+          "completed_at": "2026-10-21T05:44:11Z"
+        },
+        {
+          "name": "Run actions/upload-artifact@v4",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 21,
+          "started_at": "2026-10-21T05:44:11Z",
+          "completed_at": "2026-10-21T05:44:16Z"
+        },
+        {
+          "name": "Post Run actions/setup-python@v5",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 40,
+          "started_at": "2026-10-21T05:44:16Z",
+          "completed_at": "2026-10-21T05:44:16Z"
+        },
+        {
+          "name": "Post Run actions/setup-node@v4",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 41,
+          "started_at": "2026-10-21T05:44:16Z",
+          "completed_at": "2026-10-21T05:44:17Z"
+        },
+        {
+          "name": "Post Run actions/checkout@v4",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 42,
+          "started_at": "2026-10-21T05:44:17Z",
+          "completed_at": "2026-10-21T05:44:17Z"
+        },
+        {
+          "name": "Complete job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 43,
+          "started_at": "2026-10-21T05:44:17Z",
+          "completed_at": "2026-10-21T05:44:18Z"
+        }
+      ]
+    },
+    {
+      "id": 119059489777,
+      "name": "preview (windows-latest, win32, x64)",
+      "status": "completed",
+      "conclusion": "success",
+      "html_url": "https://github.com/KevinAwesomeCoding/VerseView-Detector/actions/runs/39550861376/job/119059489777",
+      "steps": [
+        {
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 1,
+          "started_at": "2026-10-21T05:40:19Z",
+          "completed_at": "2026-10-21T05:40:20Z"
+        },
+        {
+          "name": "Run actions/checkout@v4",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 2,
+          "started_at": "2026-10-21T05:40:20Z",
+          "completed_at": "2026-10-21T05:40:26Z"
+        },
+        {
+          "name": "Run actions/setup-node@v4",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 3,
+          "started_at": "2026-10-21T05:40:26Z",
+          "completed_at": "2026-10-21T05:40:34Z"
+        },
+        {
+          "name": "Run npm ci --no-fund --no-audit",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 4,
+          "started_at": "2026-10-21T05:40:34Z",
+          "completed_at": "2026-10-21T05:40:44Z"
+        },
+        {
+          "name": "Run actions/setup-python@v5",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 5,
+          "started_at": "2026-10-21T05:40:44Z",
+          "completed_at": "2026-10-21T05:40:44Z"
+        },
+        {
+          "name": "Check desktop regressions with retained diagnostics",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 6,
+          "started_at": "2026-10-21T05:40:44Z",
+          "completed_at": "2026-10-21T05:40:46Z"
+        },
+        {
+          "name": "Run npm run check",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 7,
+          "started_at": "2026-10-21T05:40:46Z",
+          "completed_at": "2026-10-21T05:40:50Z"
+        },
+        {
+          "name": "Install PortAudio for native Mac builds",
+          "status": "completed",
+          "conclusion": "skipped",
+          "number": 8,
+          "started_at": "2026-10-21T05:40:50Z",
+          "completed_at": "2026-10-21T05:40:50Z"
+        },
+        {
+          "name": "Install native backend build dependencies",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 9,
+          "started_at": "2026-10-21T05:40:50Z",
+          "completed_at": "2026-10-21T05:41:43Z"
+        },
+        {
+          "name": "Check backend and engine regressions",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 10,
+          "started_at": "2026-10-21T05:41:43Z",
+          "completed_at": "2026-10-21T05:41:58Z"
+        },
+        {
+          "name": "Build native companion with the existing spec",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 11,
+          "started_at": "2026-10-21T05:41:58Z",
+          "completed_at": "2026-10-21T05:42:42Z"
+        },
+        {
+          "name": "Smoke-test the frozen companion without devices",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 12,
+          "started_at": "2026-10-21T05:42:42Z",
+          "completed_at": "2026-10-21T05:42:43Z"
+        },
+        {
+          "name": "Check frozen recovery with mocked services",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 13,
+          "started_at": "2026-10-21T05:42:43Z",
+          "completed_at": "2026-10-21T05:43:00Z"
+        },
+        {
+          "name": "Check frozen watcher suggestions with mocked services",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 14,
+          "started_at": "2026-10-21T05:43:00Z",
+          "completed_at": "2026-10-21T05:43:07Z"
+        },
+        {
+          "name": "Check frozen outline revisions with mocked services",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 15,
+          "started_at": "2026-10-21T05:43:07Z",
+          "completed_at": "2026-10-21T05:43:20Z"
+        },
+        {
+          "name": "Check frozen owned Discord bot with mocked services",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 16,
+          "started_at": "2026-10-21T05:43:20Z",
+          "completed_at": "2026-10-21T05:43:24Z"
+        },
+        {
+          "name": "Check frozen private settings sync with mocked downloads",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 17,
+          "started_at": "2026-10-21T05:43:24Z",
+          "completed_at": "2026-10-21T05:43:42Z"
+        },
+        {
+          "name": "Package dashboard with the native companion",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 18,
+          "started_at": "2026-10-21T05:43:42Z",
+          "completed_at": "2026-10-21T05:43:53Z"
+        },
+        {
+          "name": "Verify final dashboard and backend package",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 19,
+          "started_at": "2026-10-21T05:43:53Z",
+          "completed_at": "2026-10-21T05:43:54Z"
+        },
+        {
+          "name": "Archive and verify extracted native deliverable",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 20,
+          "started_at": "2026-10-21T05:43:54Z",
+          "completed_at": "2026-10-21T05:44:25Z"
+        },
+        {
+          "name": "Run actions/upload-artifact@v4",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 21,
+          "started_at": "2026-10-21T05:44:25Z",
+          "completed_at": "2026-10-21T05:44:34Z"
+        },
+        {
+          "name": "Post Run actions/setup-python@v5",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 40,
+          "started_at": "2026-10-21T05:44:34Z",
+          "completed_at": "2026-10-21T05:44:34Z"
+        },
+        {
+          "name": "Post Run actions/setup-node@v4",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 41,
+          "started_at": "2026-10-21T05:44:34Z",
+          "completed_at": "2026-10-21T05:44:37Z"
+        },
+        {
+          "name": "Post Run actions/checkout@v4",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 42,
+          "started_at": "2026-10-21T05:44:37Z",
+          "completed_at": "2026-10-21T05:44:40Z"
+        },
+        {
+          "name": "Complete job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 43,
+          "started_at": "2026-10-21T05:44:40Z",
+          "completed_at": "2026-10-21T05:44:40Z"
+        }
+      ]
+    }
+  ]
+}

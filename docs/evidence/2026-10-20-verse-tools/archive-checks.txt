@@ -1,0 +1,9 @@
+{
+  "result": "PASS",
+  "target": "/var/folders/np/wg999h6d6dxfk49dsl4d0h340000gn/T/vv-archive-check-l5er37xo/2026-10-21T03-03-23-008Z-1efd4700-darwin-arm64/VerseView Desktop Preview-darwin-arm64/VerseView Desktop Preview.app",
+  "buildId": "2026-10-21T03-03-23-008Z-1efd4700-darwin-arm64",
+  "verifiedFiles": 31,
+  "productionEngineIncluded": true
+}
+{"result": "PASS", "ready": {"ready": true, "pid": 62297, "frozen": true, "verification": true, "guiImported": false}, "platform": "posix", "audioOrPresentationStarted": false}
+{"result": "PASS", "archive": "2026-10-21T03-03-23-008Z-1efd4700-darwin-arm64.tar.gz", "sha256": "32e5ed03925abf2a75f2b8d2ff9b0e7f06d8fdea4e1772aba9aafd38f42c8081", "buildId": "2026-10-21T03-03-23-008Z-1efd4700-darwin-arm64", "platform": "darwin", "arch": "arm64", "extractedRuntimeVerified": true, "extractedFrozenStartupVerified": true, "microphoneOrPresentationStarted": false}

@@ -1,0 +1,8 @@
+{
+  "copiedArtifact": "/Users/kevinanil/VerseView-Detector/desktop-preview/out/2026-10-21T03-03-23-008Z-1efd4700-darwin-arm64/VerseView Desktop Preview-darwin-arm64/VerseView Desktop Preview.app",
+  "testedSourceArtifact": "/Users/kevinanil/.codex/worktrees/verse-tools-verification/VerseView-Detector/desktop-preview/out/2026-10-21T03-03-23-008Z-1efd4700-darwin-arm64/VerseView Desktop Preview-darwin-arm64/VerseView Desktop Preview.app",
+  "archive": "/Users/kevinanil/VerseView-Detector/desktop-preview/out/deliverables/2026-10-21T03-03-23-008Z-1efd4700-darwin-arm64.tar.gz",
+  "archiveSHA256": "32e5ed03925abf2a75f2b8d2ff9b0e7f06d8fdea4e1772aba9aafd38f42c8081",
+  "copiedSignatureVerified": true,
+  "copiedFrontendAndFrozenBackendHashesVerified": true
+}
