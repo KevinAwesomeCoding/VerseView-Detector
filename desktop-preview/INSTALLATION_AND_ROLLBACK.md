@@ -1,5 +1,33 @@
 # Preview installation, migration and rollback
 
+## Current consumer beta downloads (0.15.0 and later)
+
+Use the current GitHub beta release matching your platform. Apple Silicon and
+Intel Mac downloads are ZIPs containing only **VerseView Detector.app**. Extract
+the ZIP, then copy the app to a separate versioned folder for evaluation. Leave
+the original operational app intact until you choose to replace it. Required
+license notices and provenance are inside the app; checksums are in the release
+notes. Native ditto creation/extraction preserves executable modes and framework
+symlinks.
+
+Windows downloads are a single **VerseView-Detector-Windows-Setup.exe**. Setup
+installs for the current user under `%LOCALAPPDATA%\Programs\VerseView Detector`,
+with a Start menu entry and uninstaller. It keeps required runtime files together.
+Uninstall via Windows installed apps; the installer does not delete your profile,
+settings, keys or saved sessions. Keep the previous trusted installer for rollback.
+
+The displayed product is now **VerseView Detector** on all platforms. The internal
+`VerseView Desktop Preview` profile paths below are intentionally unchanged for
+upgrade compatibility. First launch uses the original icon; explicit/saved theme
+choices affect the sidebar and running Dock/window icon. Finder and pinned
+shortcuts retain the original static icon.
+
+Signing/security and physical Windows limitations below still apply. The old
+archive/executable instructions in the following historical sections describe
+pre-0.15.0 builds. See [consumer packaging verification](CONSUMER_PACKAGING_VERIFICATION.md)
+for the current build results.
+
+
 The Electron application is still a separate development preview. The original
 installed detector remains the operational app. These steps describe a manual
 preview installation/update; they do not authorize replacing the operational

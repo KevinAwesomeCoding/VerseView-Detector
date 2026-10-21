@@ -1,5 +1,26 @@
 # Verse delivery investigation
 
+## October 21: branded 0.15.0 beta published with verified local ARM packaging
+
+The user authorized a local Apple Silicon build after both hosted ARM attempts
+failed to acquire a GitHub runner. A clean checkout of source dfefa3cc was freshly
+frozen and packaged as `2026-10-21T17-41-55-730Z-dfefa3cc-darwin-arm64`;
+211 Python/81 Node checks, frozen mocked feature checks, package/signature/archive
+checks and six packaged theme/restart cases passed. Windows/Intel packages from
+the successful native CI jobs were retained without changing their bytes.
+All three reports and package hashes passed release staging. The published
+[0.15.0 beta](https://github.com/KevinAwesomeCoding/VerseView-Detector/releases/tag/desktop-beta-235-local-1)
+contains two app-only Mac ZIPs and one Windows Setup.exe. All assets were downloaded
+again and their hashes verified; downloaded Mac bundles passed signature/inventory
+checks. Downloaded ARM frozen startup and actual packaged window inspection passed.
+The original app/settings stayed intact, temporary QA windows/profiles were removed,
+and no real microphone/presentation test or security change occurred. Hosted ARM
+CI remains unavailable, physical Windows acceptance and distribution signing remain
+incomplete, and the original intermittent incident remains unresolved.
+See [consumer release verification](../desktop-preview/CONSUMER_PACKAGING_VERIFICATION.md)
+for exact provenance, platform origins, asset hashes and remaining limits.
+
+
 ## October 21: consumer product packaging and theme integration
 
 Version 0.15.0 renames the native app VerseView Detector and includes the theme
@@ -9,8 +30,12 @@ first-launch/static icon, with selected themes restored for the running native
 icon and sidebar. Existing desktop profile paths are retained for compatibility.
 Local Apple Silicon packaged first-launch, all six themes/restarts, native Dock
 image checks, app-only ZIP extraction/signatures and frozen startup passed;
-211 Python and 81 Node checks passed. Intel/Windows CI/release verification is
-pending. See [consumer packaging verification](../desktop-preview/CONSUMER_PACKAGING_VERIFICATION.md).
+211 Python and 81 Node checks passed. Native Windows x64 installer/runtime/
+uninstall checks and Intel Mac app-only ZIP/signature/frozen checks passed for
+source dfefa3cc. Apple Silicon CI attempt 1 could not acquire a hosted runner due
+to GitHub's reported ARM capacity constraints; its checks never started and
+publication was skipped. The failed-job-only retry also ended without acquiring a runner after 15 minutes;
+GitHub repeated its ARM capacity notices. Release verification remains pending. See [consumer packaging verification](../desktop-preview/CONSUMER_PACKAGING_VERIFICATION.md).
 No original installed app, normal credentials/settings, security settings or
 delivery guards were changed. No live audio/presentation was started. The original
 intermittent incident remains unresolved.

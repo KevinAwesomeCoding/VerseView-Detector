@@ -1,0 +1,103 @@
+{
+  "release": "https://github.com/KevinAwesomeCoding/VerseView-Detector/releases/tag/desktop-beta-235-local-1",
+  "tag": "desktop-beta-235-local-1",
+  "sourceCommit": "dfefa3cc08881538d31942eac8ce1ea0fbdb439d",
+  "localArmBuild": "2026-10-21T17-41-55-730Z-dfefa3cc-darwin-arm64",
+  "localTrackedSourceClean": true,
+  "localFrozenBackendRebuilt": true,
+  "ciRun": 39628053341,
+  "nativeOrigins": {
+    "darwin-arm64": "local Apple Silicon Mac; clean source checkout",
+    "darwin-x64": "successful native CI job",
+    "win32-x64": "successful native CI job; install/runtime/uninstall passed"
+  },
+  "pythonTests": 211,
+  "nodeTests": 81,
+  "frozenSmokeChecks": [
+    "startup",
+    "recovery",
+    "suggestions",
+    "outline",
+    "bot",
+    "sync"
+  ],
+  "packagedThemeChecks": {
+    "firstLaunchOriginal": "passed",
+    "defaultRestartOriginal": "passed",
+    "sixThemes": [
+      {
+        "theme": "sage",
+        "nativeFormat": "icns",
+        "selection": "passed",
+        "savedStartup": "passed",
+        "backdrop": "solid"
+      },
+      {
+        "theme": "midnight",
+        "nativeFormat": "icns",
+        "selection": "passed",
+        "savedStartup": "passed",
+        "backdrop": "solid"
+      },
+      {
+        "theme": "galaxy",
+        "nativeFormat": "icns",
+        "selection": "passed",
+        "savedStartup": "passed",
+        "backdrop": "solid"
+      },
+      {
+        "theme": "aurora",
+        "nativeFormat": "icns",
+        "selection": "passed",
+        "savedStartup": "passed",
+        "backdrop": "solid"
+      },
+      {
+        "theme": "ember",
+        "nativeFormat": "icns",
+        "selection": "passed",
+        "savedStartup": "passed",
+        "backdrop": "solid"
+      },
+      {
+        "theme": "glass",
+        "nativeFormat": "icns",
+        "selection": "passed",
+        "savedStartup": "passed",
+        "backdrop": "native"
+      }
+    ],
+    "rapidChanges": "passed",
+    "errors": []
+  },
+  "downloadedAssetsVerified": true,
+  "macDownloadRootOnlyApp": true,
+  "downloadedMacSignaturesAndInventoriesVerified": true,
+  "downloadedArmFrozenStartupVerified": true,
+  "downloadedArmComputerUseWindowVerified": true,
+  "newRealMicrophoneOrPresentationTest": false,
+  "installedAppReplaced": false,
+  "normalSettingsChanged": false,
+  "originalIncidentExplained": false,
+  "assets": [
+    {
+      "name": "VerseView-Detector-Mac-Apple-Silicon.zip",
+      "size": 189793997,
+      "sha256": "sha256:65d77d3ed9b67012b7724f4f7594ae565a7c3fb4558a96f7cabb94969d027cd4",
+      "download": "https://github.com/KevinAwesomeCoding/VerseView-Detector/releases/download/desktop-beta-235-local-1/VerseView-Detector-Mac-Apple-Silicon.zip"
+    },
+    {
+      "name": "VerseView-Detector-Mac-Intel.zip",
+      "size": 197384325,
+      "sha256": "sha256:2e394cd632fdc6b471a0472808a18f7b6e13a300036cd9bb1167bbac599f95e8",
+      "download": "https://github.com/KevinAwesomeCoding/VerseView-Detector/releases/download/desktop-beta-235-local-1/VerseView-Detector-Mac-Intel.zip"
+    },
+    {
+      "name": "VerseView-Detector-Windows-Setup.exe",
+      "size": 163344108,
+      "sha256": "sha256:e58e8759430ce34d7db25a05150882e7f49442452bd61907e2bbe63b2c3831a9",
+      "download": "https://github.com/KevinAwesomeCoding/VerseView-Detector/releases/download/desktop-beta-235-local-1/VerseView-Detector-Windows-Setup.exe"
+    }
+  ]
+}
