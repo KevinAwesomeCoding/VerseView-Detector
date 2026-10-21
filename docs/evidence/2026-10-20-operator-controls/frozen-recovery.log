@@ -1,0 +1,1 @@
+{"result": "PASS", "native": "posix", "frozen": true, "autosaveIntervalSeconds": 15, "engineStringContext": true, "crashCheckpointRetained": true, "restoreOnlyRemainsStopped": true, "warmup": "PASS with slow mocked completions, one private failure, and concurrent delivery", "microphoneSTT": "NOT USED - callback replay", "presentation": "FAKE CONTROLLER"}

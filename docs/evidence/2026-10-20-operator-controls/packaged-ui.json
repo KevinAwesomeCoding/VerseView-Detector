@@ -1,0 +1,43 @@
+{
+  "result": "PASS",
+  "environment": {
+    "platform": "darwin",
+    "release": "25.5.0",
+    "version": "0.13.0",
+    "packaged": true,
+    "sourceRevision": "66dc11b2442d2e39df7af6c5f696a318872b21aa",
+    "buildId": "2026-10-21T02-31-40-193Z-66dc11b2-darwin-arm64",
+    "appearance": {
+      "mode": "native",
+      "material": "under-window",
+      "reason": "macOS native glass",
+      "theme": "glass",
+      "dark": true,
+      "reducedTransparency": false,
+      "highContrast": false
+    }
+  },
+  "processInfo": {
+    "packaged": true,
+    "executable": "/Users/kevinanil/VerseView-Detector/desktop-preview/out/2026-10-21T02-31-40-193Z-66dc11b2-darwin-arm64/VerseView Desktop Preview-darwin-arm64/VerseView Desktop Preview.app/Contents/MacOS/VerseView Desktop Preview"
+  },
+  "backend": {
+    "status": "ready",
+    "message": "Isolated verification backend · no microphone or live services",
+    "pid": 58261,
+    "owned": true,
+    "frozen": true,
+    "guiImported": false,
+    "verification": true
+  },
+  "checks": [
+    "Native Always on top readback toggles both ways; Detector window only.",
+    "Worship survives Start configuration: bilingual synthetic speech and detections continue, all presentation suppressed. Rolling autosave and normal Stop preserve bilingual originals and the edited outline in library records.",
+    "Compact Saved sessions popup reads bilingual originals; narrow dialog remains bounded; native Escape closes and returns focus.",
+    "Emergency blocks delivery, cancels held approval, stops and confirms an AI-free bilingual saved record. Resume stages it without starting or presenting."
+  ],
+  "errors": [],
+  "microphoneSTT": "UNVERIFIED; synthetic callback replay only",
+  "visibleVerseVIEW": "UNVERIFIED; fake controller only",
+  "windowsPhysical": "UNVERIFIED"
+}

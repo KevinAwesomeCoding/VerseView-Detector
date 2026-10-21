@@ -158,3 +158,15 @@ opened through Computer Use and its Live speech setup prepared without starting
 listening. The original installed detector and prior preview versions are retained.
 Overall migration progress remains6/8 (75%). Native CI for this layout revision is
 separate from the previously passed consumer milestone builds.
+
+##0.13.0 — operator controls group, October20,2026
+
+Four consumer controls are implemented: compact Saved sessions modal, persistent
+Worship, native Always on top and Emergency Stop & Save. Reference/speech stay above
+the tools and emergency remains in the sticky listening header. Final packaged Mac
+checks cover normal/narrow popup bounds, bilingual originals/outline, rolling
+autosave, pin readback, guarded stage-only Resume and emergency cancellation/save.
+Computer Use confirmed popup scrolling and Escape/focus return. See
+[OPERATOR_CONTROLS_VERIFICATION.md](OPERATOR_CONTROLS_VERIFICATION.md) for source,
+artifact and evidence. No new real microphone, visible VerseVIEW or Windows physical
+pass is claimed. Original installed app remains intact; progress6/8,75%.

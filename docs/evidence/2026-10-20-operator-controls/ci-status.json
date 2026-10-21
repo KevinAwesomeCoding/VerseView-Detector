@@ -1,0 +1,51 @@
+{
+  "checked_at": "2026-10-21T02:38:31.238706+00:00",
+  "runs": [
+    {
+      "run": 39533228978,
+      "jobs": [
+        {
+          "name": "preview (windows-latest, win32, x64)",
+          "status": "completed",
+          "conclusion": "success",
+          "html_url": "https://github.com/KevinAwesomeCoding/VerseView-Detector/actions/runs/39533228978/job/119003799473"
+        },
+        {
+          "name": "preview (macos-latest, darwin, arm64)",
+          "status": "completed",
+          "conclusion": "success",
+          "html_url": "https://github.com/KevinAwesomeCoding/VerseView-Detector/actions/runs/39533228978/job/119003799733"
+        },
+        {
+          "name": "preview (macos-15-intel, darwin, x64)",
+          "status": "completed",
+          "conclusion": "success",
+          "html_url": "https://github.com/KevinAwesomeCoding/VerseView-Detector/actions/runs/39533228978/job/119003799820"
+        }
+      ]
+    },
+    {
+      "run": 39533785069,
+      "jobs": [
+        {
+          "name": "preview (macos-15-intel, darwin, x64)",
+          "status": "in_progress",
+          "conclusion": null,
+          "html_url": "https://github.com/KevinAwesomeCoding/VerseView-Detector/actions/runs/39533785069/job/119005567341"
+        },
+        {
+          "name": "preview (windows-latest, win32, x64)",
+          "status": "in_progress",
+          "conclusion": null,
+          "html_url": "https://github.com/KevinAwesomeCoding/VerseView-Detector/actions/runs/39533785069/job/119005567533"
+        },
+        {
+          "name": "preview (macos-latest, darwin, arm64)",
+          "status": "completed",
+          "conclusion": "success",
+          "html_url": "https://github.com/KevinAwesomeCoding/VerseView-Detector/actions/runs/39533785069/job/119005567591"
+        }
+      ]
+    }
+  ]
+}

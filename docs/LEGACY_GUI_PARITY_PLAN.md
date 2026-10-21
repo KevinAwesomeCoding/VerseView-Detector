@@ -180,3 +180,16 @@ a confirmed clear/stop. Shortcut assignment must not conflate emergency with pan
 
 This is a plan only. No controls, checkpoint formats, saved data, runtime modes,
 application installation or system preferences were changed during this inventory.
+
+## Group-of-four implementation update — October 20, 2026
+
+Saved sessions, Worship, native pinning and Emergency Stop & Save are now implemented
+in preview 0.13.0, with the scope and verification limits recorded in
+[OPERATOR_CONTROLS_VERIFICATION.md](OPERATOR_CONTROLS_VERIFICATION.md). The first two
+sequence items above describe their broader design; Save & Quit and live-journal
+backfill across resumed sessions remain deferred. The static audit remains a record
+of the earlier 0.12.1 baseline, not the current implementation status.
+
+The next group is limited to four verse tools: context editing, manual reference
+entry, selectable history and chapter browsing/preview. No next-group implementation
+was included in this delivery. Overall engineering milestone count stays6/8,75%.

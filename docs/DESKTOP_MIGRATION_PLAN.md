@@ -129,3 +129,15 @@ English/Malayalam watcher routes with shared budgets. This adds no completed
 overall milestone: candidate microphone/outline acceptance, recurring-free STT,
 and production replacement/signing remain open. The installed app and active
 settings were not changed. Details: [free-cloud audit](FREE_CLOUD_API_AUDIT.md).
+
+## Operator controls group — October20,2026
+
+Preview0.13.0 adds the next four consumer controls: Saved sessions, Worship,
+Always on top and Emergency Stop & Save. Final Mac artifact uses desktop source
+`66dc11b` with backend source `0503132`; package checks and isolated packaged UI
+verification pass. New library records preserve bilingual originals and outline,
+while older text files remain read-only archives. See
+[OPERATOR_CONTROLS_VERIFICATION.md](OPERATOR_CONTROLS_VERIFICATION.md) for evidence,
+CI status and the remaining recovery/live-journal limitations. Physical microphone,
+visible-output, production signing and replacement gates are not newly passed.
+Overall remains6/8,75%; this feature group is4/4 within its isolated test scope.

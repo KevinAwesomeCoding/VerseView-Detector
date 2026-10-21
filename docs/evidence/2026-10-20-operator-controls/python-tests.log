@@ -1,0 +1,319 @@
+2026-10-20 21:27:53,968 INFO  🔒 SSL CA bundle: /private/tmp/verseview-standalone-build-20261017/lib/python3.13/site-packages/certifi/cacert.pem
+2026-10-20 21:27:54,466 INFO  ✅ [VersionDetector] Detected VerseVIEW version: verseview10 (title: "VerseVIEW Remote 10.0.0")
+2026-10-20 21:27:54,466 INFO  ✅ [VersionDetector] Detected VerseVIEW version: verseview11 (title: "VerseVIEW Remote 11.0.0")
+2026-10-20 21:27:54,467 INFO  ✅ [VersionDetector] Detected VerseVIEW version: verseview11 (title: "VerseVIEW Remote 11.0.0")
+2026-10-20 21:27:58,023 INFO  [bridge] /clear → screen cleared
+2026-10-20 21:27:58,572 ERROR Owned bot bridge request failed
+Traceback (most recent call last):
+  File "/Users/kevinanil/VerseView-Detector/desktop_bot_bridge.py", line 173, in do_GET
+    with self.bridge.delivery():
+         ~~~~~~~~~~~~~~~~~~~~^^
+  File "/Library/Frameworks/Python.framework/Versions/3.13/lib/python3.13/contextlib.py", line 141, in __enter__
+    return next(self.gen)
+  File "/Users/kevinanil/VerseView-Detector/desktop_bot_bridge.py", line 99, in delivery
+    raise ValueError('Engine is not ready for remote delivery')
+ValueError: Engine is not ready for remote delivery
+2026-10-20 21:28:00,646 ERROR Operator session save failed
+Traceback (most recent call last):
+  File "/Users/kevinanil/VerseView-Detector/desktop_operator.py", line 121, in work
+    captured = self.capture()
+  File "/Users/kevinanil/VerseView-Detector/desktop_operator.py", line 56, in capture
+    self.runtime.publisher.flush()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/Users/kevinanil/VerseView-Detector/observer_feed.py", line 181, in flush
+    os.replace(temporary, destination)
+    ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.13/lib/python3.13/unittest/mock.py", line 1169, in __call__
+    return self._mock_call(*args, **kwargs)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.13/lib/python3.13/unittest/mock.py", line 1173, in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+           ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.13/lib/python3.13/unittest/mock.py", line 1234, in _execute_mock_call
+    raise effect
+OSError: disk full
+2026-10-20 21:28:00,686 ERROR Private settings sync commit failed
+Traceback (most recent call last):
+  File "/Users/kevinanil/VerseView-Detector/desktop_sync.py", line 126, in tick
+    count=self.apply(*result)
+  File "/Users/kevinanil/VerseView-Detector/desktop_backend.py", line 100, in apply_sync
+    if target.is_symlink() or target.stat().st_size!=len(data) or target.read_bytes()!=data:raise SyncError('Managed credential file conflicts with downloaded content.')
+                                                                                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+desktop_sync.SyncError: Managed credential file conflicts with downloaded content.
+2026-10-20 21:28:00,687 ERROR Private settings sync commit failed
+Traceback (most recent call last):
+  File "/Users/kevinanil/VerseView-Detector/desktop_sync.py", line 126, in tick
+    count=self.apply(*result)
+  File "/Users/kevinanil/VerseView-Detector/desktop_backend.py", line 111, in apply_sync
+    if count and not self.config.save(merged):raise SyncError('Private settings save failed.')
+                                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+desktop_sync.SyncError: Private settings save failed.
+2026-10-20 21:28:00,689 ERROR Private settings sync download or validation failed
+Traceback (most recent call last):
+  File "/Users/kevinanil/VerseView-Detector/desktop_sync.py", line 110, in _download
+    changes,credential=collect(remote,self.config,self.fetch,self.cancelled.is_set)
+                       ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/kevinanil/VerseView-Detector/desktop_sync.py", line 45, in collect
+    if not isinstance(remote,dict):raise SyncError('Downloaded settings are not a JSON object.')
+                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+desktop_sync.SyncError: Downloaded settings are not a JSON object.
+2026-10-20 21:28:00,690 ERROR Private settings sync download or validation failed
+Traceback (most recent call last):
+  File "/Users/kevinanil/VerseView-Detector/desktop_sync.py", line 110, in _download
+    changes,credential=collect(remote,self.config,self.fetch,self.cancelled.is_set)
+                       ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/kevinanil/VerseView-Detector/desktop_sync.py", line 50, in collect
+    if not isinstance(value,str) or len(value)>16384 or '\0' in value:raise SyncError('Downloaded credential values are invalid.')
+                                                                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+desktop_sync.SyncError: Downloaded credential values are invalid.
+2026-10-20 21:28:00,690 ERROR Private settings sync download or validation failed
+Traceback (most recent call last):
+  File "/Users/kevinanil/VerseView-Detector/desktop_sync.py", line 110, in _download
+    changes,credential=collect(remote,self.config,self.fetch,self.cancelled.is_set)
+                       ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/kevinanil/VerseView-Detector/desktop_sync.py", line 50, in collect
+    if not isinstance(value,str) or len(value)>16384 or '\0' in value:raise SyncError('Downloaded credential values are invalid.')
+                                                                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+desktop_sync.SyncError: Downloaded credential values are invalid.
+2026-10-20 21:28:00,690 ERROR Private settings sync download or validation failed
+Traceback (most recent call last):
+  File "/Users/kevinanil/VerseView-Detector/desktop_sync.py", line 110, in _download
+    changes,credential=collect(remote,self.config,self.fetch,self.cancelled.is_set)
+                       ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/kevinanil/VerseView-Detector/desktop_sync.py", line 65, in collect
+    if not url:raise SyncError('Downloaded Google credentials are invalid.') from None
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+desktop_sync.SyncError: Downloaded Google credentials are invalid.
+2026-10-20 21:28:00,691 ERROR Private settings sync download or validation failed
+Traceback (most recent call last):
+  File "/Users/kevinanil/VerseView-Detector/desktop_sync.py", line 110, in _download
+    changes,credential=collect(remote,self.config,self.fetch,self.cancelled.is_set)
+                       ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/kevinanil/VerseView-Detector/desktop_sync.py", line 67, in collect
+    if not valid_sync_url(url):raise SyncError('Downloaded Google credential URL is invalid.')
+                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+desktop_sync.SyncError: Downloaded Google credential URL is invalid.
+2026-10-20 21:28:00,691 ERROR Private settings sync download or validation failed
+Traceback (most recent call last):
+  File "/Users/kevinanil/VerseView-Detector/desktop_sync.py", line 110, in _download
+    changes,credential=collect(remote,self.config,self.fetch,self.cancelled.is_set)
+                       ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/kevinanil/VerseView-Detector/desktop_sync.py", line 58, in collect
+    if remote.get('type')=='service_account':return changes,credential(remote)
+                                                            ~~~~~~~~~~^^^^^^^^
+  File "/Users/kevinanil/VerseView-Detector/desktop_sync.py", line 54, in credential
+    raise SyncError('Downloaded Google credentials are invalid.')
+desktop_sync.SyncError: Downloaded Google credentials are invalid.
+2026-10-20 21:28:00,703 WARNING Free cloud verse: This provider/model is outside the reviewed recurring-free allowlist.
+2026-10-20 21:28:00,703 WARNING Free cloud verse: groq: confirm recurring free plan, project/model quotas and credential ownership before enabling this route.
+2026-10-20 21:28:00,704 WARNING Free cloud watcher: Watcher previous request is still finishing; this cycle was skipped.
+2026-10-20 21:28:00,773 WARNING Free cloud verse: groq: complete input exceeds the conservative context/minute budget. Shorten the input or explicitly select another verified free route; no text was dropped.
+2026-10-20 21:28:00,781 WARNING Free cloud verse: groq completion: HTTP 429; wait for the rate limit reset. No retry or provider switch was made.
+2026-10-20 21:28:00,781 WARNING Free cloud verse: groq: rate hold; check account or wait 60 seconds before another attempt.
+2026-10-20 21:28:00,784 WARNING Free cloud verse: groq completion: HTTP 401; check the credential. No retry or provider switch was made.
+2026-10-20 21:28:00,785 WARNING Free cloud verse: groq completion: HTTP 403; check project/model permissions. No retry or provider switch was made.
+2026-10-20 21:28:00,786 WARNING Free cloud verse: groq completion: HTTP 402; wait for the free quota reset. No retry or provider switch was made.
+2026-10-20 21:28:00,786 WARNING Free cloud verse: groq completion: HTTP 404; check current model availability. No retry or provider switch was made.
+2026-10-20 21:28:00,787 WARNING Free cloud verse: groq completion: HTTP 429; wait for the rate limit reset. No retry or provider switch was made.
+2026-10-20 21:28:00,788 WARNING Free cloud verse: groq completion: HTTP 503; check provider/network status. No retry or provider switch was made.
+2026-10-20 21:28:00,789 WARNING Free cloud verse: groq completion: connection failed; check network/TLS and try manually.
+2026-10-20 21:28:00,789 WARNING Free cloud verse: groq: truncated output; result was not accepted.
+test_accepted_candidate_reaches_browser_with_one_id (test_delivery.DeliveryTests.test_accepted_candidate_reaches_browser_with_one_id) ... ok
+test_changed_verse_in_same_chapter_passes (test_delivery.DeliveryTests.test_changed_verse_in_same_chapter_passes) ... ok
+test_chapter_only_does_not_report_delivery (test_delivery.DeliveryTests.test_chapter_only_does_not_report_delivery) ... ok
+test_compact_layout_keeps_transcript_and_history_room (test_delivery.DeliveryTests.test_compact_layout_keeps_transcript_and_history_room) ... ok
+test_concurrent_candidates_produce_one_command (test_delivery.DeliveryTests.test_concurrent_candidates_produce_one_command) ... ok
+test_contextual_confirmation_retains_candidate_identity_and_guards (test_delivery.DeliveryTests.test_contextual_confirmation_retains_candidate_identity_and_guards) ... ok
+test_delivery_diagnostics_are_bounded_and_copied (test_delivery.DeliveryTests.test_delivery_diagnostics_are_bounded_and_copied) ... ok
+test_desktop_bot_keeps_real_worship_guard_and_candidate_acceptance (test_delivery.DeliveryTests.test_desktop_bot_keeps_real_worship_guard_and_candidate_acceptance) ... ok
+test_desktop_watcher_manual_send_reaches_actual_delivery_and_keeps_worship_guard (test_delivery.DeliveryTests.test_desktop_watcher_manual_send_reaches_actual_delivery_and_keeps_worship_guard) ... ok
+test_emergency_hold_or_mode_change_before_click_cannot_present (test_delivery.DeliveryTests.test_emergency_hold_or_mode_change_before_click_cannot_present) ... ok
+test_failed_connection_does_not_poison_retry (test_delivery.DeliveryTests.test_failed_connection_does_not_poison_retry) ... ok
+test_failed_input_update_does_not_poison_retry (test_delivery.DeliveryTests.test_failed_input_update_does_not_poison_retry) ... ok
+test_false_positive_and_translation_guards_remain_explainable (test_delivery.DeliveryTests.test_false_positive_and_translation_guards_remain_explainable) ... ok
+test_global_cooldown_kept (test_delivery.DeliveryTests.test_global_cooldown_kept) ... ok
+test_gui_diagnostics_refresh_is_bounded_and_read_only (test_delivery.DeliveryTests.test_gui_diagnostics_refresh_is_bounded_and_read_only) ... ok
+test_hear_twice_verification_kept (test_delivery.DeliveryTests.test_hear_twice_verification_kept) ... ok
+test_hybrid_parser_acceptance_and_guard_have_correlated_events (test_delivery.DeliveryTests.test_hybrid_parser_acceptance_and_guard_have_correlated_events) ... ok
+test_invalid_candidate (test_delivery.DeliveryTests.test_invalid_candidate) ... ok
+test_local_only_queue_and_vtc_can_match (test_delivery.DeliveryTests.test_local_only_queue_and_vtc_can_match) ... ok
+test_manual_confirmation_holds_and_reuses_id (test_delivery.DeliveryTests.test_manual_confirmation_holds_and_reuses_id) ... ok
+test_manual_pending_is_cancelled_when_controller_closes (test_delivery.DeliveryTests.test_manual_pending_is_cancelled_when_controller_closes) ... ok
+test_manual_rejection_and_callback_exception (test_delivery.DeliveryTests.test_manual_rejection_and_callback_exception) ... ok
+test_missing_controller_and_controls (test_delivery.DeliveryTests.test_missing_controller_and_controls) ... ok
+test_multilingual_parser_outputs_still_deliver (test_delivery.DeliveryTests.test_multilingual_parser_outputs_still_deliver) ... ok
+test_normalized_references_share_dedup_state (test_delivery.DeliveryTests.test_normalized_references_share_dedup_state) ... ok
+test_observer_keeps_raw_sarvam_text_when_translation_raises (test_delivery.DeliveryTests.test_observer_keeps_raw_sarvam_text_when_translation_raises) ... ok
+test_old_approval_cannot_replay_after_worship_is_switched_on_then_off (test_delivery.DeliveryTests.test_old_approval_cannot_replay_after_worship_is_switched_on_then_off) ... ok
+test_onwards_failure_does_not_advance (test_delivery.DeliveryTests.test_onwards_failure_does_not_advance) ... ok
+test_operator_mode_cancels_queues_and_worship_keeps_detection_without_presentation (test_delivery.DeliveryTests.test_operator_mode_cancels_queues_and_worship_keeps_detection_without_presentation) ... ok
+test_post_command_error_preserves_accepted_state (test_delivery.DeliveryTests.test_post_command_error_preserves_accepted_state) ... ok
+test_queue_book_change_cancels (test_delivery.DeliveryTests.test_queue_book_change_cancels) ... ok
+test_queue_fetch_and_send_failures_are_recorded (test_delivery.DeliveryTests.test_queue_fetch_and_send_failures_are_recorded) ... ok
+test_queue_replacement_and_expiry_are_explained (test_delivery.DeliveryTests.test_queue_replacement_and_expiry_are_explained) ... ok
+test_queue_semantic_exception_remains_visible (test_delivery.DeliveryTests.test_queue_semantic_exception_remains_visible) ... ok
+test_queued_verse_releases_with_original_id_and_stream (test_delivery.DeliveryTests.test_queued_verse_releases_with_original_id_and_stream) ... ok
+test_replaced_range_fetch_cannot_repopulate_queue (test_delivery.DeliveryTests.test_replaced_range_fetch_cannot_repopulate_queue) ... ok
+test_restore_keeps_both_buffers_as_metadata_without_delivery (test_delivery.DeliveryTests.test_restore_keeps_both_buffers_as_metadata_without_delivery) ... ok
+test_scripture_and_quarantine_guards_are_reported (test_delivery.DeliveryTests.test_scripture_and_quarantine_guards_are_reported) ... ok
+test_scripture_progression_only_after_command_acceptance (test_delivery.DeliveryTests.test_scripture_progression_only_after_command_acceptance) ... ok
+test_sdk_callback_stream_and_exception_boundary (test_delivery.DeliveryTests.test_sdk_callback_stream_and_exception_boundary) ... ok
+test_suppression_does_not_extend_cooldown (test_delivery.DeliveryTests.test_suppression_does_not_extend_cooldown) ... ok
+test_transcript_to_browser_preserves_candidate_identity (test_delivery.DeliveryTests.test_transcript_to_browser_preserves_candidate_identity) ... ok
+test_uncertain_click_does_not_blindly_retry (test_delivery.DeliveryTests.test_uncertain_click_does_not_blindly_retry) ... ok
+test_version_and_legacy_selector_paths_with_fake_selenium (test_delivery.DeliveryTests.test_version_and_legacy_selector_paths_with_fake_selenium) ... ok
+test_vtc_fetch_failure_preserves_existing_fallback (test_delivery.DeliveryTests.test_vtc_fetch_failure_preserves_existing_fallback) ... ok
+test_vtc_replaced_fetch_and_old_expiry_cannot_affect_new_candidate (test_delivery.DeliveryTests.test_vtc_replaced_fetch_and_old_expiry_cannot_affect_new_candidate) ... ok
+test_vtc_replacement_expiry_and_release (test_delivery.DeliveryTests.test_vtc_replacement_expiry_and_release) ... ok
+test_worship_mode_kept (test_delivery.DeliveryTests.test_worship_mode_kept) ... ok
+test_current_verse_model_uses_instruct_mode_with_bounded_answer (test_delivery.GroqCompatibilityTests.test_current_verse_model_uses_instruct_mode_with_bounded_answer) ... ok
+test_semantic_match_routes_to_available_model_and_preserves_no_match (test_delivery.GroqCompatibilityTests.test_semantic_match_routes_to_available_model_and_preserves_no_match) ... ok
+test_close_signals_engine_stop_even_when_owned_bot_is_still_draining (test_desktop_backend.BackendTests.test_close_signals_engine_stop_even_when_owned_bot_is_still_draining) ... ok
+test_configuration_preserves_engine_guards_and_credentials (test_desktop_backend.BackendTests.test_configuration_preserves_engine_guards_and_credentials) ... ok
+test_headless_session_files_write_without_gui_or_provider_calls (test_desktop_backend.BackendTests.test_headless_session_files_write_without_gui_or_provider_calls) ... ok
+test_host_boot_never_starts_recognition_and_close_stops_only_owned_runtime (test_desktop_backend.BackendTests.test_host_boot_never_starts_recognition_and_close_stops_only_owned_runtime) ... ok
+test_private_store_preserves_unknown_values_and_does_not_export_keys (test_desktop_backend.BackendTests.test_private_store_preserves_unknown_values_and_does_not_export_keys) ... ok
+test_profile_lease_prevents_duplicate_host_and_releases_on_close (test_desktop_backend.BackendTests.test_profile_lease_prevents_duplicate_host_and_releases_on_close) ... ok
+test_profile_override_isolated_and_legacy_profile_unchanged_when_unset (test_desktop_backend.BackendTests.test_profile_override_isolated_and_legacy_profile_unchanged_when_unset) ... ok
+test_schedule_incompatible_primary_provider_stays_stopped (test_desktop_backend.BackendTests.test_schedule_incompatible_primary_provider_stays_stopped) ... ok
+test_schedule_resolves_at_explicit_start_without_saving_or_changing_guards (test_desktop_backend.BackendTests.test_schedule_resolves_at_explicit_start_without_saving_or_changing_guards) ... ok
+test_settings_module_import_does_not_require_tkinter (test_desktop_backend.BackendTests.test_settings_module_import_does_not_require_tkinter) ... ok
+test_stop_tolerates_loop_finishing_between_status_check_and_signal (test_desktop_backend.BackendTests.test_stop_tolerates_loop_finishing_between_status_check_and_signal) ... ok
+test_store_rechecks_running_state_conflicts_and_corruption (test_desktop_backend.BackendTests.test_store_rechecks_running_state_conflicts_and_corruption) ... ok
+test_unexpected_start_error_never_exports_raw_exception (test_desktop_backend.BackendTests.test_unexpected_start_error_never_exports_raw_exception) ... ok
+test_unsupported_features_and_missing_keys_are_explicit (test_desktop_backend.BackendTests.test_unsupported_features_and_missing_keys_are_explicit) ... ok
+test_delayed_power_acknowledgement_is_unknown_and_is_not_retried (test_desktop_bot.BotTests.test_delayed_power_acknowledgement_is_unknown_and_is_not_retried) ... ok
+test_explicit_close_keeps_existing_close_behavior_separate_from_clear (test_desktop_bot.BotTests.test_explicit_close_keeps_existing_close_behavior_separate_from_clear) ... ok
+test_http_requires_auth_and_remote_start_reuses_recovery_capabilities (test_desktop_bot.BotTests.test_http_requires_auth_and_remote_start_reuses_recovery_capabilities) ... ok
+test_manual_command_keeps_delivery_checks_and_acceptance_identity (test_desktop_bot.BotTests.test_manual_command_keeps_delivery_checks_and_acceptance_identity) ... ok
+test_missing_or_malformed_credentials_never_launch (test_desktop_bot.BotTests.test_missing_or_malformed_credentials_never_launch) ... ok
+test_navigation_uses_known_canonical_bounds_and_never_guesses_context (test_desktop_bot.BotTests.test_navigation_uses_known_canonical_bounds_and_never_guesses_context) ... ok
+test_owned_subprocess_is_opt_in_private_and_stops_on_close (test_desktop_bot.BotTests.test_owned_subprocess_is_opt_in_private_and_stops_on_close) ... ok
+test_parent_eof_cancels_owned_sdk_task_and_runs_its_cleanup (test_desktop_bot.BotTests.test_parent_eof_cancels_owned_sdk_task_and_runs_its_cleanup) ... ok
+test_private_auth_expiry_replay_and_bounded_sanitized_events (test_desktop_bot.BotTests.test_private_auth_expiry_replay_and_bounded_sanitized_events) ... ok
+test_stop_drain_retains_ownership_until_inflight_command_finishes (test_desktop_bot.BotTests.test_stop_drain_retains_ownership_until_inflight_command_finishes) ... ok
+test_temporary_private_settings_parse_error_does_not_crash_status_or_stop (test_desktop_bot.BotTests.test_temporary_private_settings_parse_error_does_not_crash_status_or_stop) ... ok
+test_drive_url_saves_without_credentials_or_route_changes (test_desktop_cloud_settings.CloudSettingsTests.test_drive_url_saves_without_credentials_or_route_changes) ... ok
+test_invalid_patch_never_echoes_secrets_or_writes (test_desktop_cloud_settings.CloudSettingsTests.test_invalid_patch_never_echoes_secrets_or_writes) ... ok
+test_speech_credentials_are_write_only_and_preserve_delivery_and_routes (test_desktop_cloud_settings.CloudSettingsTests.test_speech_credentials_are_write_only_and_preserve_delivery_and_routes) ... ok
+test_stale_and_running_requests_do_not_write (test_desktop_cloud_settings.CloudSettingsTests.test_stale_and_running_requests_do_not_write) ... ok
+test_write_only_credentials_and_routing_preserve_other_settings (test_desktop_cloud_settings.CloudSettingsTests.test_write_only_credentials_and_routing_preserve_other_settings) ... ok
+test_approval_targets_exact_candidate_and_cannot_repeat (test_desktop_control.DesktopControlTests.test_approval_targets_exact_candidate_and_cannot_repeat) ... ok
+test_checks_state_when_executed (test_desktop_control.DesktopControlTests.test_checks_state_when_executed) ... ok
+test_close_disables_controls_and_removes_own_inbox (test_desktop_control.DesktopControlTests.test_close_disables_controls_and_removes_own_inbox) ... ok
+test_command_age_does_not_expire_or_approve_a_held_candidate (test_desktop_control.DesktopControlTests.test_command_age_does_not_expire_or_approve_a_held_candidate) ... ok
+test_inbox_is_atomic_bounded_and_bad_json_does_not_break_tick (test_desktop_control.DesktopControlTests.test_inbox_is_atomic_bounded_and_bad_json_does_not_break_tick) ... ok
+test_managed_clear_delegates_to_existing_panic_action (test_desktop_control.DesktopControlTests.test_managed_clear_delegates_to_existing_panic_action) ... ok
+test_no_side_effects_without_explicit_opt_in (test_desktop_control.DesktopControlTests.test_no_side_effects_without_explicit_opt_in) ... ok
+test_outline_edits_check_revision_state_and_do_not_start_or_present (test_desktop_control.DesktopControlTests.test_outline_edits_check_revision_state_and_do_not_start_or_present) ... ok
+test_recovery_decisions_require_current_revision_and_stopped_host (test_desktop_control.DesktopControlTests.test_recovery_decisions_require_current_revision_and_stopped_host) ... ok
+test_reject_and_stop_release_waiters_without_approval (test_desktop_control.DesktopControlTests.test_reject_and_stop_release_waiters_without_approval) ... ok
+test_rejects_wrong_session_control_expired_future_and_unknown_action (test_desktop_control.DesktopControlTests.test_rejects_wrong_session_control_expired_future_and_unknown_action) ... ok
+test_session_restart_cancels_pending_and_rejects_old_commands (test_desktop_control.DesktopControlTests.test_session_restart_cancels_pending_and_rejects_old_commands) ... ok
+test_start_failure_is_not_reported_running (test_desktop_control.DesktopControlTests.test_start_failure_is_not_reported_running) ... ok
+test_start_once_and_scheduling_ack (test_desktop_control.DesktopControlTests.test_start_once_and_scheduling_ack) ... ok
+test_start_queued_before_emergency_cannot_restart_after_save_finishes (test_desktop_control.DesktopControlTests.test_start_queued_before_emergency_cannot_restart_after_save_finishes) ... ok
+test_suggestion_sends_are_running_session_bound_and_never_acknowledge_acceptance (test_desktop_control.DesktopControlTests.test_suggestion_sends_are_running_session_bound_and_never_acknowledge_acceptance) ... ok
+test_actual_outline_loop_cannot_overwrite_newer_operator_notes (test_desktop_outline.OutlineTests.test_actual_outline_loop_cannot_overwrite_newer_operator_notes) ... ok
+test_manual_notes_work_with_ai_off_and_error_payloads_are_fixed (test_desktop_outline.OutlineTests.test_manual_notes_work_with_ai_off_and_error_payloads_are_fixed) ... ok
+test_model_generation_revisions_bounds_and_stop (test_desktop_outline.OutlineTests.test_model_generation_revisions_bounds_and_stop) ... ok
+test_stop_prevents_later_fallback_requests_or_publication (test_desktop_outline.OutlineTests.test_stop_prevents_later_fallback_requests_or_publication) ... ok
+test_atomic_failure_retains_last_checkpoint_and_removes_temporary_file (test_desktop_recovery.RecoveryTests.test_atomic_failure_retains_last_checkpoint_and_removes_temporary_file) ... ok
+test_discard_does_not_follow_symlink_and_corruption_is_not_exported (test_desktop_recovery.RecoveryTests.test_discard_does_not_follow_symlink_and_corruption_is_not_exported) ... ok
+test_engine_string_context_is_preserved_and_numeric_legacy_context_is_adapted (test_desktop_recovery.RecoveryTests.test_engine_string_context_is_preserved_and_numeric_legacy_context_is_adapted) ... ok
+test_external_file_is_retained_while_recording (test_desktop_recovery.RecoveryTests.test_external_file_is_retained_while_recording) ... ok
+test_failed_configuration_leaves_staged_recovery_recoverable (test_desktop_recovery.RecoveryTests.test_failed_configuration_leaves_staged_recovery_recoverable) ... ok
+test_idle_empty_and_malformed_content_do_not_destroy_a_checkpoint (test_desktop_recovery.RecoveryTests.test_idle_empty_and_malformed_content_do_not_destroy_a_checkpoint) ... ok
+test_pending_decision_blocks_start_and_cannot_be_overwritten (test_desktop_recovery.RecoveryTests.test_pending_decision_blocks_start_and_cannot_be_overwritten) ... ok
+test_preview_is_bounded_without_truncating_saved_content (test_desktop_recovery.RecoveryTests.test_preview_is_bounded_without_truncating_saved_content) ... ok
+test_private_utf8_roundtrip_excludes_settings_logs_and_commands (test_desktop_recovery.RecoveryTests.test_private_utf8_roundtrip_excludes_settings_logs_and_commands) ... ok
+test_runtime_restores_after_configure_before_thread_and_keeps_checkpoint (test_desktop_recovery.RecoveryTests.test_runtime_restores_after_configure_before_thread_and_keeps_checkpoint) ... ok
+test_stale_revision_and_external_replacement_invalidate_prepared_restore (test_desktop_recovery.RecoveryTests.test_stale_revision_and_external_replacement_invalidate_prepared_restore) ... ok
+test_archive_is_read_only_and_stale_or_symlink_session_cannot_resume (test_desktop_sessions.SessionTests.test_archive_is_read_only_and_stale_or_symlink_session_cannot_resume) ... ok
+test_autosave_updates_one_current_record_and_preserves_explicit_archives (test_desktop_sessions.SessionTests.test_autosave_updates_one_current_record_and_preserves_explicit_archives) ... ok
+test_catalogue_pagination_and_preview_limits (test_desktop_sessions.SessionTests.test_catalogue_pagination_and_preview_limits) ... ok
+test_emergency_blocks_before_stop_saves_originals_and_never_uses_summary (test_desktop_sessions.SessionTests.test_emergency_blocks_before_stop_saves_originals_and_never_uses_summary) ... ok
+test_emergency_supersedes_manual_save_without_premature_success (test_desktop_sessions.SessionTests.test_emergency_supersedes_manual_save_without_premature_success) ... ok
+test_emergency_write_failure_stays_held_and_retains_previous_library (test_desktop_sessions.SessionTests.test_emergency_write_failure_stays_held_and_retains_previous_library) ... ok
+test_failed_write_retains_previous_and_invalid_records_are_visible_but_not_resumable (test_desktop_sessions.SessionTests.test_failed_write_retains_previous_and_invalid_records_are_visible_but_not_resumable) ... ok
+test_immutable_bilingual_sessions_page_preview_without_secret_or_execution (test_desktop_sessions.SessionTests.test_immutable_bilingual_sessions_page_preview_without_secret_or_execution) ... ok
+test_recovery_stage_preserves_file_and_start_new_cancels_staged_content (test_desktop_sessions.SessionTests.test_recovery_stage_preserves_file_and_start_new_cancels_staged_content) ... ok
+test_resume_preserves_current_and_stages_without_starting_or_presenting (test_desktop_sessions.SessionTests.test_resume_preserves_current_and_stages_without_starting_or_presenting) ... ok
+test_worship_persists_and_failure_does_not_acknowledge_a_changed_mode (test_desktop_sessions.SessionTests.test_worship_persists_and_failure_does_not_acknowledge_a_changed_mode) ... ok
+test_result_in_flight_before_reset_cannot_be_emitted_or_clear_a_new_slot (test_desktop_sessions.WatcherModeTests.test_result_in_flight_before_reset_cannot_be_emitted_or_clear_a_new_slot) ... ok
+test_atomic_writer_failure_does_not_truncate_original_settings (test_desktop_settings.SettingsTests.test_atomic_writer_failure_does_not_truncate_original_settings) ... ok
+test_binding_checks_stopped_state_and_last_disk_revision (test_desktop_settings.SettingsTests.test_binding_checks_stopped_state_and_last_disk_revision) ... ok
+test_catalog_supported_combinations (test_desktop_settings.SettingsTests.test_catalog_supported_combinations) ... ok
+test_corrupt_file_is_unavailable_instead_of_overwritten_with_defaults (test_desktop_settings.SettingsTests.test_corrupt_file_is_unavailable_instead_of_overwritten_with_defaults) ... ok
+test_external_disk_and_unsaved_gui_edits_invalidate_revision (test_desktop_settings.SettingsTests.test_external_disk_and_unsaved_gui_edits_invalidate_revision) ... ok
+test_failed_save_restores_widgets_and_keeps_original_file (test_desktop_settings.SettingsTests.test_failed_save_restores_widgets_and_keeps_original_file) ... ok
+test_projection_drops_credentials_and_credential_bearing_url (test_desktop_settings.SettingsTests.test_projection_drops_credentials_and_credential_bearing_url) ... ok
+test_rejects_arbitrary_or_invalid_fields_and_provider_language_pairs (test_desktop_settings.SettingsTests.test_rejects_arbitrary_or_invalid_fields_and_provider_language_pairs) ... ok
+test_rollback_preserves_invalid_legacy_widget_labels (test_desktop_settings.SettingsTests.test_rollback_preserves_invalid_legacy_widget_labels) ... ok
+test_save_preserves_external_credentials_and_unrelated_gui_drafts (test_desktop_settings.SettingsTests.test_save_preserves_external_credentials_and_unrelated_gui_drafts) ... ok
+test_save_updates_gui_and_disk_preserving_unknown_fields_secrets_and_guards (test_desktop_settings.SettingsTests.test_save_updates_gui_and_disk_preserving_unknown_fields_secrets_and_guards) ... ok
+test_settings_reads_stay_on_gui_thread_and_broker_rechecks_state (test_desktop_settings.SettingsTests.test_settings_reads_stay_on_gui_thread_and_broker_rechecks_state) ... ok
+test_unavailable_microphone_may_be_preserved_but_not_newly_selected (test_desktop_settings.SettingsTests.test_unavailable_microphone_may_be_preserved_but_not_newly_selected) ... ok
+test_bounded_projection_omits_provider_payload_and_never_delivers (test_desktop_suggestions.SuggestionTests.test_bounded_projection_omits_provider_payload_and_never_delivers) ... ok
+test_manual_send_uses_guarded_path_with_candidate_and_actual_acceptance (test_desktop_suggestions.SuggestionTests.test_manual_send_uses_guarded_path_with_candidate_and_actual_acceptance) ... ok
+test_no_acceptance_does_not_update_context_or_automatically_retry (test_desktop_suggestions.SuggestionTests.test_no_acceptance_does_not_update_context_or_automatically_retry) ... ok
+test_post_acceptance_error_cannot_erase_acceptance (test_desktop_suggestions.SuggestionTests.test_post_acceptance_error_cannot_erase_acceptance) ... ok
+test_refresh_expiry_old_session_and_stop_invalidate_actions (test_desktop_suggestions.SuggestionTests.test_refresh_expiry_old_session_and_stop_invalidate_actions) ... ok
+test_stop_retains_unknown_inflight_outcome_and_owned_worker (test_desktop_suggestions.SuggestionTests.test_stop_retains_unknown_inflight_outcome_and_owned_worker) ... ok
+test_allowed_credentials_only_and_unchanged_pulls_do_not_rewrite (test_desktop_sync.SyncTests.test_allowed_credentials_only_and_unchanged_pulls_do_not_rewrite) ... ok
+test_auto_pull_is_opt_in_and_readiness_is_required (test_desktop_sync.SyncTests.test_auto_pull_is_opt_in_and_readiness_is_required) ... ok
+test_bounded_transport_uses_existing_tls_timeout_and_rejects_other_schemes (test_desktop_sync.SyncTests.test_bounded_transport_uses_existing_tls_timeout_and_rejects_other_schemes) ... ok
+test_busy_pull_blocks_duplicate_fetch_and_local_settings_save (test_desktop_sync.SyncTests.test_busy_pull_blocks_duplicate_fetch_and_local_settings_save) ... ok
+test_close_discards_result_and_prevents_secondary_download_or_writes (test_desktop_sync.SyncTests.test_close_discards_result_and_prevents_secondary_download_or_writes) ... ok
+test_cloudflare_credentials_sync_without_activating_or_changing_routes (test_desktop_sync.SyncTests.test_cloudflare_credentials_sync_without_activating_or_changing_routes) ... ok
+test_conflicting_credential_file_is_retained_without_overwrite (test_desktop_sync.SyncTests.test_conflicting_credential_file_is_retained_without_overwrite) ... ok
+test_failure_retains_previous_settings_and_credential_bytes (test_desktop_sync.SyncTests.test_failure_retains_previous_settings_and_credential_bytes) ... ok
+test_invalid_primary_payload_can_use_existing_secondary_url_transport (test_desktop_sync.SyncTests.test_invalid_primary_payload_can_use_existing_secondary_url_transport) ... ok
+test_malformed_downloads_fail_without_exposing_or_writing_payload (test_desktop_sync.SyncTests.test_malformed_downloads_fail_without_exposing_or_writing_payload) ... ok
+test_raw_base64_and_url_gcp_transport_stays_private_and_reuses_immutable_file (test_desktop_sync.SyncTests.test_raw_base64_and_url_gcp_transport_stays_private_and_reuses_immutable_file) ... ok
+test_snapshot_and_startup_failure_tolerate_incomplete_private_json (test_desktop_sync.SyncTests.test_snapshot_and_startup_failure_tolerate_incomplete_private_json) ... ok
+test_state_and_storage_conflicts_prevent_staged_commit (test_desktop_sync.SyncTests.test_state_and_storage_conflicts_prevent_staged_commit) ... ok
+test_captured_clients_use_production_parameters_and_redact_results (test_desktop_warmup.WarmupTests.test_captured_clients_use_production_parameters_and_redact_results) ... ok
+test_opt_in_and_local_roles_are_required (test_desktop_warmup.WarmupTests.test_opt_in_and_local_roles_are_required) ... ok
+test_stop_restart_does_not_overlap_or_publish_stale_results (test_desktop_warmup.WarmupTests.test_stop_restart_does_not_overlap_or_publish_stale_results) ... ok
+test_unexpected_failure_is_private_and_status_is_allowlisted (test_desktop_warmup.WarmupTests.test_unexpected_failure_is_private_and_status_is_allowlisted) ... ok
+test_allowlist_and_entitlement_fail_before_network (test_free_cloud.FreeCloudTests.test_allowlist_and_entitlement_fail_before_network) ... ok
+test_busy_watcher_skips_instead_of_queueing_after_a_timeout (test_free_cloud.FreeCloudTests.test_busy_watcher_skips_instead_of_queueing_after_a_timeout) ... ok
+test_concurrent_streams_have_one_global_watcher_slot (test_free_cloud.FreeCloudTests.test_concurrent_streams_have_one_global_watcher_slot) ... ok
+test_current_groq_mode_bound_cache_and_actual_usage (test_free_cloud.FreeCloudTests.test_current_groq_mode_bound_cache_and_actual_usage) ... ok
+test_daily_neurons_shared_between_models_and_failed_reservations_kept (test_free_cloud.FreeCloudTests.test_daily_neurons_shared_between_models_and_failed_reservations_kept) ... ok
+test_desktop_configuration_preserves_opt_in_and_private_fields (test_free_cloud.FreeCloudTests.test_desktop_configuration_preserves_opt_in_and_private_fields) ... ok
+test_engine_free_routing_bypasses_legacy_cloud_and_local_clients (test_free_cloud.FreeCloudTests.test_engine_free_routing_bypasses_legacy_cloud_and_local_clients) ... ok
+test_gemini_actual_token_count_can_admit_large_utf8_input (test_free_cloud.FreeCloudTests.test_gemini_actual_token_count_can_admit_large_utf8_input) ... ok
+test_gemini_summary_count_finish_thought_usage_and_stable_cache (test_free_cloud.FreeCloudTests.test_gemini_summary_count_finish_thought_usage_and_stable_cache) ... ok
+test_language_routing_is_explicit_and_keeps_shared_watcher_budget (test_free_cloud.FreeCloudTests.test_language_routing_is_explicit_and_keeps_shared_watcher_budget) ... ok
+test_malayalam_bound_and_long_input_rejection_do_not_truncate (test_free_cloud.FreeCloudTests.test_malayalam_bound_and_long_input_rejection_do_not_truncate) ... ok
+test_missing_usage_retains_conservative_reservation (test_free_cloud.FreeCloudTests.test_missing_usage_retains_conservative_reservation) ... ok
+test_parallel_identical_summaries_make_one_inference (test_free_cloud.FreeCloudTests.test_parallel_identical_summaries_make_one_inference) ... ok
+test_provider_hold_prevents_subsequent_dispatch (test_free_cloud.FreeCloudTests.test_provider_hold_prevents_subsequent_dispatch) ... ok
+test_rate_quota_auth_model_transport_and_truncation_have_no_retry (test_free_cloud.FreeCloudTests.test_rate_quota_auth_model_transport_and_truncation_have_no_retry) ... ok
+test_server_remaining_headers_preserve_verse_reserve (test_free_cloud.FreeCloudTests.test_server_remaining_headers_preserve_verse_reserve) ... ok
+test_shared_atomic_budget_survives_new_router_and_reserves_verse (test_free_cloud.FreeCloudTests.test_shared_atomic_budget_survives_new_router_and_reserves_verse) ... ok
+test_timer_and_volume_share_floor_and_secondary_gets_a_turn (test_free_cloud.FreeCloudTests.test_timer_and_volume_share_floor_and_secondary_gets_a_turn) ... ok
+test_disabled_export_does_not_create_files_or_threads (test_observer_feed.ObserverTests.test_disabled_export_does_not_create_files_or_threads) ... ok
+test_events_are_bounded_and_context_secrets_are_excluded (test_observer_feed.ObserverTests.test_events_are_bounded_and_context_secrets_are_excluded) ... ok
+test_export_failure_does_not_escape_into_engine_calls (test_observer_feed.ObserverTests.test_export_failure_does_not_escape_into_engine_calls) ... ok
+test_new_session_resets_old_transcripts_and_events (test_observer_feed.ObserverTests.test_new_session_resets_old_transcripts_and_events) ... ok
+test_partial_replacement_is_per_stream_and_finals_are_retained (test_observer_feed.ObserverTests.test_partial_replacement_is_per_stream_and_finals_are_retained) ... ok
+test_platform_directories_match_the_existing_detector_profile (test_observer_feed.ObserverTests.test_platform_directories_match_the_existing_detector_profile) ... ok
+test_raw_and_translation_keep_explicit_stream_and_language (test_observer_feed.ObserverTests.test_raw_and_translation_keep_explicit_stream_and_language) ... ok
+test_snapshot_is_atomic_private_and_stops_cleanly (test_observer_feed.ObserverTests.test_snapshot_is_atomic_private_and_stops_cleanly) ... ok
+test_translation_updates_its_raw_transcript_by_identity (test_observer_feed.ObserverTests.test_translation_updates_its_raw_transcript_by_identity) ... ok
+test_history_write_failure_keeps_recent_live_snapshot_available (test_observer_feed.TranscriptHistoryTests.test_history_write_failure_keeps_recent_live_snapshot_available) ... ok
+test_long_final_retains_more_than_the_snapshot_preview (test_observer_feed.TranscriptHistoryTests.test_long_final_retains_more_than_the_snapshot_preview) ... ok
+test_private_history_keeps_beginning_across_snapshot_limit_and_sessions (test_observer_feed.TranscriptHistoryTests.test_private_history_keeps_beginning_across_snapshot_limit_and_sessions) ... ok
+test_disabled_or_no_service_keeps_saved_choices (test_service_schedule.ScheduleTests.test_disabled_or_no_service_keeps_saved_choices) ... ok
+test_local_weekdays_and_saturday (test_service_schedule.ScheduleTests.test_local_weekdays_and_saturday) ... ok
+test_saved_english_secondary_choices_survive (test_service_schedule.ScheduleTests.test_saved_english_secondary_choices_survive) ... ok
+test_service_rules_keep_primary_provider_settings_and_guards (test_service_schedule.ScheduleTests.test_service_rules_keep_primary_provider_settings_and_guards) ... ok
+test_sunday_exact_boundaries (test_service_schedule.ScheduleTests.test_sunday_exact_boundaries) ... ok
+
+----------------------------------------------------------------------
+Ran 194 tests in 6.842s
+
+OK

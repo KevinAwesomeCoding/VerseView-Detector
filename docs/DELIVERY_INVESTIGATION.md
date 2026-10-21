@@ -1349,3 +1349,22 @@ recovery, approval, bilingual transcript/history and independent scrolling check
 passed. This introduces no new evidence explaining the original intermittent
 incident and does not claim a new physical microphone/STT or VerseVIEW output pass.
 The original installed detector was not replaced.
+
+## October20,2026 — consumer operator controls, isolated packaged checks
+
+Preview0.13.0 implements Saved sessions, Worship, native Always on top and Emergency
+Stop & Save. Desktop revision `66dc11b`, frozen core `0503132`: 194 Python and74
+desktop unit checks passed; final Mac package bytes/provenance, extracted archive
+startup, frozen crash recovery and the group-of-four packaged UI checks passed.
+Computer Use confirmed the final packaged window, session popup/scrolling and
+Escape/focus return. Tests used explicit QA callback replay and mocked services/
+browser; they did not use real microphone/STT or establish actual VerseVIEW output.
+
+Mode transitions invalidate old approvals, queued/timed work and model dispatches.
+Emergency holds delivery before stopping, saves without initiating summarization,
+retains old files on failure and blocks queued pre-emergency Start commands from
+restarting recognition. These are scoped consumer-control guards, not proof of the
+original incident's cause. The original intermittent incident remains unresolved.
+Detailed provenance, evidence, CI state and limits are recorded in
+[OPERATOR_CONTROLS_VERIFICATION.md](OPERATOR_CONTROLS_VERIFICATION.md). Installed
+production app and normal settings remain untouched; overall progress6/8,75%.
