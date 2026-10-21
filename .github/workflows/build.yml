@@ -45,4 +45,4 @@ jobs:
           body_path: ./release/release-notes.md
           files: |
             ./release/*.zip
-            ./release/*.tar.gz
+            ./release/*.exe

@@ -6,9 +6,9 @@ from pathlib import Path
 import shutil
 
 DOWNLOAD_NAMES = {
-    ('win32', 'x64'): 'VerseView-Detector-Windows-x64.zip',
-    ('darwin', 'arm64'): 'VerseView-Detector-Mac-Apple-Silicon.tar.gz',
-    ('darwin', 'x64'): 'VerseView-Detector-Mac-Intel.tar.gz',
+    ('win32', 'x64'): 'VerseView-Detector-Windows-Setup.exe',
+    ('darwin', 'arm64'): 'VerseView-Detector-Mac-Apple-Silicon.zip',
+    ('darwin', 'x64'): 'VerseView-Detector-Mac-Intel.zip',
 }
 EXPECTED = set(DOWNLOAD_NAMES)
 
@@ -21,7 +21,7 @@ def release_notes(checksums, source_commit=None):
         f"| Windows 64-bit | `{DOWNLOAD_NAMES[('win32', 'x64')]}` |",
         f"| Mac with Apple Silicon (M-series) | `{DOWNLOAD_NAMES[('darwin', 'arm64')]}` |",
         f"| Mac with an Intel processor | `{DOWNLOAD_NAMES[('darwin', 'x64')]}` |", '',
-        'Extract the archive before opening the app. On Windows, keep the extracted app folder together.', '',
+        'Mac: extract the ZIP and move VerseView Detector.app to Applications. Windows: run Setup.exe to install for your user.', '',
         '**Beta:** production signing/notarization and remaining physical microphone, visible VerseVIEW',
         'output and Windows UI acceptance are incomplete. The original intermittent delivery incident remains unresolved.', '',
         '<details>', '<summary>Technical details and SHA256 checksums</summary>', '',
@@ -45,10 +45,13 @@ def prepare_artifacts(artifacts, output, source_commit=None):
         if data.get('result') != 'PASS' or any(data.get(k) is not True for k in
                 ('extractedRuntimeVerified', 'extractedFrozenStartupVerified')):
             raise ValueError('Native package did not pass extracted-runtime verification')
+        required = ('installerRuntimeVerified', 'installerUninstallVerified') if target[0] == 'win32' else ('singleAppBundleVerified',)
+        if any(data.get(key) is not True for key in required):
+            raise ValueError('Consumer download verification is incomplete')
         name = data.get('archive')
         if not isinstance(name, str) or not name or '/' in name or '\\' in name or name in ('.', '..'):
             raise ValueError('Invalid package filename')
-        if not name.endswith('.zip' if target[0] == 'win32' else '.tar.gz'):
+        if not name.endswith('.exe' if target[0] == 'win32' else '.zip'):
             raise ValueError('Unexpected package format')
         names = {name, name + '.sha256', report.name}
         if names & filenames:

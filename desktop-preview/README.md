@@ -1,4 +1,4 @@
-# VerseView Desktop Preview
+# VerseView Detector desktop app
 
 A separate Electron dashboard for macOS and Windows, with local engine events,
 **start/stop, candidate approval, speech settings and cloud-provider configuration**, and a separate sample demo. The
@@ -360,11 +360,16 @@ frontend, local icons/licenses, runtime manifest, and build record are packaged;
 native builds additionally include the frozen companion outside `app.asar`.
 Credentials, production settings and test files are excluded from the runtime.
 Mac builds made on Mac receive verified local ad-hoc test signatures. Windows
-builds are unsigned. These are development applications, not public installers.
+builds are unsigned. Downloads remain beta software.
 
-Open the Mac `.app` directly. On Windows keep the entire output directory
-together and run `VerseView Desktop Preview.exe` with its DLLs/resources. Do not
-replace the installed detector with this preview.
+The consumer Mac ZIP contains only `VerseView Detector.app`; required licenses
+and build metadata stay inside the bundle. Extract it and move it to Applications
+when ready to install. Windows downloads are one `VerseView-Detector-Windows-Setup.exe`,
+a per-user installer that stores the required Electron runtime files together
+and supplies a Start menu entry and uninstaller. The native Windows runner builds
+it with its existing Inno Setup compiler, silently installs it in a temporary
+directory, verifies the installed runtime/frozen backend, then uninstalls it.
+This is automated installation coverage; physical Windows acceptance is deferred.
 
 See the [installation and rollback guide](INSTALLATION_AND_ROLLBACK.md) for
 profile locations, one-time settings/managed-credential import, private backups,
@@ -373,8 +378,8 @@ The [installation verification report](INSTALLATION_VERIFICATION.md) records
 actual packaged Mac upgrade/rollback results and unverified Windows/security gates.
 
 ```sh
-node scripts/verify-package.cjs '/path/to/VerseView Desktop Preview.app'
-node scripts/verify-package.cjs '/path/to/VerseView Desktop Preview-win32-x64'
+node scripts/verify-package.cjs '/path/to/VerseView Detector.app'
+node scripts/verify-package.cjs '/path/to/installed/VerseView Detector'
 ```
 
 ## Checks and next work
@@ -419,3 +424,22 @@ Human speech, actual verse output and Windows graphical acceptance remain open.
 The progress plan records completion criteria and the remaining release gates.
 
 Semantic model compatibility and the pending live queue check: [verification](SEMANTIC_QUEUE_VERIFICATION.md).
+
+
+## Product name and theme icons (0.15.0)
+
+All three native targets use **VerseView Detector** for the application name.
+The original repository icon is the static bundle/installer/shortcut icon and
+first-launch runtime/sidebar icon. Selecting any of the six appearance themes
+uses its matching logo in the sidebar and the Mac Dock or Windows window icon;
+the choice survives restarts. Finder and pinned shortcut images remain the
+original static icon; the running application controls its own native icon.
+Native appearance preferences load before window creation. Existing renderer
+preferences migrate without losing the saved theme. The internal desktop profile
+folder and preference key retain their old Preview names to preserve existing
+settings, credentials and sessions; this is not the displayed product name.
+
+Consumer downloads expose no provenance, version or license siblings. Required
+license notices remain in the installed runtime. Build reports/checksums stay in
+Actions artifacts and release notes. See [consumer packaging verification](CONSUMER_PACKAGING_VERIFICATION.md)
+for verified results and platform limitations.

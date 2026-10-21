@@ -1,5 +1,21 @@
 # Verse delivery investigation
 
+## October 21: consumer product packaging and theme integration
+
+Version 0.15.0 renames the native app VerseView Detector and includes the theme
+assets previously absent from committed release source. Mac downloads contain
+one app bundle; Windows uses a per-user Setup.exe. Original icon remains the
+first-launch/static icon, with selected themes restored for the running native
+icon and sidebar. Existing desktop profile paths are retained for compatibility.
+Local Apple Silicon packaged first-launch, all six themes/restarts, native Dock
+image checks, app-only ZIP extraction/signatures and frozen startup passed;
+211 Python and 81 Node checks passed. Intel/Windows CI/release verification is
+pending. See [consumer packaging verification](../desktop-preview/CONSUMER_PACKAGING_VERIFICATION.md).
+No original installed app, normal credentials/settings, security settings or
+delivery guards were changed. No live audio/presentation was started. The original
+intermittent incident remains unresolved.
+
+
 ## October20: committed candidate, native CI and separate Mac installation
 
 Provider and consumer Settings changes were committed/pushed on the existing

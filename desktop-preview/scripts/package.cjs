@@ -44,6 +44,7 @@ const { inventory, verify: verifyBackend, relocateLinks } = require('./backend-i
   const { packager } = await import('@electron/packager');
   const output = path.join(root, 'out', buildId);
   const artifacts = await packager({ dir: root, out: output, name: packageInfo.productName,
+    icon: path.join(root, 'src', 'assets', 'icons', `verseview-original.${platform === 'darwin' ? 'icns' : 'ico'}`),
     ...(backendPath ? { extraResource: [backendPath] } : {}),
     ...(platform === 'darwin' ? { extendInfo: { NSMicrophoneUsageDescription: 'VerseView uses microphone audio when you explicitly start recognition.' } } : {}),
     appBundleId: 'com.verseview.detector.desktop-preview', appVersion: packageInfo.version,
@@ -53,12 +54,17 @@ const { inventory, verify: verifyBackend, relocateLinks } = require('./backend-i
       // Packager passes slash-prefixed paths relative to `dir` to this callback.
       const relative = file.replace(/^[/\\]+/, '');
       if (!relative) return false;
-      return !['src', 'main.cjs', 'preload.cjs', 'outline-output.cjs', 'outline-preload.cjs', 'appearance.cjs', 'backend-manager.cjs', 'engine-feed.cjs', 'engine-commands.cjs', 'package.json', 'build-info.json'].includes(relative.split(/[/\\]/)[0]);
+      return !['src', 'main.cjs', 'preload.cjs', 'outline-output.cjs', 'outline-preload.cjs', 'appearance.cjs', 'appearance-preferences.cjs', 'theme-icons.cjs', 'backend-manager.cjs', 'engine-feed.cjs', 'engine-commands.cjs', 'package.json', 'build-info.json'].includes(relative.split(/[/\\]/)[0]);
     }
   });
   if (platform === 'darwin' && process.platform === 'darwin') {
     for (const artifact of artifacts) {
       const bundle = path.join(artifact, `${packageInfo.productName}.app`);
+      const licenses = path.join(bundle, 'Contents', 'Resources', 'licenses');
+      fs.mkdirSync(licenses, { recursive: true });
+      for (const name of ['LICENSE', 'LICENSES.chromium.html']) {
+        fs.copyFileSync(path.join(artifact, name), path.join(licenses, name));
+      }
       if (backend) relocateLinks(backendPath, path.join(bundle, 'Contents', 'Resources', 'backend'), backend);
       execFileSync('codesign', ['--force', '--deep', '--sign', '-',
         '--preserve-metadata=entitlements,requirements,flags,runtime', bundle], { stdio: 'inherit' });

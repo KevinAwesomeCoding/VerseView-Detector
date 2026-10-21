@@ -19,7 +19,7 @@
 #verseview-prototype .vv-shell{display:grid;grid-template-columns:154px minmax(0,1fr);min-height:854px}
 #verseview-prototype .vv-sidebar{background:var(--vv-panel);padding:24px 12px 18px;border-right:1px solid var(--vv-border);display:flex;flex-direction:column;gap:28px}
 #verseview-prototype .vv-brand{display:flex;align-items:center;gap:9px;padding:0 6px;font-weight:500;letter-spacing:-.5px;font-size:17px}
-#verseview-prototype .vv-brand-mark{display:grid;place-items:center;width:30px;height:32px;border-radius:9px;background:var(--vv-accent);color:var(--vv-on-accent,#fff);font-family:Georgia,serif;font-size:24px;font-style:italic;flex:none}
+#verseview-prototype .vv-brand-mark{display:block;width:34px;height:34px;object-fit:contain;flex:none}
 #verseview-prototype .vv-eyebrow{font-size:10px;line-height:1.5;font-weight:500;letter-spacing:1.6px;text-transform:uppercase;color:var(--vv-muted)}
 #verseview-prototype .vv-nav-label{padding:0 12px;margin-bottom:9px}
 #verseview-prototype .vv-nav{display:flex;flex-direction:column;gap:4px}

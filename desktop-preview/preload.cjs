@@ -7,7 +7,7 @@ contextBridge.exposeInMainWorld('verseviewDesktop', Object.freeze({
   setAlwaysOnTop:enabled=>ipcRenderer.invoke('preview:window-pin',enabled),
   windowState:()=>ipcRenderer.invoke('preview:window-state'),
   environment: () => ipcRenderer.invoke('preview:environment'),
-  setTheme: theme => ipcRenderer.invoke('preview:set-theme', theme),
+  setTheme: (theme, themedIcon = true) => ipcRenderer.invoke('preview:set-theme', theme, themedIcon),
   startEngine: sessionId => ipcRenderer.invoke('preview:start-engine', sessionId),
   stopEngine: sessionId => ipcRenderer.invoke('preview:stop-engine', sessionId),
   resolveCandidate: (sessionId, candidateId, approved) => ipcRenderer.invoke('preview:resolve-candidate', sessionId, candidateId, approved),

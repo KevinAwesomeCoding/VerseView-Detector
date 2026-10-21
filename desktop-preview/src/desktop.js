@@ -2,10 +2,14 @@
   'use strict';
   const preferenceKey = 'verseview-desktop-preview.preferences.v1';
   const themeNames = ['sage', 'midnight', 'glass', 'galaxy', 'aurora', 'ember'];
-  let preferences = { theme: 'glass', layout: 'studio', mode: 'observer', developer: false };
+  let preferences = { theme: 'glass', themeChosen: false, layout: 'studio', mode: 'observer', developer: false };
   try {
     const stored = JSON.parse(localStorage.getItem(preferenceKey));
-    if (themeNames.includes(stored?.theme)) preferences.theme = stored.theme;
+    if (themeNames.includes(stored?.theme)) {
+      preferences.theme = stored.theme;
+      // Older versions persisted selected themes without a separate choice flag.
+      preferences.themeChosen = stored.themeChosen !== false;
+    }
     if (['studio', 'focus'].includes(stored?.layout)) preferences.layout = stored.layout;
     if (['samples', 'observer'].includes(stored?.mode)) preferences.mode = stored.mode;
     preferences.developer = stored?.developer === true;
@@ -55,6 +59,7 @@
   root.dataset.developer=String(preferences.developer);
   window.previewShell = Object.freeze({
     initialTheme: preferences.theme,
+    getIconTheme: () => preferences.themeChosen ? preferences.theme : 'original',
     getMode: () => preferences.mode,
     setMode,
     setLayout: value => {setLayout(value);root.dispatchEvent(new Event('preview:layout'));},
@@ -69,9 +74,12 @@
     getObserver: () => observer,
     getEnvironment: () => environment,
     getBackend: () => backend,
-    setTheme: async theme => {
-      if (!themeNames.includes(theme) || appliedTheme === theme) return;
-      appliedTheme = theme;
+    setTheme: async (theme, explicit = false) => {
+      if (!themeNames.includes(theme)) return;
+      if (explicit) preferences.themeChosen = true;
+      const selection = `${theme}:${preferences.themeChosen}`;
+      if (appliedTheme === selection) return;
+      appliedTheme = selection;
       preferences.theme = theme;
       persist();
       const serial = ++requestSerial;
@@ -79,7 +87,7 @@
       root.dataset.backdrop = 'solid';
       try {
         const result = window.verseviewDesktop
-          ? await window.verseviewDesktop.setTheme(theme)
+          ? await window.verseviewDesktop.setTheme(theme, preferences.themeChosen)
           : { mode: 'solid', theme, reason: 'Native glass requires the desktop app' };
         if (serial === requestSerial) applyAppearance(result);
       } catch {
@@ -97,12 +105,12 @@
       updateObserver({ connection: 'unavailable', message: 'Observer connection unavailable', sources: [], session: null });
     });
     window.verseviewDesktop.onAppearanceChanged(value => {
-      if (value.theme === appliedTheme) applyAppearance(value);
+      if (value.theme === preferences.theme) applyAppearance(value);
     });
     window.verseviewDesktop.environment().then(value => {
       environment = value;
       root.dataset.platform = value.platform;
-      if (value.appearance?.theme === appliedTheme) applyAppearance(value.appearance);
+      if (value.appearance?.theme === preferences.theme) applyAppearance(value.appearance);
       root.dispatchEvent(new CustomEvent('preview:environment', { detail: environment }));
     }).catch(() => {});
   }

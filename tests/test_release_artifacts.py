@@ -22,11 +22,12 @@ class ReleaseArtifactsTests(unittest.TestCase):
         for platform, arch in sorted(release.EXPECTED):
             folder = self.artifacts / f'{platform}-{arch}'
             folder.mkdir(parents=True)
-            package = folder / (f'build-{platform}-{arch}' + ('.zip' if platform == 'win32' else '.tar.gz'))
+            package = folder / (f'build-{platform}-{arch}' + ('.exe' if platform == 'win32' else '.zip'))
             package.write_bytes(f'{platform}/{arch} synthetic package'.encode())
             data = dict(result='PASS', platform=platform, arch=arch, archive=package.name,
                         sha256=hashlib.sha256(package.read_bytes()).hexdigest(),
-                        extractedRuntimeVerified=True, extractedFrozenStartupVerified=True)
+                        extractedRuntimeVerified=True, extractedFrozenStartupVerified=True,
+                        singleAppBundleVerified=True, installerRuntimeVerified=True, installerUninstallVerified=True)
             report = folder / f'build-{platform}-{arch}-archive-verification.json'
             report.write_text(json.dumps(data)); self.reports.append(report)
 
@@ -67,6 +68,16 @@ class ReleaseArtifactsTests(unittest.TestCase):
         for p in self.reports[:2]:
             data = json.loads(p.read_text())
             source = p.parent / data['archive']
-            renamed = p.parent / 'duplicate.tar.gz'
+            renamed = p.parent / 'duplicate.zip'
             source.rename(renamed); data['archive'] = renamed.name; p.write_text(json.dumps(data))
         self.rejected()
+
+    def test_consumer_structure_verification_is_required(self):
+        self.change(singleAppBundleVerified=False); self.rejected()
+
+    def test_windows_install_and_uninstall_must_be_verified(self):
+        p = next(p for p in self.reports if json.loads(p.read_text())['platform'] == 'win32')
+        for field in ['installerRuntimeVerified', 'installerUninstallVerified']:
+            data = json.loads(p.read_text()); data[field] = False; p.write_text(json.dumps(data))
+            self.rejected()
+            data[field] = True; p.write_text(json.dumps(data))

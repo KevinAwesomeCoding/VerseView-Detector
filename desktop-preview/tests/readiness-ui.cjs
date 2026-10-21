@@ -11,7 +11,7 @@ function bundle(executable) {
   return process.platform === 'darwin' ? path.resolve(executable, '../../..') : path.dirname(executable);
 }
 function binary(target) {
-  return process.platform === 'darwin' ? path.join(target, 'Contents/MacOS/VerseView Desktop Preview') : path.join(target, 'VerseView Desktop Preview.exe');
+  return process.platform === 'darwin' ? path.join(target, 'Contents/MacOS/VerseView Detector') : path.join(target, 'VerseView Detector.exe');
 }
 function digest(file) { return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex'); }
 function inventory(directory) {

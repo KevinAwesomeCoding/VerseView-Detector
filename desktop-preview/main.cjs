@@ -1,6 +1,6 @@
 'use strict';
 
-const { app, BrowserWindow, ipcMain, Menu, nativeTheme, session, shell, screen } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu, nativeTheme, nativeImage, session, shell, screen } = require('electron');
 const path = require('node:path');
 const os = require('node:os');
 const { pathToFileURL } = require('node:url');
@@ -9,18 +9,27 @@ const { EngineFeedReader, feedDirectory } = require('./engine-feed.cjs');
 const { EngineCommands } = require('./engine-commands.cjs');
 const { BackendManager } = require('./backend-manager.cjs');
 const { OutlineOutput } = require('./outline-output.cjs');
+const { iconPath, applyThemeIcon } = require('./theme-icons.cjs');
 const fs = require('node:fs');
 
-app.setName('VerseView Desktop Preview');
-// Separate from both the production detector and the Electron development app.
+app.setName('VerseView Detector');
+// Keep the existing desktop profile so upgrades retain settings, sessions and keys.
 app.setPath('userData', path.join(app.getPath('appData'), 'VerseView Desktop Preview'));
 if (process.env.VV_PREVIEW_TEST_PROFILE === '1') {
   app.setPath('userData', path.join(app.getPath('userData'), 'QA'));
+  const tag = process.env.VV_PREVIEW_TEST_PROFILE_TAG;
+  if (tag && /^[a-z0-9-]{1,48}$/.test(tag)) app.setPath('userData', path.join(app.getPath('userData'), tag));
 }
 let window;
 let outlineOutput;
-let theme = 'glass';
+const { loadAppearance, saveAppearance } = require('./appearance-preferences.cjs');
+const appearanceFile = path.join(app.getPath('userData'), 'appearance-preferences.json');
+const savedAppearance = loadAppearance(appearanceFile);
+let theme = savedAppearance.theme;
+let iconTheme = savedAppearance.themedIcon ? theme : 'original';
+nativeTheme.themeSource = DARK_THEMES.has(theme) ? 'dark' : 'system';
 let appearance;
+let nativeIcon;
 let build = { sourceRevision: 'development', buildId: 'development' };
 if (app.isPackaged) {
   try { build = require('./build-info.json'); } catch { /* Show unknown provenance if metadata is missing. */ }
@@ -73,7 +82,7 @@ function updateBackdrop() {
     policy = { mode: 'solid', reason: 'Native backdrop could not be enabled' };
     window.setBackgroundColor(backgroundColor(theme, nativeTheme.shouldUseDarkColors));
   }
-  appearance = { ...policy, theme, dark: nativeTheme.shouldUseDarkColors, reducedTransparency, highContrast };
+  appearance = { ...policy, theme, dark: nativeTheme.shouldUseDarkColors, reducedTransparency, highContrast, nativeIcon };
   window.webContents.send('preview:appearance-changed', appearance);
   return appearance;
 }
@@ -88,10 +97,13 @@ ipcMain.handle('preview:environment', event => {
   return { platform: process.platform, release: os.release(), version: app.getVersion(), packaged: app.isPackaged,
     sourceRevision: build.sourceRevision, buildId: build.buildId, appearance };
 });
-ipcMain.handle('preview:set-theme', (event, value) => {
-  if (!trusted(event) || !validTheme(value)) throw new Error('Invalid appearance request');
+ipcMain.handle('preview:set-theme', (event, value, themedIcon = true) => {
+  if (!trusted(event) || !validTheme(value) || typeof themedIcon !== 'boolean') throw new Error('Invalid appearance request');
   theme = value;
+  iconTheme = themedIcon ? theme : 'original';
+  saveAppearance(appearanceFile, { theme, themedIcon });
   nativeTheme.themeSource = DARK_THEMES.has(theme) ? 'dark' : 'system';
+  updateIcon();
   return updateBackdrop();
 });
 ipcMain.handle('preview:observer', event => {
@@ -195,10 +207,19 @@ ipcMain.handle('preview:backend-folder', async event => {
   if (error) throw new Error('Could not open the backend profile folder');
 });
 
+function updateIcon() {
+  try { nativeIcon = applyThemeIcon({ app, window, nativeImage, theme: iconTheme }); }
+  catch (error) {
+    nativeIcon = { theme: iconTheme, error: error.message };
+    console.warn('Theme icon unavailable:', error.message);
+  }
+}
+
 function createWindow() {
   window = new BrowserWindow({
-    title: 'VerseView Desktop Preview', width: 1180, height: 880, minWidth: 640, minHeight: 540,
+    title: 'VerseView Detector', width: 1180, height: 880, minWidth: 640, minHeight: 540,
     show: false, backgroundColor: '#dce7ef',
+    icon: iconPath(iconTheme, process.platform === 'win32' ? 'ico' : 'png'),
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
     ...(process.platform === 'darwin' ? { transparent: true, vibrancy: 'under-window', visualEffectState: 'followWindow' } : {}),
     webPreferences: { preload: path.join(__dirname, 'preload.cjs'), nodeIntegration: false, contextIsolation: true,
@@ -211,6 +232,7 @@ function createWindow() {
   window.webContents.on('did-finish-load', updateBackdrop);
   window.once('ready-to-show', () => { updateBackdrop(); window.show(); });
   window.on('closed', () => { window = null; outlineOutput?.close(); });
+  updateIcon();
   updateBackdrop();
   window.loadFile(path.join(__dirname, 'src', 'index.html'));
 }
