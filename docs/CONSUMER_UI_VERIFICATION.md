@@ -111,9 +111,11 @@ placeholder change is covered locally and awaits its own pushed CI result. These
 native builds do not substitute for Windows physical UI/microphone testing.
 
 Computer Use confirmed the prior normal-profile bda6f4bf package, source URL and
-Focus screen with listening stopped. The Mac locked before the final52082eda
-window could be opened/confirmed; an unlock request is pending. Its package and
-signature have been verified, and the installed final copy is ready to open.
+Focus screen with listening stopped. The Mac initially locked before the final52082eda
+window could be opened. After the user unlocked it, Computer Use confirmed the
+exact installed52082eda package URL, normal Live navigation, the neutral “No
+reference yet” result, Focus/Full transcript controls and Stopped status. The
+final app is left visible on Live; recognition was not started.
 
 All isolated QA main/backend processes exited. Disposable QA profile, synthetic
 journals and dummy source were removed; no real microphone/cloud/presentation was
