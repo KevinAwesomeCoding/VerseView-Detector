@@ -1,0 +1,11 @@
+{
+  "result": "PASS",
+  "archive": "2026-10-21T14-32-44-970Z-c014bedd-darwin-x64.tar.gz",
+  "sha256": "f527c64b12eaa226798a21eb53dc157a1a88f91a1342eff941ff8131763c6591",
+  "buildId": "2026-10-21T14-32-44-970Z-c014bedd-darwin-x64",
+  "platform": "darwin",
+  "arch": "x64",
+  "extractedRuntimeVerified": true,
+  "extractedFrozenStartupVerified": true,
+  "microphoneOrPresentationStarted": false
+}

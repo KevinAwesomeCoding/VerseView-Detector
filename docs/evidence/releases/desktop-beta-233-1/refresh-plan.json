@@ -1,0 +1,36 @@
+{
+  "release_id": 419665294,
+  "tag": "desktop-beta-233-1",
+  "renames": [
+    {
+      "id": 662789604,
+      "old_name": "2026-10-21T14-28-53-455Z-c014bedd-darwin-arm64.tar.gz",
+      "name": "VerseView-Detector-Mac-Apple-Silicon.tar.gz",
+      "digest": "sha256:dcf8f71e81fd9323ddccfa7816eafe04481f23563544d60e79725fbb9dfe9c55",
+      "size": 174206049
+    },
+    {
+      "id": 662789592,
+      "old_name": "2026-10-21T14-29-56-305Z-c014bedd-win32-x64.zip",
+      "name": "VerseView-Detector-Windows-x64.zip",
+      "digest": "sha256:9e23b8e9a5b9fd63c194683fe001a04d966a1559974dc41bc81a1178fc2f7f67",
+      "size": 204937111
+    },
+    {
+      "id": 662789600,
+      "old_name": "2026-10-21T14-32-44-970Z-c014bedd-darwin-x64.tar.gz",
+      "name": "VerseView-Detector-Mac-Intel.tar.gz",
+      "digest": "sha256:f527c64b12eaa226798a21eb53dc157a1a88f91a1342eff941ff8131763c6591",
+      "size": 180529778
+    }
+  ],
+  "remove_metadata_ids": [
+    662789591,
+    662789601,
+    662789590,
+    662789596,
+    662789585,
+    662789587
+  ],
+  "backup": "/Users/kevinanil/VerseView-Detector/docs/evidence/releases/desktop-beta-233-1"
+}

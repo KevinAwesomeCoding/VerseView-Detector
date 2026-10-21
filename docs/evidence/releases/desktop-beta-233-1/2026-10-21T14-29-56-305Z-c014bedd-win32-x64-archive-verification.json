@@ -1,0 +1,11 @@
+{
+  "result": "PASS",
+  "archive": "2026-10-21T14-29-56-305Z-c014bedd-win32-x64.zip",
+  "sha256": "9e23b8e9a5b9fd63c194683fe001a04d966a1559974dc41bc81a1178fc2f7f67",
+  "buildId": "2026-10-21T14-29-56-305Z-c014bedd-win32-x64",
+  "platform": "win32",
+  "arch": "x64",
+  "extractedRuntimeVerified": true,
+  "extractedFrozenStartupVerified": true,
+  "microphoneOrPresentationStarted": false
+}

@@ -340,7 +340,9 @@ The reusable workflow can also be run manually without publishing.
 
 After all three platforms pass, the main workflow verifies the extracted-runtime
 reports and archive checksums again, then automatically publishes a **GitHub beta
-release** containing the native packages, SHA256 files and verification reports.
+release** containing three clearly named native app packages. SHA256 checksums
+are in a collapsed section of the release notes; technical reports stay in Actions
+artifacts instead of cluttering the app download list.
 A missing, failed or corrupt package prevents publishing. Beta releases do not
 replace the existing stable release. These remain preview builds; production
 signing/notarization and the remaining physical acceptance gates are incomplete.

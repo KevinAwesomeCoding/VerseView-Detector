@@ -38,14 +38,17 @@ class ReleaseArtifactsTests(unittest.TestCase):
             release.prepare_artifacts(self.artifacts, self.output)
         self.assertFalse(self.output.exists(), 'Invalid inputs must not stage partial release files')
 
-    def test_all_verified_targets_stage_only_packages_checksums_and_reports(self):
+    def test_all_verified_targets_publish_only_readable_download_names(self):
         (self.artifacts / 'private-test-log.txt').write_text('not a download')
         self.assertEqual(release.prepare_artifacts(self.artifacts, self.output), 3)
-        self.assertEqual(len(list(self.output.iterdir())), 9)
-        self.assertFalse((self.output / 'private-test-log.txt').exists())
-        for checksum in self.output.glob('*.sha256'):
-            digest, name = checksum.read_text().split()
-            self.assertEqual(hashlib.sha256((self.output / name).read_bytes()).hexdigest(), digest)
+        self.assertEqual({p.name for p in self.output.iterdir()}, set(release.DOWNLOAD_NAMES.values()) | {'release-notes.md'})
+        notes = (self.output / 'release-notes.md').read_text()
+        self.assertIn('<details>', notes)
+        for report in self.reports:
+            data = json.loads(report.read_text())
+            name = release.DOWNLOAD_NAMES[(data['platform'], data['arch'])]
+            self.assertEqual(hashlib.sha256((self.output / name).read_bytes()).hexdigest(), data['sha256'])
+            self.assertIn(data['sha256'] + '  ' + name, notes)
 
     def test_missing_platform_cannot_publish(self):
         self.reports[0].unlink(); self.rejected()

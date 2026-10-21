@@ -5,10 +5,36 @@ import json
 from pathlib import Path
 import shutil
 
-EXPECTED = {('win32', 'x64'), ('darwin', 'arm64'), ('darwin', 'x64')}
+DOWNLOAD_NAMES = {
+    ('win32', 'x64'): 'VerseView-Detector-Windows-x64.zip',
+    ('darwin', 'arm64'): 'VerseView-Detector-Mac-Apple-Silicon.tar.gz',
+    ('darwin', 'x64'): 'VerseView-Detector-Mac-Intel.tar.gz',
+}
+EXPECTED = set(DOWNLOAD_NAMES)
 
 
-def prepare_artifacts(artifacts, output):
+def release_notes(checksums, source_commit=None):
+    lines = [
+        '## Download VerseView Detector', '',
+        'Choose the download for your computer under **Assets** below.', '',
+        '| Computer | App download |', '| --- | --- |',
+        f"| Windows 64-bit | `{DOWNLOAD_NAMES[('win32', 'x64')]}` |",
+        f"| Mac with Apple Silicon (M-series) | `{DOWNLOAD_NAMES[('darwin', 'arm64')]}` |",
+        f"| Mac with an Intel processor | `{DOWNLOAD_NAMES[('darwin', 'x64')]}` |", '',
+        'Extract the archive before opening the app. On Windows, keep the extracted app folder together.', '',
+        '**Beta:** production signing/notarization and remaining physical microphone, visible VerseVIEW',
+        'output and Windows UI acceptance are incomplete. The original intermittent delivery incident remains unresolved.', '',
+        '<details>', '<summary>Technical details and SHA256 checksums</summary>', '',
+    ]
+    if source_commit:
+        lines += [f'Source commit: `{source_commit}`', '']
+    lines += ['Build verification reports are retained with the GitHub Actions artifacts.', '', '```text']
+    lines += [f'{digest}  {name}' for name, digest in sorted(checksums.items())]
+    lines += ['```', '', '</details>', '']
+    return '\n'.join(lines)
+
+
+def prepare_artifacts(artifacts, output, source_commit=None):
     artifacts, output = Path(artifacts), Path(output)
     staged, seen, filenames = [], set(), set()
     for report in sorted(artifacts.rglob('*-archive-verification.json')):
@@ -34,17 +60,17 @@ def prepare_artifacts(artifacts, output):
         if digest != data.get('sha256'):
             raise ValueError('Native package checksum differs from its verification report')
         seen.add(target)
-        staged.append((report, package, digest))
+        staged.append((DOWNLOAD_NAMES[target], package, digest))
     if seen != EXPECTED:
         raise ValueError('All three native builds must pass before publishing')
     # Validate every report before creating any release output.
     if output.exists():
         raise ValueError('Release staging directory must be new')
     output.mkdir(parents=True)
-    for report, package, digest in staged:
-        shutil.copy2(package, output / package.name)
-        shutil.copy2(report, output / report.name)
-        (output / (package.name + '.sha256')).write_text(f'{digest}  {package.name}\n', encoding='utf-8')
+    for name, package, digest in staged:
+        shutil.copy2(package, output / name)
+    (output / 'release-notes.md').write_text(
+        release_notes({name: digest for name, _, digest in staged}, source_commit), encoding='utf-8')
     return len(staged)
 
 
@@ -52,6 +78,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--artifacts', required=True)
     parser.add_argument('--output', required=True)
+    parser.add_argument('--source-commit')
     args = parser.parse_args()
-    count = prepare_artifacts(args.artifacts, args.output)
+    count = prepare_artifacts(args.artifacts, args.output, args.source_commit)
     print(f'Verified and staged {count} native packages for the beta release.')

@@ -31,30 +31,18 @@ jobs:
           pattern: VerseView-Desktop-Preview-*
           path: ./artifacts
       - name: Verify and stage all three native downloads
-        run: python desktop-preview/scripts/prepare-release.py --artifacts ./artifacts --output ./release
+        run: python desktop-preview/scripts/prepare-release.py --artifacts ./artifacts --output ./release --source-commit "${{ github.sha }}"
       - name: Publish beta downloads
         uses: softprops/action-gh-release@v2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           tag_name: desktop-beta-${{ github.run_number }}-${{ github.run_attempt }}
-          name: VerseView Desktop Beta ${{ github.run_number }}.${{ github.run_attempt }}
+          name: VerseView Detector Beta ${{ github.run_number }}.${{ github.run_attempt }}
           prerelease: true
           make_latest: false
           fail_on_unmatched_files: true
           generate_release_notes: true
-          body: |
-            Automated beta of the current desktop app with its bundled Python backend.
-            Source commit: `${{ github.sha }}`
-
-            Downloads: Windows x64 (`win32-x64.zip`), Apple Silicon Mac (`darwin-arm64.tar.gz`),
-            and Intel Mac (`darwin-x64.tar.gz`). Full filenames include their build timestamp.
-            SHA256 checksums and extracted-runtime verification reports are included.
-
-            Beta status: production signing/notarization and remaining physical microphone,
-            visible VerseVIEW output and Windows UI acceptance are still incomplete.
-            The original intermittent delivery incident remains unresolved.
+          body_path: ./release/release-notes.md
           files: |
             ./release/*.zip
             ./release/*.tar.gz
-            ./release/*.sha256
-            ./release/*-archive-verification.json
