@@ -124,3 +124,37 @@ byte-for-byte. Previous app versions remain available. The original detector's
 settings SHA256 remains `e1e2bc2198a328250fe8f3ca1b6b3c3f48928820750916fdc91cada8d26b9760`.
 The original installed detector remains intact. Publisher signing/notarization and
 production replacement remain separate steps requiring the existing approvals.
+
+##0.12.1 — Live ordering and speech setup, October20,2026
+
+At the user's request, normal Live now orders the reference result first, then
+transcript view controls and speech panels. Saved-session recovery, approvals,
+suggestions and Live speech setup follow below the speech panels. Developer Live
+also keeps its runtime/status sections below the output. Full transcript retains
+its existing behavior of prioritizing the transcript rather than the result card.
+
+Primary/secondary language and provider selectors plus the second-stream enable
+switch are now on Live. Normal Settings retains microphone, Bible and VerseVIEW
+connection controls. Both surfaces reuse the same validated settings draft,
+revision checks and stopped-only save path. The global Start/Stop control remains
+at the top. Window layout in Appearance is inset17px to align with the theme grid
+and note, and its label no longer wraps unnecessarily.
+
+PASS:71 desktop tests, syntax/offline checks, package inventory/signature and
+archive extraction/frozen startup. No Python runtime changed; the already tested
+backend is reused. Packaged Computer Use confirmed the new ordering, language
+selectors, stream disabling and successful settings save in an isolated profile
+without starting recognition, and visually confirmed Appearance label alignment.
+The disposable QA app/backend exited and its settings were removed afterward.
+No real microphone/STT or presentation test was performed for this layout change.
+
+Runtime revision `fcac8c15`, version0.12.1, build
+`2026-10-21T01-14-28-855Z-fcac8c15-darwin-arm64` using the existing package command.
+Archive SHA256 `1dd0a556ecd263243fac8c387bd0214b53cbfc2e292ca17ab76aa5599d6a95ef`.
+Separate installed app: `~/Applications/VerseView Preview/0.12.1-fcac8c1/VerseView Desktop Preview.app`.
+The prior normal app had no unsaved form changes and recognition was stopped;
+its settings were backed up before switching versions. The new packaged app was
+opened through Computer Use and its Live speech setup prepared without starting
+listening. The original installed detector and prior preview versions are retained.
+Overall migration progress remains6/8 (75%). Native CI for this layout revision is
+separate from the previously passed consumer milestone builds.
