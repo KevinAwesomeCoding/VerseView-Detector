@@ -1,0 +1,80 @@
+key,source,status,destination,runtime,note
+language,vv_gui.py:2240,Implemented,Live Speech setup,configure() mapping,Typed stopped-only setting
+bible_translation,vv_gui.py:2241,Implemented,Settings: microphone / VerseVIEW,configure() mapping,Typed stopped-only setting
+display_screen,vv_gui.py:2242,Partial,Live Notes tool / existing Outline output,legacy UI display position; new native output target is separate,Native monitor/window selector exists on Outline; legacy screen preference is not the same persisted target
+remote_url,vv_gui.py:2243,Implemented,Settings: microphone / VerseVIEW,configure() mapping,Typed stopped-only setting
+confidence,vv_gui.py:2244,Partial,Settings: detection behavior,configure() mapping,Engine receives saved guard/behavior; editable control and legacy in-session toggle parity absent
+manual_confirm,vv_gui.py:2245,Partial,Settings: detection behavior,configure() mapping,Engine receives saved guard/behavior; editable control and legacy in-session toggle parity absent
+verify,vv_gui.py:2246,Partial,Settings: detection behavior,configure() mapping,Engine receives saved guard/behavior; editable control and legacy in-session toggle parity absent
+verse_interrupt,vv_gui.py:2247,Partial,Settings: detection behavior,configure() mapping,Engine receives saved guard/behavior; editable control and legacy in-session toggle parity absent
+spoken_numeral_mode,vv_gui.py:2248,Partial,Settings: detection behavior,configure() mapping,Engine receives saved guard/behavior; editable control and legacy in-session toggle parity absent
+smart_amen,vv_gui.py:2249,Partial,Settings: detection behavior,configure() mapping,Engine receives saved guard/behavior; editable control and legacy in-session toggle parity absent
+auto_save_notes,vv_gui.py:2250,Partial,Settings: notes automation,EngineRuntime._save_session,Backend can generate summary on normal engine completion; legacy GUI generated on app close if notes had not been generated/saved
+auto_start,vv_gui.py:2251,Changed deliberately,"Settings: Startup, if reintroduced",intentionally ignored on app launch,Stored value is not automatic recognition permission; current app launch stays stopped
+smart_schedule,vv_gui.py:2252,Partial,Settings: Startup / schedule,BackendHost.start -> effective_start_settings,"Backend applies shared timetable on explicit Start, without saving it; no editor/toggle in the new UI"
+show_malayalam_raw,vv_gui.py:2253,Partial,Live speech display options,EngineRuntime.start direct assignment,Raw observed speech and translation disclosure exist; legacy Show Malayalam switch is absent
+malayalam_transliteration,vv_gui.py:2254,Partial,Live language options / Settings default,configure() mapping,Saved flag reaches engine; Sarvam transliteration toggle absent
+panic_key,vv_gui.py:2255,Partial,Settings: shortcuts,configure() mapping,Shift+Escape exists; Windows engine may honor saved single key; no new key recorder and no verified global desktop shortcut parity
+dual_stt_enabled,vv_gui.py:2256,Implemented,Live Speech setup,configure() mapping,Typed stopped-only setting
+secondary_language,vv_gui.py:2257,Implemented,Live Speech setup,configure() mapping,Typed stopped-only setting
+secondary_stt_engine,vv_gui.py:2258,Implemented,Live Speech setup,configure() mapping,Typed stopped-only setting
+stt_engine,vv_gui.py:2259,Implemented,Live Speech setup,configure() mapping,Typed stopped-only setting
+assemblyai_api_key,vv_gui.py:2260,Implemented,Settings: Connections,configure() mapping,Write-only replacement; saved key contents are not shown
+live_points_prompt,vv_gui.py:2261,Partial,Settings: outline behavior,configure() mapping,Saved prompt reaches engine; new prompt editor absent
+live_points_llm_enabled,vv_gui.py:2262,Partial,Live Notes tool,EngineRuntime.start -> SessionOutline.prepare + live_points_enabled,Backend explicitly maps this flag to outline enabling; no normal UI enable toggle
+rate,vv_gui.py:2263,Partial,Developer: audio/timing,configure() mapping,Saved value reaches engine configure; no typed editor in new UI
+chunk,vv_gui.py:2264,Partial,Developer: audio/timing,configure() mapping,Saved value reaches engine configure; no typed editor in new UI
+cooldown,vv_gui.py:2265,Partial,Developer: audio/timing,configure() mapping,Saved value reaches engine configure; no typed editor in new UI
+dedup_window,vv_gui.py:2266,Partial,Developer: audio/timing,configure() mapping,Saved value reaches engine configure; no typed editor in new UI
+silence_timeout,vv_gui.py:2267,Partial,Developer: audio/timing,configure() mapping,Saved value reaches engine configure; no typed editor in new UI
+aai_turn_cutoff,vv_gui.py:2268,Partial,Developer: audio/timing,configure() mapping,Saved value reaches engine configure; no typed editor in new UI
+gcp_interim_flush,vv_gui.py:2269,Partial,Developer: audio/timing,configure() mapping,Saved value reaches engine configure; no typed editor in new UI
+llm_enabled,vv_gui.py:2270,Partial,Developer: audio/timing,configure() mapping,Saved value reaches engine configure; no typed editor in new UI
+deepgram_api_key,vv_gui.py:2271,Implemented,Settings: Connections,configure() mapping,Write-only replacement; saved key contents are not shown
+groq_api_key,vv_gui.py:2272,Implemented,Settings: Connections,configure() mapping,Write-only replacement; saved key contents are not shown
+gemini_api_key,vv_gui.py:2273,Implemented,Settings: Connections,configure() mapping,Write-only replacement; saved key contents are not shown
+cerebras_api_key,vv_gui.py:2274,Partial,Settings: optional legacy connections,configure() mapping,Preserved private values can feed legacy routing; no replacement field in new UI; do not replace reviewed free-only routes
+mistral_api_key,vv_gui.py:2275,Partial,Settings: optional legacy connections,configure() mapping,Preserved private values can feed legacy routing; no replacement field in new UI; do not replace reviewed free-only routes
+sarvam_api_key,vv_gui.py:2276,Implemented,Settings: Connections,configure() mapping,Write-only replacement; saved key contents are not shown
+sarvam_api_key_backup,vv_gui.py:2277,Implemented,Settings: Connections,configure() mapping,Write-only replacement; saved key contents are not shown
+gladia_api_key,vv_gui.py:2278,Implemented,Settings: Connections,configure() mapping,Write-only replacement; saved key contents are not shown
+gcp_credentials_path,vv_gui.py:2279,Partial,Settings: Google credentials,configure() mapping,Existing private path/ADC and managed sync supported; no service-account import picker/status workflow
+local_whisper_endpoint,vv_gui.py:2280,Partial,Settings: speech connections,configure() mapping,Provider can be selected and saved endpoint reaches engine; endpoint editor absent
+discord_webhook_url,vv_gui.py:2282,Partial,Settings: Discord/webhooks,configure() mapping,Saved values and credential sync can supply engine webhooks; no new dedicated editor
+discord_log_webhook_url,vv_gui.py:2283,Partial,Settings: Discord/webhooks,configure() mapping,Saved values and credential sync can supply engine webhooks; no new dedicated editor
+discord_notes_webhook_url,vv_gui.py:2284,Partial,Settings: Discord/webhooks,configure() mapping,Saved values and credential sync can supply engine webhooks; no new dedicated editor
+mic_index,vv_gui.py:2285,Implemented,Settings: microphone / VerseVIEW,configure() mapping,Typed stopped-only setting
+atem_enabled,vv_gui.py:2286,Partial,Settings: ATEM setup; Live integration actions,configure() mapping,Automatic engine behavior can use saved values; setup/discovery/manual keyer controls are absent
+atem_ip,vv_gui.py:2287,Partial,Settings: ATEM setup; Live integration actions,configure() mapping,Automatic engine behavior can use saved values; setup/discovery/manual keyer controls are absent
+atem_key_duration,vv_gui.py:2288,Partial,Settings: ATEM setup; Live integration actions,configure() mapping,Automatic engine behavior can use saved values; setup/discovery/manual keyer controls are absent
+settings_sync_url,vv_gui.py:2289,Implemented,Settings: Connections,SettingsSync,Drive download URL with startup/manual sync; supported formats are deliberately bounded
+local_llm_enabled,vv_gui.py:2291,Partial,Settings: AI / Local models,configure() mapping,Saved configuration feeds engine; editor is absent; manual Test / Warm buttons are separately missing
+local_llm_endpoint,vv_gui.py:2295,Partial,Settings: AI / Local models,configure() mapping,Saved configuration feeds engine; editor is absent; manual Test / Warm buttons are separately missing
+local_llm_auth_token,vv_gui.py:2297,Partial,Settings: AI / Local models,configure() mapping,Saved configuration feeds engine; editor is absent; manual Test / Warm buttons are separately missing
+local_llm_extra_headers,vv_gui.py:2298,Partial,Settings: AI / Local models,configure() mapping,Saved configuration feeds engine; editor is absent; manual Test / Warm buttons are separately missing
+local_llm_model,vv_gui.py:2299,Partial,Settings: AI / Local models,configure() mapping,Saved configuration feeds engine; editor is absent; manual Test / Warm buttons are separately missing
+local_llm_timeout,vv_gui.py:2300,Partial,Settings: AI / Local models,configure() mapping,Saved configuration feeds engine; editor is absent; manual Test / Warm buttons are separately missing
+local_llm_warm_at_start,vv_gui.py:2301,Partial,Settings: AI / Local models,EngineRuntime._main -> SessionWarmup.start,Background warmup works from saved configuration; no editable toggle in the new UI
+local_llm_on_failure,vv_gui.py:2302,Partial,Settings: AI / Local models,configure() mapping,Saved configuration feeds engine; editor is absent; manual Test / Warm buttons are separately missing
+local_llm_role_verse,vv_gui.py:2304,Partial,Settings: AI / Local models,configure() mapping,Saved configuration feeds engine; editor is absent; manual Test / Warm buttons are separately missing
+local_llm_role_outline,vv_gui.py:2305,Partial,Settings: AI / Local models,configure() mapping,Saved configuration feeds engine; editor is absent; manual Test / Warm buttons are separately missing
+local_llm_role_summary,vv_gui.py:2306,Partial,Settings: AI / Local models,configure() mapping,Saved configuration feeds engine; editor is absent; manual Test / Warm buttons are separately missing
+local_llm_model_verse,vv_gui.py:2307,Partial,Settings: AI / Local models,configure() mapping,Saved configuration feeds engine; editor is absent; manual Test / Warm buttons are separately missing
+local_llm_model_outline,vv_gui.py:2308,Partial,Settings: AI / Local models,configure() mapping,Saved configuration feeds engine; editor is absent; manual Test / Warm buttons are separately missing
+local_llm_model_summary,vv_gui.py:2309,Partial,Settings: AI / Local models,configure() mapping,Saved configuration feeds engine; editor is absent; manual Test / Warm buttons are separately missing
+watcher_enabled,vv_gui.py:2311,Partial,Settings: watcher; Developer tuning,configure() mapping,Engine receives saved setting; reviewed free-cloud routes/gap are not a replacement for this legacy toggle/parameter editor
+watcher_provider,vv_gui.py:2313,Partial,Settings: watcher; Developer tuning,configure() mapping,Engine receives saved setting; reviewed free-cloud routes/gap are not a replacement for this legacy toggle/parameter editor
+watcher_batch_interval,vv_gui.py:2315,Partial,Settings: watcher; Developer tuning,configure() mapping,Engine receives saved setting; reviewed free-cloud routes/gap are not a replacement for this legacy toggle/parameter editor
+watcher_auto_confidence,vv_gui.py:2316,Partial,Settings: watcher; Developer tuning,configure() mapping,Engine receives saved setting; reviewed free-cloud routes/gap are not a replacement for this legacy toggle/parameter editor
+watcher_passive_confidence,vv_gui.py:2317,Partial,Settings: watcher; Developer tuning,configure() mapping,Engine receives saved setting; reviewed free-cloud routes/gap are not a replacement for this legacy toggle/parameter editor
+watcher_window_lines,vv_gui.py:2318,Partial,Settings: watcher; Developer tuning,configure() mapping,Engine receives saved setting; reviewed free-cloud routes/gap are not a replacement for this legacy toggle/parameter editor
+watcher_window_seconds,vv_gui.py:2319,Partial,Settings: watcher; Developer tuning,configure() mapping,Engine receives saved setting; reviewed free-cloud routes/gap are not a replacement for this legacy toggle/parameter editor
+watcher_cooldown,vv_gui.py:2320,Partial,Settings: watcher; Developer tuning,configure() mapping,Engine receives saved setting; reviewed free-cloud routes/gap are not a replacement for this legacy toggle/parameter editor
+discord_bot_token,vv_gui.py:2322,Partial,Settings: Discord setup,DesktopBot.start,Managed bot reads these saved values; setup fields are absent from new forms
+vv_host,vv_gui.py:2323,Changed deliberately,"Developer: integrations, if needed",replaced by managed bridge,"Managed bot uses owned authenticated loopback bridge and a dynamic port, not these legacy arbitrary host/port fields"
+vv_port,vv_gui.py:2324,Changed deliberately,"Developer: integrations, if needed",replaced by managed bridge,"Managed bot uses owned authenticated loopback bridge and a dynamic port, not these legacy arbitrary host/port fields"
+vv_guild_id,vv_gui.py:2325,Partial,Settings: Discord setup,DesktopBot.start,Managed bot reads these saved values; setup fields are absent from new forms
+free_cloud_enabled,vv_gui.py:2238,Implemented,Developer: Cloud tuning,reviewed free-cloud configuration,Not a legacy editable widget; collector preserves this profile value. New editor exposes reviewed fields only.
+free_cloud_config,vv_gui.py:2238,Partial,Developer: Cloud tuning,reviewed free-cloud configuration,Not a legacy editable widget; collector preserves this profile value. New editor exposes reviewed fields only.
+cloudflare_api_token,vv_gui.py:2238,Implemented,Settings: Connections,reviewed free-cloud configuration,Not a legacy editable widget; collector preserves this profile value. New editor exposes reviewed fields only.
+cloudflare_account_id,vv_gui.py:2238,Implemented,Settings: Connections,reviewed free-cloud configuration,Not a legacy editable widget; collector preserves this profile value. New editor exposes reviewed fields only.

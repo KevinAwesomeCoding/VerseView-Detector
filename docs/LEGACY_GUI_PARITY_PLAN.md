@@ -5,6 +5,13 @@ or presentation output changed. This extends CONSUMER_UI_PLAN.md following the
 user's request to inventory the old GUI before implementing further controls.
 Overall migration progress remains6/8 (75%). Feature parity is not complete.
 
+The [complete legacy GUI source audit](LEGACY_GUI_AUDIT.md) now supersedes the
+preliminary inventory below as the coverage reference. It maps both GUI files,
+all function definitions and control/binding sites, and all 75 explicit settings
+plus four preserved profile fields. This is static source coverage, not a claim
+that every control has been physically tested. Implementation has not begun in
+this audit change.
+
 ## What the code establishes
 
 - `vv_gui.py:_build_ui` contains Start/Stop, Worship, Pin, Update, transcript panes,
@@ -33,6 +40,12 @@ Overall migration progress remains6/8 (75%). Feature parity is not complete.
   suggestions, basic recovery, bilingual transcript views, settings sync, outline
   editing and a separate outline output. It does not yet have the complete legacy
   operator surface. GUI parity needs backend commands as well as new buttons.
+- Shared service scheduling already applies on explicit Start, and startup local
+  model warmup already runs from saved configuration. Their settings editors and
+  manual local-model Test/Warm actions remain incomplete; do not rebuild these
+  backend features. The audit also identifies legacy Worship reset ordering,
+  direct Selenium sends, incomplete bilingual memory reset and recovery omissions
+  that must not be copied into the new controls.
 
 ## Live layout
 
@@ -158,9 +171,9 @@ a confirmed clear/stop. Shortcut assignment must not conflate emergency with pan
 4. **Notes and integrations.** Add Live access to outline/summary/export, intentional
    memory/log reset, configured Discord and ATEM operator controls. Preserve free
    usage gates; never contact services or present merely by opening a popup.
-5. **Parity/settings audit and packaging.** Map every remaining old Settings field
-   and operator control to implemented, intentionally relocated or explicitly
-   deferred status. Test saved settings separately from crash context, both speech
+5. **Settings parity and packaging.** The static field/control audit is complete
+   in LEGACY_GUI_AUDIT.md; implement its typed configuration backlog in bounded
+   groups. Test saved settings separately from crash context, both speech
    streams, restored outline and disk failures. Package with the established build;
    inspect normal/narrow windows, keyboard, themes and Developer Mode on Mac, run
    native Windows CI and report Windows physical checks separately when unavailable.
