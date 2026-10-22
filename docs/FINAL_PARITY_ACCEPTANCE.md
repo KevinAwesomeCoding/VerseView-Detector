@@ -5,9 +5,9 @@ October 22, 2026 (Chicago). Groups 1–7 and Group 8 items 29/32 are complete:
 Item 30 still needs completion of native Computer Use visual acceptance; item 31
 still needs available real-path acceptance. Current-code native Windows, Intel
 Mac and Apple Silicon CI now pass (see the continuation below).
-The repeating task must remain active until those items are resolved or the user
-explicitly changes their scope. Do not rerun completed tests while these same
-external conditions remain unchanged.
+The user subsequently deferred the two remaining tests and explicitly requested
+release (see release decision below). They remain unverified, not passed. Do not
+rerun completed tests while these same external conditions remain unchanged.
 
 ## Exact artifact and provenance
 
@@ -217,3 +217,20 @@ Glass/Studio, verification microphone and engine stopped in
 Item 30 remains partial: Glass/backdrop, reliable resized pixels, native independent
 scrolling/focus under incoming transcripts and completed native export save remain
 unverified. No real microphone or presentation test was started.
+
+### Owner release decision — October 22
+
+The user explicitly instructed: “ill do the two test later, just release the app.”
+Release is authorized with items 30–31 deferred; the checklist remains 30/32
+verified rather than relabeling those checks as passed. The separate visual chat
+is idle and reports that it stopped without changing the acceptance docs or
+starting speech/presentation. Its last reported QA surface was Verse tools.
+
+Publish through the existing main-push three-platform build/release workflow,
+retaining its beta designation and verification gates. The release notes state
+that final native visual and real microphone/STT-to-visible-output acceptance are
+deferred. Paid publisher signing/notarization remains intentionally omitted.
+Publication does not replace the installed app, change real settings or establish
+a cause for the original incident. Once publication is verified, pause the
+repeating parity task under this explicit scope change; physical checks resume
+when the owner requests them.

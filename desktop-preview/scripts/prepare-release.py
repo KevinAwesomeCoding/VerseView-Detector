@@ -22,8 +22,9 @@ def release_notes(checksums, source_commit=None):
         f"| Mac with Apple Silicon (M-series) | `{DOWNLOAD_NAMES[('darwin', 'arm64')]}` |",
         f"| Mac with an Intel processor | `{DOWNLOAD_NAMES[('darwin', 'x64')]}` |", '',
         'Mac: extract the ZIP and move VerseView Detector.app to Applications. Windows: run Setup.exe to install for your user.', '',
-        '**Beta:** production signing/notarization and remaining physical microphone, visible VerseVIEW',
-        'output and Windows UI acceptance are incomplete. The original intermittent delivery incident remains unresolved.', '',
+        '**Beta:** final native visual checks and real microphone/STT-to-visible-VerseVIEW acceptance',
+        'are deferred by the owner for later testing. Native Windows, Intel Mac and Apple Silicon build checks run before publication.',
+        'Paid publisher signing/notarization is intentionally omitted. The original intermittent delivery incident remains unresolved.', '',
         '<details>', '<summary>Technical details and SHA256 checksums</summary>', '',
     ]
     if source_commit:
