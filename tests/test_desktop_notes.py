@@ -74,11 +74,11 @@ class NotesTests(unittest.TestCase):
         self.generate();source=self.notes.result['source_id']
         self.runtime.publisher.emit('transcript',stream='primary',text='LATER NEW SPEECH',is_final=True)
         self.notes.prepare_export(self.notes.revision,'all')
-        value=self.notes.export;data=(self.profile/'Exports'/(value['id']+'.txt')).read_text()
+        value=self.notes.export;data=(self.profile/'Exports'/(value['id']+'.txt')).read_text(encoding='utf-8')
         self.assertIn('ORIGINAL BEGINNING',data);self.assertIn('മലയാളം ആരംഭം',data);self.assertIn('John 3:17',data)
         self.assertNotIn('LATER NEW SPEECH',data);self.assertEqual(value['source_id'],source)
         self.notes.prepare_export(self.notes.revision,'transcript')
-        self.assertIn('LATER NEW SPEECH',(self.profile/'Exports'/(self.notes.export['id']+'.txt')).read_text())
+        self.assertIn('LATER NEW SPEECH',(self.profile/'Exports'/(self.notes.export['id']+'.txt')).read_text(encoding='utf-8'))
         self.assertEqual(len(list((self.profile/'Exports').glob('*.txt'))),1)
         with self.assertRaises(NotesError):self.notes.prepare_export('bad','notes')
         with self.assertRaises(NotesError):self.notes.prepare_export(self.notes.revision,'../../secret')
@@ -90,14 +90,14 @@ class NotesTests(unittest.TestCase):
 
     def test_auto_save_writes_both_streams_before_optional_notes_and_reuses_same_result(self):
         self.notes.on_stop(False)
-        transcript=Path(self.notes.auto['transcript_path']).read_text()
+        transcript=Path(self.notes.auto['transcript_path']).read_text(encoding='utf-8')
         self.assertIn('മലയാളം ആരംഭം',transcript);self.assertIn('ORIGINAL BEGINNING',transcript)
         self.runtime.engine.generate_sermon_summary.assert_not_called()
         self.generate();calls=self.runtime.engine.generate_sermon_summary.call_count
         self.notes.on_stop(True)
         if self.notes.worker:self.notes.worker.join(2)
         self.assertEqual(self.notes.auto['status'],'saved')
-        self.assertEqual(Path(self.notes.auto['notes_path']).read_text(),'Sermon notes — മലയാളം')
+        self.assertEqual(Path(self.notes.auto['notes_path']).read_text(encoding='utf-8'),'Sermon notes — മലയാളം')
         self.assertEqual(self.runtime.engine.generate_sermon_summary.call_count,calls)
 
     def test_auto_save_failure_retains_transcript_and_no_retry_is_scheduled(self):
@@ -133,7 +133,7 @@ class NotesTests(unittest.TestCase):
         self.assertEqual(self.raw['current_verse'],'18')
 
     def test_interrupted_state_is_visible_and_never_automatically_retried(self):
-        self.generate();value=json.loads(self.notes.path.read_text());value['status']='generating';self.notes.path.write_text(json.dumps(value))
+        self.generate();value=json.loads(self.notes.path.read_text(encoding='utf-8'));value['status']='generating';self.notes.path.write_text(json.dumps(value),encoding='utf-8')
         loaded=SessionNotes(self.runtime)
         self.assertEqual(loaded.status,'interrupted');self.assertEqual(loaded.result['text'],self.notes.result['text'])
         self.assertFalse(loaded.busy);self.assertIsNone(loaded.pending_auto)

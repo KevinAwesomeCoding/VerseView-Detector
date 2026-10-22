@@ -59,17 +59,17 @@ class ConnectionsTests(unittest.TestCase):
         self.assertIn('Synthetic',self.c.snapshot()['message'])
         with self.assertRaises(ConnectionError):self.c.run('atem_off',revision,review=review,isolated=True)
     def test_export_scope_omits_secrets_by_default_and_persists_original_settings(self):
-        self.c.prepare_export(self.revision(),False);packet=self.c.snapshot()['export'];data=json.loads((self.root/'Exports'/(packet['id']+'.txt')).read_text())
+        self.c.prepare_export(self.revision(),False);packet=self.c.snapshot()['export'];data=json.loads((self.root/'Exports'/(packet['id']+'.txt')).read_text(encoding='utf-8'))
         self.assertNotIn('credentials',data);self.assertNotIn('SECRET',json.dumps(data));self.assertFalse(packet['include_credentials'])
-        self.c.prepare_export(self.revision(),True);packet=self.c.snapshot()['export'];data=json.loads((self.root/'Exports'/(packet['id']+'.txt')).read_text());self.assertEqual(data['credentials']['deepgram_api_key'],'SECRET-ORIGINAL')
-        self.assertEqual(json.loads(self.path.read_text()),self.values)
+        self.c.prepare_export(self.revision(),True);packet=self.c.snapshot()['export'];data=json.loads((self.root/'Exports'/(packet['id']+'.txt')).read_text(encoding='utf-8'));self.assertEqual(data['credentials']['deepgram_api_key'],'SECRET-ORIGINAL')
+        self.assertEqual(json.loads(self.path.read_text(encoding='utf-8')),self.values)
     def test_validated_settings_import_retains_unknown_fields_and_respects_credential_scope(self):
         view=project(self.values);view.update(cooldown=4.5,local_llm_role_verse='local')
         payload=dict(schema=1,kind='verseview-settings',values=view,credentials={'deepgram_api_key':'SECRET-REPLACEMENT','local_llm_auth_token':'SECRET-TOKEN','gladia_api_key':'SECRET-GLADIA'})
         self.c.import_file(self.revision(),self.attachment('settings',json.dumps(payload)),False)
-        result=json.loads(self.path.read_text());self.assertEqual(result['deepgram_api_key'],'SECRET-ORIGINAL');self.assertEqual(result['cooldown'],4.5);self.assertEqual(result['future'],{'retain':True})
+        result=json.loads(self.path.read_text(encoding='utf-8'));self.assertEqual(result['deepgram_api_key'],'SECRET-ORIGINAL');self.assertEqual(result['cooldown'],4.5);self.assertEqual(result['future'],{'retain':True})
         self.c.import_file(self.revision(),self.attachment('settings',json.dumps(payload)),True)
-        result=json.loads(self.path.read_text());self.assertEqual(result['deepgram_api_key'],'SECRET-REPLACEMENT');self.assertEqual(result['local_llm_auth_token'],'SECRET-TOKEN');self.assertEqual(result['gladia_api_key'],'SECRET-GLADIA');self.assertNotIn('SECRET',str(self.c.snapshot()))
+        result=json.loads(self.path.read_text(encoding='utf-8'));self.assertEqual(result['deepgram_api_key'],'SECRET-REPLACEMENT');self.assertEqual(result['local_llm_auth_token'],'SECRET-TOKEN');self.assertEqual(result['gladia_api_key'],'SECRET-GLADIA');self.assertNotIn('SECRET',str(self.c.snapshot()))
     def test_invalid_import_and_atomic_save_failure_preserve_settings_and_remove_new_credential(self):
         before=self.path.read_bytes()
         with self.assertRaises(ConnectionError):self.c.import_file(self.revision(),self.attachment('settings',json.dumps({'schema':1,'kind':'verseview-settings','values':{'remote_url':'file:///secret'}})),False)
@@ -123,8 +123,8 @@ class LegacyAuditTests(unittest.TestCase):
     def test_all_79_legacy_fields_have_a_current_reviewed_disposition(self):
         import csv
         root=Path(__file__).resolve().parents[1]
-        old=list(csv.DictReader(io.StringIO((root/'docs/evidence/legacy-gui-audit/settings.csv').read_text())))
-        current=list(csv.DictReader(io.StringIO((root/'docs/evidence/consumer-settings-audit.csv').read_text())))
+        old=list(csv.DictReader(io.StringIO((root/'docs/evidence/legacy-gui-audit/settings.csv').read_text(encoding='utf-8'))))
+        current=list(csv.DictReader(io.StringIO((root/'docs/evidence/consumer-settings-audit.csv').read_text(encoding='utf-8'))))
         self.assertEqual(len(old),79);self.assertEqual(len(current),79)
         self.assertEqual({r['key'] for r in old},{r['key'] for r in current})
         for r in current:

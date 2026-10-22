@@ -8,7 +8,7 @@ import time
 import uuid
 
 root=Path(__file__).resolve().parents[1]
-backend=Path((root/'backend-build/latest.txt').read_text().strip())
+backend=Path((root/'backend-build/latest.txt').read_text(encoding='utf-8').strip())
 executable=backend/('VerseViewBackend.exe' if os.name=='nt' else 'VerseViewBackend')
 with tempfile.TemporaryDirectory(prefix='vv-connections-smoke-') as temporary:
     directory=Path(temporary);profile=directory/'QA/Backend';profile.mkdir(parents=True)
