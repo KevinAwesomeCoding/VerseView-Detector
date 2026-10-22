@@ -1660,3 +1660,30 @@ hit context quarantine and global cooldown; the harness was corrected without
 changing those guards. These findings do not connect the original incident to a
 proven cause. Microphone/STT transport, live VerseVIEW output and live semantic
 queue release were not retested in this isolated fixture-based feature group.
+
+## October 22, 2026 — consumer parity preview CI and partial native acceptance
+
+Groups 1–7 and acceptance/handoff work total 30/32 complete. With explicit user
+approval, runtime parity source was committed to `codex/consumer-parity` as
+`cca4923`. Following a test-only UTF-8 portability correction in `5798877`, preview
+run `39786390395` passed native Windows x64, Intel Mac and Apple Silicon build,
+frozen regression, package and archive checks. Windows acceptance includes a
+temporary silent installer/runtime/uninstaller check; physical Windows microphone
+and visible output remain unverified. Main, releases and the installed app were
+not changed.
+
+Computer Use operated the separate 0.15.7 app and its isolated frozen backend.
+The real Google JSON chooser imported a synthetic nonfunctional key successfully.
+Credential-free export preparation and opening the save sheet were confirmed;
+Save remained disabled and was cancelled. Native screenshots continued to show
+older Live content while accessibility reported Settings/current outcomes, with
+window lookup errors also affecting other apps. This is unresolved observation
+evidence, not proof of a runtime rendering defect. No speculative application or
+STT change was made. The configured local VerseVIEW remote refused connection;
+no real microphone capture or presentation command was sent. The user reported
+being outside, so remaining native visual and real-path checks await their return.
+
+Exact artifacts, commits, CI metadata, screenshots, native AX evidence and remaining
+steps are in [FINAL_PARITY_ACCEPTANCE.md](FINAL_PARITY_ACCEPTANCE.md). Synthetic
+callback replay is not microphone/STT acceptance. The original intermittent
+delivery incident remains **unresolved**.

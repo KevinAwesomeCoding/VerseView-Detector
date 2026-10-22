@@ -279,4 +279,4 @@ Progress reports should show the current group (0/4 through 4/4) and total check
 packages (0/32 through 32/32), plus separate physical checks that are unverified.
 Do not carry the older 75% milestone figure forward as a claim of full parity.
 
-Current scope: **Group 8: 2/4 complete**. Total **30/32 (93.75%)**. Items 30–31 retain explicit locked-Mac and native/real-path validation gaps; see [Final acceptance and handoff](FINAL_PARITY_ACCEPTANCE.md). Groups 6–7 verification: [Connections and Developer settings](CONNECTIONS_DEVELOPER_VERIFICATION.md).
+Current scope: **Group 8: 2/4 complete**. Total **30/32 (93.75%)**. Current-code Windows/Intel/Apple Silicon preview CI passed at `5798877` (run `39786390395`). Native Google import was acknowledged, but screenshot/AX mismatch and native export-save availability remain unresolved. The user is away from the Mac; items 30–31 retain visual and real microphone/output acceptance gaps. See [Final acceptance and handoff](FINAL_PARITY_ACCEPTANCE.md). Groups 6–7 verification: [Connections and Developer settings](CONNECTIONS_DEVELOPER_VERIFICATION.md).
