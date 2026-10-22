@@ -22,3 +22,35 @@ test('verse feed projects only bounded preview data and keeps exact translation 
  assert.equal(decoded.selected.status,'stale');assert.equal(decoded.selected.translation,'mal');assert.equal(decoded.selected.text.length,6000);
  assert.equal(decoded.history.length,128);assert.equal(decoded.chapter.rows.length,8);assert.equal(decoded.chapter.page,24);assert.equal(JSON.stringify(decoded).includes('private'),false);
 });
+
+test('chapter grid and inbox review commands keep exact typed identities and reject extra fields',async t=>{
+ const directory=fs.mkdtempSync(path.join(os.tmpdir(),'vv-review-command-'));t.after(()=>fs.rmSync(directory,{recursive:true,force:true}));
+ const id='a'.repeat(32),revision='c'.repeat(32),now=Date.now(),control={id:'b'.repeat(32),state:'running',actions:['grid_preview','clear_history','preview_suggestion','dismiss_suggestion','clear_suggestions']};
+ const snapshot={connection:'connected',session:{session_id:id,pid:123,updated_at:new Date(now).toISOString(),control}};
+ const inbox=path.join(directory,`control-123-${control.id}`);fs.mkdirSync(inbox);
+ const commands=new EngineCommands({directory,poll:async()=>snapshot},{clock:()=>now});
+ const submit=(a,v)=>commands.submit(id,a,undefined,undefined,undefined,undefined,undefined,v);
+ for(const [action,value] of [['grid_preview',{reference:'John 3:36',context_revision:revision}],['clear_history',{history_revision:revision}],['preview_suggestion',{suggestion_id:revision}],['dismiss_suggestion',{suggestion_id:revision}],['clear_suggestions',{revision}]]){
+  const result=await submit(action,value),request=JSON.parse(fs.readFileSync(path.join(inbox,`command-${result.id}.json`)));
+  for(const [key,item] of Object.entries(value))assert.equal(request[key],item);
+  await assert.rejects(submit(action,{...value,extra:'unsafe'}));
+ }
+ await assert.rejects(submit('grid_preview',{reference:'John 3:36'}));
+ await assert.rejects(submit('dismiss_suggestion',{suggestion_id:'../x'}));
+ snapshot.connection='stale';await assert.rejects(submit('clear_history',{history_revision:revision}));
+ assert.equal(fs.readdirSync(inbox).length,5);
+});
+
+test('notes and memory requests are bounded opaque operations with no renderer paths or content',async t=>{
+ const directory=fs.mkdtempSync(path.join(os.tmpdir(),'vv-notes-commands-'));t.after(()=>fs.rmSync(directory,{recursive:true,force:true}));
+ const id='a'.repeat(32),revision='c'.repeat(32),now=Date.now(),control={id:'b'.repeat(32),state:'stopped',actions:['generate_notes','cancel_notes','prepare_export','prepare_memory_clear','clear_memory']};
+ const snapshot={connection:'connected',session:{session_id:id,pid:123,updated_at:new Date(now).toISOString(),control}};
+ const inbox=path.join(directory,`control-123-${control.id}`);fs.mkdirSync(inbox);
+ const client=new EngineCommands({directory,poll:async()=>snapshot},{clock:()=>now});
+ const submit=(a,v)=>client.submit(id,a,undefined,undefined,undefined,undefined,undefined,v);
+ for(const [action,value] of [['generate_notes',{revision}],['cancel_notes',{}],['prepare_export',{revision,kind:'all'}],['prepare_memory_clear',{}],['clear_memory',{revision}]]){
+  await submit(action,value);await assert.rejects(submit(action,{...value,path:'/tmp/unsafe'}));
+ }
+ await assert.rejects(submit('generate_notes',{}));await assert.rejects(submit('prepare_export',{revision,kind:'credentials'}));
+ control.actions=[];await assert.rejects(submit('clear_memory',{revision}));assert.equal(fs.readdirSync(inbox).length,5);
+});

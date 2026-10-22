@@ -21,14 +21,28 @@
     const names={COMMAND_ACCEPTED:'Command sent',MANUAL_CONFIRM_REQUIRED:'Needs approval',QUEUED:'Waiting for the verse reading',DETECTED:'Reference detected',CANCELLED:'Cancelled',EXPIRED:'Expired',ERROR:'Could not process reference',DELIVERY_FAILED:'Could not send',SUPPRESSED:/duplicate|already.*sent|already.*accepted|cooldown/i.test(event.reason||'')?'Already sent recently':'Not sent'};
     return names[event.outcome]||outcome(event.outcome);
   }
+  function remoteMessage(value){
+    if(!value)return '';
+    const failure={browser:'The browser or its driver could not start.',remote:'The remote page could not be reached.',controls:'The page did not provide the required VerseVIEW controls.'}[value.reason]||'';
+    return {connecting:`Connecting to VerseVIEW · attempt ${value.attempt}/5…`,
+      retrying:`Attempt ${value.attempt}/5 failed. ${failure} Retrying in 5 seconds…`,
+      connected:`VerseVIEW connected on attempt ${value.attempt}/5.`,
+      failed:`Could not connect to VerseVIEW after 5 attempts. ${failure} Check that VerseVIEW and its remote are enabled, review the control URL in Settings, then try again.`,
+      cancelled:'VerseVIEW connection cancelled. Listening is stopped.'}[value.status]||'';
+  }
+  function remoteStatus(snapshot){
+    const session=snapshot.session,value=session?.remote_connection;
+    if(!value)return session?.engine_state==='connection_failed'?'<p role="status">Could not connect to VerseVIEW. Review the remote URL in Settings, then try again.</p>':'';
+    return `<section class="vv-remote-status" aria-label="VerseVIEW connection"><p role="status" aria-live="polite">${escape(remoteMessage(value))}${snapshot.connection!=='connected'?' Last reported status; the backend connection is unavailable.':''}</p><details data-connection-history data-connection-session="${escape(session.session_id)}"><summary>Connection activity</summary><ol>${(session.connection_events||[]).map(row=>`<li>${time(row.timestamp)} · ${escape(remoteMessage(row))}</li>`).join('')}</ol></details></section>`;
+  }
   function compactControls(snapshot){
     reconcileCommand(snapshot);
     const s=snapshot.session,c=s?.control,backend=window.previewShell.getBackend();
     const flow=window.consumerFlow?.state()||{},connected=snapshot.connection==='connected';
     const running=['running','starting','stopping'].includes(c?.state),error=Object.values(s?.streams||{}).some(v=>v.state==='error');
-    const label=flow.busy?'Preparing…':!connected&&backend.owned?'Connection unavailable':c?.operator?.emergency?c.operator.busy?'Stopping & saving…':'Stopped':error?'Needs attention':running?c.state==='running'?'Listening':c.state==='stopping'?'Stopping…':'Starting…':connected?'Ready':'Stopped';
+    const label=flow.busy?'Preparing…':!connected&&backend.owned?'Connection unavailable':s?.remote_connection?.status==='failed'&&c?.state==='stopped'?'Connection failed':c?.operator?.emergency?c.operator.busy?'Stopping & saving…':'Stopped':error?'Needs attention':running?c.state==='running'?'Listening':c.state==='stopping'?'Stopping…':'Starting…':connected?'Ready':'Stopped';
     const disabled=flow.busy||command?.outcome==='submitted';
-    return `<div class="vv-consumer-status" aria-label="Listening controls"><span class="vv-badge ${running&&!error?'vv-ok':''}"><span class="vv-dot"></span>${label}</span><div class="vv-control-actions">${running?`<button class="vv-btn vv-btn-primary" type="button" data-live-stop ${!connected||!c.actions.includes('stop')?'disabled':''}>Stop listening</button>`:`<button class="vv-btn vv-btn-primary" type="button" data-consumer-prepare="start" ${disabled||!window.verseviewDesktop?'disabled':''}>Start listening</button>`}${flow.busy?'<button class="vv-btn" type="button" data-consumer-cancel>Cancel preparation</button>':''}${c?.actions.includes('panic')?`<button class="vv-btn" type="button" data-engine-action="panic" data-engine-session="${s.session_id}" ${!connected?'disabled':''}>Clear output</button>`:''}${window.operatorTools?.safety(snapshot)||''}</div></div>`;
+    return `<div class="vv-consumer-status" aria-label="Listening controls"><span class="vv-badge ${running&&!error?'vv-ok':''}"><span class="vv-dot"></span>${label}</span><div class="vv-control-actions">${running?`<button class="vv-btn vv-btn-primary" type="button" data-live-stop ${!connected||!c.actions.includes('stop')?'disabled':''}>Stop listening</button>`:`<button class="vv-btn vv-btn-primary" type="button" data-consumer-prepare="start" ${disabled||!window.verseviewDesktop?'disabled':''}>${s?.remote_connection?.status==='failed'&&c?.state==='stopped'?'Retry connection':'Start listening'}</button>`}${flow.busy?'<button class="vv-btn" type="button" data-consumer-cancel>Cancel preparation</button>':''}${c?.actions.includes('panic')?`<button class="vv-btn" type="button" data-engine-action="panic" data-engine-session="${s.session_id}" ${!connected?'disabled':''}>Clear output</button>`:''}${window.operatorTools?.safety(snapshot,false)||''}${window.operatorTools?.header(snapshot)||''}</div></div>${window.operatorTools?.recoveryNotice(snapshot)||''}${window.operatorTools?.render(snapshot)||''}${remoteStatus(snapshot)}${window.sessionSetup?.banner(snapshot)||''}`;
   }
   function consumerNotice(snapshot){
     const c=snapshot.session?.control,flow=window.consumerFlow?.state();
@@ -81,11 +95,13 @@
 
   function suggestionPanel(snapshot, disabled) {
     const session=snapshot.session, control=session.control, value=control.suggestions;
-    if(!value?.enabled)return '';
-    const stateLabel={sending:'Send in progress',accepted:'Command accepted',review:'No acceptance confirmed · inspect delivery activity',unknown:'Outcome unknown after Stop · inspect delivery activity'};
-    return `<details class="vv-panel vv-suggestions" data-suggestion-panel data-suggestion-session="${session.session_id}" ${suggestionsOpen===session.session_id?'open':''}><summary>Verse suggestions · ${value.rows.length}</summary>
-      <div class="vv-suggestions-body"><p class="vv-caption">${value.active ? value.has_clients ? developer()?`Watcher active · ${value.cycles} cycles`:'Suggestions active' : 'Watcher active · no provider client configured' : 'Watcher stopped'} · ${developer()?`${value.suggested} suggestions · ${value.discarded} discarded.`:''} Advice expires after 90 seconds. Sends use the existing delivery checks.</p>
-      ${value.rows.length ? value.rows.slice().reverse().map(row=>`<div class="vv-pending-candidate"><div><strong>${escape(row.reference)}</strong><p class="vv-caption">${Math.round(row.confidence*100)}% · ${escape(streamName(session,row.stream))} · ${time(row.created_at)}</p><p class="vv-caption">${escape(row.state==='available' ? row.kind==='auto_suggest' ? 'Automatic candidate · inspect delivery activity for its result' : 'Suggested passage · awaiting your choice' : stateLabel[row.state])}</p>${row.reasoning?`<p class="vv-caption">${escape(row.reasoning)}</p>`:''}${developer()&&row.candidate_id?`<code>${escape(row.candidate_id)}</code>`:''}</div><button type="button" class="vv-btn" data-engine-action="send_suggestion" data-engine-session="${session.session_id}" data-suggestion-id="${row.id}" ${disabled||!control.actions.includes('send_suggestion')||!value.active||value.busy||row.state!=='available'?'disabled':''}>Send ${escape(row.reference)}</button></div>`).join('') : '<p class="vv-caption">No current suggestions.</p>'}</div></details>`;
+    if(!value)return '';
+    const phase={off:'Off',stopped:'Stopped',waiting:'Waiting for speech',scanning:'Scanning speech',suggested:'Suggestion ready',configuration_required:'Provider setup required',rate_limited:'Rate limited',budget_limited:'Free usage limit reached',failed:'No usable response · check provider status'};
+    const stateLabel={sending:'Send in progress',accepted:'Command accepted · visible output unverified',review:'No acceptance confirmed · inspect delivery activity',unknown:'Outcome unknown after Stop · inspect delivery activity'};
+    const locked=(action,row)=>disabled||!control.actions.includes(action)||(row&&row.state!=='available');
+    return `<details class="vv-panel vv-suggestions" data-suggestion-panel data-suggestion-session="${session.session_id}" ${suggestionsOpen===session.session_id?'open':''}><summary>Verse suggestions · ${escape(phase[value.phase]||'Waiting')} · ${value.rows.length}</summary><div class="vv-suggestions-body"><p class="vv-caption" role="status">${escape(phase[value.phase]||'Waiting')}. Enable or configure the watcher in Settings. Every suggestion needs your explicit Display action. Advice expires after 90 seconds.</p>${developer()?`<p class="vv-caption">Effective route: ${escape(value.effective_route||'Not configured')} · ${value.cycles} cycles · ${value.suggested} suggestions · ${value.discarded} discarded</p>`:''}
+      ${value.rows.length?`<button type="button" class="vv-btn" data-engine-action="clear_suggestions" data-engine-session="${session.session_id}" data-suggestion-revision="${escape(value.revision)}" ${locked('clear_suggestions')?'disabled':''}>Clear suggestions</button>`:''}
+      ${value.rows.length?value.rows.slice().reverse().map(row=>`<div class="vv-pending-candidate"><div><strong>${escape(row.reference)}</strong><p class="vv-caption">${escape(languageNames[row.language]||streamName(session,row.stream))} · ${escape(streamName(session,row.stream))} · ${Math.round(row.confidence*100)}% · ${time(row.created_at)}</p><p class="vv-caption">${escape(row.state==='available'?'Awaiting your choice':stateLabel[row.state])}</p>${row.reasoning?`<p class="vv-caption">${escape(row.reasoning)}</p>`:''}${row.message?`<p class="vv-caption">${escape(row.message)}</p>`:''}${developer()&&row.candidate_id?`<code>${escape(row.candidate_id)}</code>`:''}</div><div class="vv-control-actions"><button type="button" class="vv-btn" data-suggestion-preview="${row.id}" ${locked('preview_suggestion',row)?'disabled':''}>Preview ${escape(row.reference)}</button><button type="button" class="vv-btn" data-engine-action="send_suggestion" data-engine-session="${session.session_id}" data-suggestion-id="${row.id}" ${locked('send_suggestion',row)||!value.active||value.busy?'disabled':''}>Display ${escape(row.reference)}</button><button type="button" class="vv-btn" data-engine-action="dismiss_suggestion" data-engine-session="${session.session_id}" data-review-suggestion="${row.id}" ${locked('dismiss_suggestion',row)?'disabled':''}>Dismiss ${escape(row.reference)}</button></div></div>`).join(''):'<p class="vv-caption">No current suggestions.</p>'}</div></details>`;
   }
 
   function recoveryPanel(snapshot, disabled) {
@@ -146,8 +162,8 @@
     })[streamState] || 'Waiting for status';
     return `<section class="vv-panel vv-stream vv-observed-stream" data-speech-stream="${role}" aria-label="${escape(name)} observed speech">
       <div class="vv-stream-header"><div><h2 lang="${escape(language || 'und')}">${escape(label)}</h2><p class="vv-stream-provider">${role === 'primary' ? 'Primary' : 'Secondary'} · ${escape(config?.provider || 'Provider not reported')}</p></div><span class="vv-badge">${escape(streamStatus)}</span></div>
-      <div class="vv-stream-results ${full ? 'vv-full-transcript' : ''}" ${full ? `data-full-transcript="${role}" tabindex="0" aria-label="${escape(name)} full transcript"` : ''}>${lines.length ? lines.map(row => `<div class="vv-transcript-line"><span class="vv-transcript-time">${time(row.timestamp)}</span><p lang="${escape(row.language || 'und')}">${escape(row.text)}</p>${row.translation && row.translation !== row.text ? `<details class="vv-caption"><summary>English translation</summary><p lang="en">${escape(row.translation)}</p></details>` : ''}</div>`).join('') : '<p class="vv-observer-empty">No final transcript received.</p>'}</div>
-      ${partial ? `<div class="vv-partial"><span class="vv-caption">Interim transcript</span><p lang="${escape(partial.language || 'und')}">${escape(partial.text)}</p></div>` : ''}
+      <div class="vv-stream-results ${full ? 'vv-full-transcript' : ''}" ${full ? `data-full-transcript="${role}" tabindex="0" aria-label="${escape(name)} full transcript"` : ''}>${lines.length ? lines.map(row => `<div class="vv-transcript-line"><span class="vv-transcript-time">${time(row.timestamp)}</span><p lang="${escape(window.sessionPolicy?.transcript(row,session?.control?.settings?.values?.desktop_transcript_display||'original').language||row.language||'und')}">${escape(window.sessionPolicy?.transcript(row,session?.control?.settings?.values?.desktop_transcript_display||'original').text||row.text)}</p><span class="vv-caption">${escape(window.sessionPolicy?.transcript(row,session?.control?.settings?.values?.desktop_transcript_display||'original').label||'Provider transcription')}</span>${session?.control?.settings?.values?.desktop_transcript_display==='translation'&&row.translation?`<details class="vv-caption"><summary>Provider text${row.text_kind==='transliteration'?' (transliteration)':''}</summary><p>${escape(row.text)}</p></details>`:''}${row.translation && row.translation !== row.text && session?.control?.settings?.values?.desktop_transcript_display!=='translation' ? `<details class="vv-caption"><summary>English translation</summary><p lang="en">${escape(row.translation)}</p></details>` : ''}</div>`).join('') : '<p class="vv-observer-empty">No final transcript received.</p>'}</div>
+      ${partial ? `<div class="vv-partial"><span class="vv-caption">${partial.text_kind==='transliteration'?'Interim provider transliteration':'Interim provider transcription'}</span><p lang="${escape(partial.language || 'und')}">${escape(partial.text)}</p></div>` : ''}
       ${!lastEvent&&!developer()?'':`<div class="vv-ref-notice">${lastEvent ? `<span><span class="vv-ref-notice-label">${developer()?'Latest reported candidate outcome':'Reference detected'}</span><span class="vv-ref-notice-ref">${escape(lastEvent.reference)}</span></span><span class="vv-badge">${escape(developer()?outcome(lastEvent.outcome):friendly(lastEvent))}</span>` : '<span class="vv-caption">No reference outcome reported for this stream.</span>'}</div>`}
     </section>`;
   }
@@ -165,8 +181,8 @@
     const roles=!developer()&&session?.config.streams.secondary.enabled===false?['primary']:['primary','secondary'];
     const transcripts = `<section class="vv-stream-section" aria-label="Observed speech streams"><div class="vv-dual-grid ${roles.length===1?'vv-single-stream':''}">${roles.map(role=>streamPanel(session,role)).join('')}</div></section>`;
     const unknown = session?.transcripts.filter(row => row.stream === 'unknown').slice(-3) || [];
-    if(!developer())return (window.transcriptView?.isFull()?'':consumerOutput(session))+(window.transcriptView?.controls(session)||'')+transcripts+(window.operatorTools?.render(snapshot)||'')+controlPanel(snapshot)+window.detectorSettings.render(snapshot,'speech');
-    return (window.transcriptView?.isFull()?'':output(session))+(window.transcriptView?.controls(session)||'')+transcripts+controlPanel(snapshot)+window.detectorSettings.render(snapshot,'speech')+status(snapshot)
+    if(!developer())return (window.transcriptView?.isFull()?'':consumerOutput(session))+(window.transcriptView?.controls(session)||'')+transcripts+(window.verseTools?.live(snapshot)||'')+controlPanel(snapshot)+window.detectorSettings.render(snapshot,'speech')+(window.connectionTools?.live(snapshot)||'');
+    return (window.transcriptView?.isFull()?'':output(session))+(window.transcriptView?.controls(session)||'')+transcripts+(window.verseTools?.live(snapshot)||'')+controlPanel(snapshot)+window.detectorSettings.render(snapshot,'speech')+(window.connectionTools?.live(snapshot)||'')+status(snapshot)
       + (unknown.length ? `<section class="vv-panel vv-observer-unknown"><h2>Unattributed speech</h2>${unknown.map(row => `<p>${escape(row.text)}</p>`).join('')}</section>` : '')
       + `<p class="vv-caption vv-observer-note">${session?.host?.managed ? 'The bundled detector owns recognition and delivery. Advanced queue and presentation options are in its private backend settings file.' : 'The detector owns recognition and delivery. Queue and presentation settings remain in its existing window.'}</p>`;
   }
@@ -181,8 +197,8 @@
     const managed = session?.host?.managed;
     const bible = session?.config.bible_translation;
     const savedBible = session?.control?.settings?.values?.bible_translation;
-    if(!developer())return `<button type="button" class="vv-btn" data-consumer-prepare="settings" ${window.consumerFlow?.state().busy?'disabled':''}>${session?.host?.managed?'Connection ready':'Prepare settings'}</button>`+window.detectorSettings.render(snapshot,'settings')+`<details class="vv-panel vv-connections"><summary>Connections</summary>${window.cloudSettings.render(snapshot,false)}${syncPanel(snapshot)}</details>`;
-    return status(snapshot) + window.cloudSettings.render(snapshot) + syncPanel(snapshot) + botPanel(snapshot) + window.detectorSettings.render(snapshot) + `<section class="vv-panel preview-about" aria-label="Observer setup"><h2>Local detector connection</h2>
+    if(!developer())return `<button type="button" class="vv-btn" data-consumer-prepare="settings" ${window.consumerFlow?.state().busy?'disabled':''}>${session?.host?.managed?'Connection ready':'Prepare settings'}</button>`+window.detectorSettings.render(snapshot,'settings')+(window.connectionTools?.panel(snapshot)||'')+`<details class="vv-panel vv-connections"><summary>Connections</summary>${window.cloudSettings.render(snapshot,false)}${syncPanel(snapshot)}</details>`;
+    return status(snapshot) +(window.connectionTools?.panel(snapshot)||'')+ window.cloudSettings.render(snapshot) + syncPanel(snapshot) + botPanel(snapshot) + window.detectorSettings.render(snapshot) + `<section class="vv-panel preview-about" aria-label="Observer setup"><h2>Local detector connection</h2>
       <p class="vv-caption">${managed ? "This dashboard owns the bundled backend and its private preview profile. The installed detector has not been replaced." : "The preview reads structured snapshots from your local VerseView/Observer folder. The installed detector has not been replaced."}</p>
       <p class="vv-caption">${managed ? 'Use the engine controls to start or stop recognition. Speech and connection settings can be saved above while recognition is stopped. Cloud providers and credential sync can be configured above while recognition is stopped.' : 'An updated detector must be started with <code>VERSEVIEW_OBSERVER=1</code> to publish the feed. Also set <code>VERSEVIEW_DESKTOP_CONTROL=1</code> to enable start/stop and candidate decisions. Without that opt-in the connection stays read only. Speech and connection settings can be saved above while stopped; credentials and advanced options remain in the detector.'}</p>
       <p class="vv-caption">${session ? `Session ${escape(session.session_id)} · ${bible ? `Engine Bible translation: ${escape(bible)}` : savedBible ? `Saved Bible translation: ${escape(savedBible)} · applies on Start` : 'Bible setting: not reported'}` : 'No observer session selected.'}</p></section>`;
@@ -224,6 +240,11 @@
         control?.state !== 'stopped' || control?.recovery?.revision !== button.dataset.recoveryRevision ||
         !control?.actions.includes(button.dataset.engineAction) || command?.outcome === 'submitted';
     }
+    for(const button of document.querySelectorAll('[data-suggestion-preview],[data-review-suggestion],[data-suggestion-revision]')){
+      const action=button.dataset.suggestionPreview?'preview_suggestion':button.dataset.reviewSuggestion?'dismiss_suggestion':'clear_suggestions';
+      const identity=button.dataset.suggestionPreview||button.dataset.reviewSuggestion;
+      button.disabled=snapshot.connection!=='connected'||!control?.actions.includes(action)||command?.outcome==='submitted'||(identity&&!control?.suggestions?.rows.some(r=>r.id===identity&&r.state==='available'));
+    }
     for(const button of document.querySelectorAll('[data-suggestion-id]')){
       button.disabled=snapshot.connection!=='connected'||session?.session_id!==button.dataset.engineSession||
         control?.state!=='running'||!control?.actions.includes('send_suggestion')||!control?.suggestions?.active||
@@ -238,7 +259,7 @@
     return 'Bundled backend connected. Use the engine controls to start or stop.';
   }
   window.observerView = Object.freeze({ compactControls, consumerNotice, history, recovery:recoveryPanel,
-    runtime: snapshot=>status(snapshot)+controlPanel(snapshot)+botPanel(snapshot),
+    runtime: snapshot=>remoteStatus(snapshot)+status(snapshot)+controlPanel(snapshot)+botPanel(snapshot),
     cloud: snapshot=>window.cloudSettings.render(snapshot,true)+syncPanel(snapshot),
     start: snapshot=>submitAction({disabled:false,dataset:{engineAction:'start',engineSession:snapshot.session.session_id}}),
     session: sessionView, activity, settings, outline, testGate, controls: controlPanel, updateRecoveryAvailability, connectionNotice });
@@ -267,6 +288,7 @@
         : action === 'panic' ? await window.verseviewDesktop.clearOutput(sessionId)
         : ['start_bot','stop_bot'].includes(action) ? await window.verseviewDesktop.botControl(sessionId,action)
         : action==='pull_settings' ? await window.verseviewDesktop.pullSettings(sessionId)
+        : ['dismiss_suggestion','clear_suggestions'].includes(action) ? await window.verseviewDesktop.operator(sessionId,action,action==='dismiss_suggestion'?{suggestion_id:button.dataset.reviewSuggestion}:{revision:button.dataset.suggestionRevision})
         : action === 'send_suggestion' ? await window.verseviewDesktop.sendSuggestion(sessionId, button.dataset.suggestionId)
         : ['restore_session', 'discard_session'].includes(action) ? await window.verseviewDesktop.recoverSession(sessionId, button.dataset.recoveryRevision, action === 'restore_session')
         : await window.verseviewDesktop.resolveCandidate(sessionId, button.dataset.candidate, action === 'approve');
@@ -303,18 +325,7 @@
     } catch { /* The manager publishes status; no retry or raw error is shown. */ }
     button.disabled = false;
   });
-  document.addEventListener('keydown', event => {
-    if (event.key === 'Escape' && event.shiftKey && !event.repeat && window.previewShell.getMode() === 'observer') {
-      const button = root.querySelector('[data-engine-action="panic"]');
-      if (button && !button.disabled) { event.preventDefault(); button.click(); }
-      else {
-        const snapshot = window.previewShell.getObserver();
-        if (snapshot.connection === 'connected' && snapshot.session?.control?.actions.includes('panic')) {
-          event.preventDefault(); window.verseviewDesktop.clearOutput(snapshot.session.session_id).catch(() => {});
-        }
-      }
-    }
-  });
+  root.addEventListener('click',event=>{const button=event.target.closest('[data-suggestion-preview]');if(button&&!button.disabled)window.verseTools.previewSuggestion(button,button.dataset.suggestionPreview);});
   root.addEventListener('change', async event => {
     if (!event.target.matches('[data-observer-source]') || !window.verseviewDesktop) return;
     try { await window.verseviewDesktop.selectObserver(event.target.value || null); } catch { /* Reader will retain its previous source. */ }

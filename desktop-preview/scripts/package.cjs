@@ -54,7 +54,7 @@ const { inventory, verify: verifyBackend, relocateLinks } = require('./backend-i
       // Packager passes slash-prefixed paths relative to `dir` to this callback.
       const relative = file.replace(/^[/\\]+/, '');
       if (!relative) return false;
-      return !['src', 'main.cjs', 'preload.cjs', 'outline-output.cjs', 'outline-preload.cjs', 'appearance.cjs', 'appearance-preferences.cjs', 'theme-icons.cjs', 'backend-manager.cjs', 'engine-feed.cjs', 'engine-commands.cjs', 'package.json', 'build-info.json'].includes(relative.split(/[/\\]/)[0]);
+      return !['src', 'main.cjs', 'preload.cjs', 'outline-output.cjs', 'outline-preload.cjs', 'appearance.cjs', 'appearance-preferences.cjs', 'theme-icons.cjs', 'backend-manager.cjs', 'engine-feed.cjs', 'engine-commands.cjs', 'session-export.cjs', 'launch-preferences.cjs', 'profile-transfer.cjs', 'package.json', 'build-info.json'].includes(relative.split(/[/\\]/)[0]);
     }
   });
   if (platform === 'darwin' && process.platform === 'darwin') {

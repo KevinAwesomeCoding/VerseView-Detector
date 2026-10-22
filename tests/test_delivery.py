@@ -1,8 +1,9 @@
 """Delivery regression tests: real engine, fake browser/LLM, no live services."""
 import logging
+import asyncio
 import threading
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 # Keep import-time logging and the Discord maintenance thread isolated.
 with patch('logging.FileHandler', return_value=logging.NullHandler()), patch.object(threading.Thread, 'start'):
@@ -63,6 +64,7 @@ class DeliveryTests(unittest.TestCase):
     def tearDown(self):
         self.join_workers()
         engine._cancel_vtc()
+        engine._cancel_smart_amen_timer()
 
     def controller(self):
         ctrl = engine.VerseController()
@@ -220,6 +222,66 @@ class DeliveryTests(unittest.TestCase):
             self.assertEqual((event['candidate_id'],event['source'],event['stream']),
                              (row['candidate_id'],'WATCHER-MANUAL','secondary'))
 
+    def test_desktop_high_confidence_watcher_requires_approval_and_preserves_legacy_mode(self):
+        from types import SimpleNamespace
+        suggestion=SimpleNamespace(suggested_reference='John 3:19',status=engine.WatcherStatus.AUTO_SUGGEST,
+            confidence=.95,stream='primary',delivery_epoch=engine._delivery_epoch)
+        callback=Mock()
+        with patch.object(engine,'WATCHER_REQUIRE_APPROVAL',True),patch.object(engine,'WATCHER_SUGGESTION_CALLBACK',callback),patch.object(engine,'deliver_verse') as deliver:
+            engine._handle_watcher_suggestion(suggestion)
+            callback.assert_called_once_with(suggestion);deliver.assert_not_called()
+        with patch.object(engine,'WATCHER_REQUIRE_APPROVAL',False),patch.object(engine,'WATCHER_SUGGESTION_CALLBACK',None),patch.object(engine,'deliver_verse') as deliver,patch.object(engine.threading,'Thread') as worker:
+            engine._handle_watcher_suggestion(suggestion)
+            worker.assert_called_once();worker.call_args.kwargs['target']()
+            self.assertEqual(deliver.call_args.kwargs['expected_epoch'],engine._delivery_epoch)
+
+    def test_kjv_grid_and_delivery_share_validated_metadata_without_changing_other_numbering(self):
+        with patch.object(engine,'BIBLE_TRANSLATION','kjv'):
+            self.assertFalse(engine._reject_verse_out_of_range('Leviticus 27:34'))
+            self.assertTrue(engine._reject_verse_out_of_range('John 3:37'))
+            self.assertTrue(engine._reject_verse_out_of_range('3 John 1:15'))
+            self.assertTrue(engine._is_structurally_impossible('Leviticus 28:1','Leviticus chapter twenty eight verse one'))
+        with patch.object(engine,'BIBLE_TRANSLATION','web'):
+            self.assertFalse(engine._reject_verse_out_of_range('3 John 1:15'))
+
+    def test_transliteration_request_is_limited_to_malayalam_sarvam_streams(self):
+        with patch.object(engine,'MALAYALAM_TRANSLITERATION',True),patch.object(engine,'PRIMARY_LANGUAGE','en'),patch.object(engine,'SECONDARY_LANGUAGE','ml'),patch.object(engine,'SarvamProvider') as provider:
+            engine.build_stt_provider('sarvam',self.ctrl,False)
+            self.assertFalse(provider.call_args.args[0]['transliteration'])
+            engine.build_stt_provider('sarvam',self.ctrl,True)
+            self.assertTrue(provider.call_args.args[0]['transliteration'])
+
+    def test_notes_only_configuration_keeps_the_observer_session_and_legacy_default_still_begins(self):
+        # Preserve module settings because configure intentionally initializes globals.
+        with patch.dict(engine.__dict__, dict(engine.__dict__)), patch.object(engine, '_observer_begin') as begin:
+            engine.configure(llm_enabled=False, watcher_enabled=False, begin_observer_session=False)
+            begin.assert_not_called()
+            engine.configure(llm_enabled=False, watcher_enabled=False)
+            begin.assert_called_once()
+
+    def test_captured_summary_uses_both_snapshot_languages_and_never_sends_notes_notifications(self):
+        from types import SimpleNamespace
+        client=Mock();client.chat.completions.create.return_value=SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content='Captured summary'))])
+        captured=dict(transcript='CAPTURED PRIMARY '*12,transcript_secondary='മലയാളം '*30,verses_cited=['John 3:16'],stream_languages={'primary':'en','secondary':'ml'})
+        with patch.object(engine,'LLM_ENABLED',True),patch.object(engine,'_free_cloud_router',None),patch.object(engine,'_local_llm_active_for',return_value=False),patch.object(engine,'mistral_client',client),patch.object(engine,'full_sermon_transcript','LATER LIVE SPEECH'),patch.object(engine,'send_sermon_notes_to_discord') as notify:
+            result=engine.generate_sermon_summary(captured,notify=False,strict=True)
+            prompt=client.chat.completions.create.call_args.kwargs['messages'][0]['content']
+            self.assertIn('CAPTURED PRIMARY',prompt);self.assertIn('മലയാളം',prompt);self.assertIn('SECONDARY TRANSCRIPT (ml)',prompt)
+            self.assertNotIn('LATER LIVE SPEECH',prompt);self.assertIn('John 3:16',result);notify.assert_not_called()
+
+    def test_memory_reset_clears_both_streams_and_guesses_but_retains_delivery_evidence_and_guards(self):
+        engine.full_sermon_transcript='Primary';engine.full_sermon_transcript_secondary='Secondary'
+        engine._session_verse_high_water['John 3']=17
+        engine.current_book,engine.current_chapter,engine.current_verse='John','3','17'
+        before=(engine.WORSHIP_MODE,engine.COOLDOWN,engine.DEDUP_WINDOW,engine.REQUIRE_VERIFY)
+        self.send('John 3:16');events=list(engine.get_delivery_events());commands=self.ctrl.driver.execute_script.call_count
+        with patch.object(engine,'_controller',self.ctrl):engine.reset_desktop_memory()
+        self.assertEqual(engine.full_sermon_transcript,'');self.assertEqual(engine.full_sermon_transcript_secondary,'')
+        self.assertFalse(engine._session_verse_high_water);self.assertIsNone(engine.current_book)
+        self.assertFalse(self.ctrl.history);self.assertIsNone(self.ctrl.pending_verse)
+        self.assertEqual(list(engine.get_delivery_events()),events);self.assertEqual(self.ctrl.driver.execute_script.call_count,commands)
+        self.assertEqual((engine.WORSHIP_MODE,engine.COOLDOWN,engine.DEDUP_WINDOW,engine.REQUIRE_VERIFY),before)
+
     def test_failed_connection_does_not_poison_retry(self):
         self.ctrl.driver = None
         self.ctrl.connect = Mock(return_value=False)
@@ -281,6 +343,68 @@ class DeliveryTests(unittest.TestCase):
         self.ctrl.driver.execute_script.assert_not_called()
         self.assertFalse(self.events('COMMAND_ACCEPTED'))
         self.assertEqual(engine.current_chapter, '3')
+
+    def test_chapter_only_never_resumes_remembered_verse_even_when_repeated(self):
+        engine._session_verse_high_water['John 3'] = 18
+        engine.REQUIRE_VERIFY = True
+        phrases = ('John chapter three verse sixteen', 'John three seventeen',
+                   'John chapter three verse seventeen', 'John three seventeen', 'John three eighteen')
+        for index, phrase in enumerate(phrases):
+            with patch('parse_reference_eng.SPOKEN_NUMERAL_MODE', False):
+                parsed = engine.parse_eng(phrase)
+            with patch.object(engine.time,'time',return_value=1000+index*13):
+                if index in (0,2): self.assertTrue(self.send(parsed[0]))
+                else:
+                    self.assertEqual(parsed,['John 3'])
+                    self.assertFalse(engine.deliver_verse(parsed[0], self.ctrl, source='PARSER'))
+        self.assertEqual([e['reference'] for e in self.events('COMMAND_ACCEPTED')],['John 3:16','John 3:17'])
+        self.assertEqual(self.ctrl.driver.execute_script.call_count,4)
+        self.assertIsNone(engine.current_verse)
+
+    def test_spoken_numeral_option_resolves_shorthand_and_keeps_duplicate_guard(self):
+        engine._session_verse_high_water['John 3'] = 18
+        with patch('parse_reference_eng.SPOKEN_NUMERAL_MODE', True):
+            self.assertEqual(engine.parse_eng('John three seventeen'), ['John 3:17'])
+        self.assertTrue(self.send('John 3:17'))
+        self.assertFalse(self.send('John 3:17'))
+        self.assertEqual([e['reference'] for e in self.events('COMMAND_ACCEPTED')], ['John 3:17'])
+
+    def test_smart_amen_accepts_standalone_prayer_and_ignores_cancelled_timer(self):
+        with patch.object(engine, 'SMART_AMEN_ENABLED', True), patch.object(engine.threading,'Timer') as timer:
+            self.assertTrue(engine.check_smart_amen('Let us pray.',self.ctrl))
+            self.assertEqual(timer.call_args.args[0],2.5)
+            callback=timer.call_args.args[1]
+            with patch.object(self.ctrl,'close_presentation') as clear:
+                callback();clear.assert_called_once()
+                self.assertIsNone(engine._smart_amen_timer)
+            self.assertTrue(engine.check_smart_amen('Let us pray.',self.ctrl))
+            callback=timer.call_args.args[1]
+            engine.set_delivery_mode(worship=True)
+            with patch.object(self.ctrl,'close_presentation') as clear:
+                callback();clear.assert_not_called()
+        with patch.object(engine,'SMART_AMEN_ENABLED',False):
+            self.assertFalse(engine.check_smart_amen('Let us pray.',self.ctrl))
+
+    def test_remote_connection_sequence_is_bounded_and_cancelled_without_retrying(self):
+        async def run():
+            for results, expected in [([False]*5, False), ([False,True], True)]:
+                stop = asyncio.Event()
+                controller = Mock(connection_failure='remote')
+                controller.connect.side_effect = results
+                with patch.object(engine, 'stop_event', stop), patch.object(engine, '_observer_emit') as emit, patch.object(engine.asyncio, 'sleep', new_callable=AsyncMock):
+                    self.assertEqual(await engine._connect_verseview(controller), expected)
+                    events = [c.kwargs for c in emit.call_args_list if c.args == ('remote_connection',)]
+                    self.assertEqual(controller.connect.call_count, len(results))
+                    self.assertEqual(events[-1]['status'], 'connected' if expected else 'failed')
+                    self.assertEqual([e['attempt'] for e in events if e['status']=='connecting'], list(range(1,len(results)+1)))
+            stop = asyncio.Event()
+            def connect(): stop.set(); return True
+            controller = Mock(); controller.connect.side_effect=connect
+            with patch.object(engine,'stop_event',stop),patch.object(engine,'_observer_emit') as emit:
+                self.assertFalse(await engine._connect_verseview(controller))
+                self.assertEqual(emit.call_args_list[-2].kwargs['status'],'cancelled')
+                self.assertEqual(controller.connect.call_count,1)
+        asyncio.run(run())
 
     def test_hear_twice_verification_kept(self):
         engine.REQUIRE_VERIFY = True

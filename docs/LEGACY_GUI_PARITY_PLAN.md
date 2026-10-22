@@ -1,5 +1,11 @@
 # Legacy GUI parity and saved-session browser — proposed plan
 
+The October 21 [consumer parity completion plan](CONSUMER_PARITY_COMPLETION_PLAN.md)
+is the current checklist and layout specification for the user's expanded request.
+It incorporates the current 0.15.1 source state and replaces conflicting placement
+recommendations below. Historical implementation and verification entries remain
+as evidence of earlier deliveries.
+
 October20,2026. Planning only: no application behavior, settings, saved sessions
 or presentation output changed. This extends CONSUMER_UI_PLAN.md following the
 user's request to inventory the old GUI before implementing further controls.

@@ -8,6 +8,7 @@ import re
 import threading
 import uuid
 from parse_reference_eng import BOOK_CHAPTER_COUNTS, BOOKS_ENG
+from bible_metadata import verse_count
 
 PAGE_SIZE = 8
 MAX_TEXT = 6000
@@ -43,6 +44,8 @@ def reference(engine, value, require_verse=False):
     if require_verse and verse is None: raise VerseError('Choose a verse before sending.')
     canonical = f'{book} {chapter}' + (f':{verse}' if verse is not None else '')
     bounded = canonical.replace('Psalm ', 'Psalms ', 1)
+    count = verse_count(book, chapter) if str(getattr(engine, 'BIBLE_TRANSLATION', '')).lower() == 'kjv' else None
+    if verse is not None and count is not None and verse > count: raise VerseError('Verse is outside KJV chapter bounds.')
     if verse is not None and (not 1 <= verse <= 200 or engine._reject_verse_out_of_range(bounded)):
         raise VerseError('Verse is outside the known chapter bounds.')
     return canonical, book, str(chapter), str(verse) if verse is not None else ''
@@ -129,6 +132,30 @@ class VerseTools:
         for worker in (self.lookup_worker, self.send_worker):
             if worker and worker.is_alive(): worker.join()
 
+    def grid_preview(self, revision, value):
+        with self.lock:
+            grid = self.grid()
+            if revision != grid['revision'] or not grid['count']:
+                raise VerseError('Chapter changed. Select a verse from the current grid.')
+            canonical, _, _, verse = reference(self.engine, value, True)
+            if canonical.rsplit(':', 1)[0] != grid['reference'] or int(verse) > grid['count']:
+                raise VerseError('Verse is outside the current chapter grid.')
+            self.preview(canonical)
+
+    def clear_history(self, revision):
+        with self.lock:
+            if revision != self.snapshot()['history_revision']:
+                raise VerseError('History changed. Review the latest list before clearing it.')
+            self.engine.clear_verse_history()
+            self.message = 'Current verse history cleared. Saved sessions, sermon references and delivery diagnostics were retained.'
+
+    def grid(self):
+        context = self.context()
+        count = verse_count(context['book'], context['chapter'])
+        return dict(reference=' '.join((context['book'], context['chapter'])).strip(),
+                    count=count, current=context['verse'], revision=context['revision'], numbering='KJV',
+                    note='KJV numbering. Other translations may omit or renumber verses; preview their text before sending.' if str(self.translation()).lower() != 'kjv' else 'Select a number to preview. Use Send explicitly to present it.')
+
     def snapshot(self):
         with self.lock:
             try: translation = self._translation()
@@ -145,7 +172,7 @@ class VerseTools:
                 try: canonical, _, _, _ = reference(self.engine, item.get('ref'), True)
                 except (ValueError, TypeError): continue
                 rows.append({'reference': canonical, 'time': str(item.get('time', ''))[:32]})
-            return dict(context=self.context(), translation=translation, message=self.message,
+            return dict(context=self.context(), grid=self.grid(), history_revision=hashlib.sha256(json.dumps(rows, sort_keys=True).encode()).hexdigest()[:32], translation=translation, message=self.message,
                         books=[{'name': book, 'chapters': count} for book, count in BOOK_CHAPTER_COUNTS.items()],
                         lookup_busy=bool(self.lookup_worker and self.lookup_worker.is_alive()),
                         send_busy=bool(self.send_worker and self.send_worker.is_alive()), history=rows,

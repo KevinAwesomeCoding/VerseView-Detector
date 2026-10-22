@@ -32,18 +32,14 @@ class BackendTests(unittest.TestCase):
         runtime.loop.call_soon_threadsafe.side_effect=RuntimeError('Loop already closed')
         runtime.stop();self.assertTrue(runtime.stop_requested.is_set());runtime.publisher.close()
 
-    def test_headless_session_files_write_without_gui_or_provider_calls(self):
+    def test_headless_session_save_delegates_to_snapshot_notes_lifecycle(self):
         from desktop_backend import EngineRuntime
-        with tempfile.TemporaryDirectory() as directory:
-            summary=Mock(return_value='Synthetic summary')
-            runtime=SimpleNamespace(profile=Path(directory),engine=SimpleNamespace(full_sermon_transcript='Synthetic speech '*12,generate_sermon_summary=summary))
-            EngineRuntime._save_session(runtime,{'auto_save_notes':False})
-            files=list((Path(directory)/'Sessions').glob('*.txt'))
-            self.assertEqual(len(files),1);self.assertEqual(files[0].read_text(),runtime.engine.full_sermon_transcript)
-            summary.assert_not_called()
-            EngineRuntime._save_session(runtime,{'auto_save_notes':True})
-            self.assertTrue(any(file.read_text()=='Synthetic summary' for file in (Path(directory)/'Sessions').glob('*.txt')))
-            if os.name!='nt':self.assertTrue(all(file.stat().st_mode & 0o777==0o600 for file in (Path(directory)/'Sessions').glob('*.txt')))
+        notes=SimpleNamespace(on_stop=Mock())
+        runtime=SimpleNamespace(notes=notes)
+        EngineRuntime._save_session(runtime,{'auto_save_notes':False})
+        notes.on_stop.assert_called_once_with(False)
+        EngineRuntime._save_session(runtime,{'auto_save_notes':True})
+        self.assertEqual(notes.on_stop.call_args.args,(True,))
 
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()

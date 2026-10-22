@@ -1,6 +1,6 @@
 'use strict';
 
-const { app, BrowserWindow, ipcMain, Menu, nativeTheme, nativeImage, session, shell, screen } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu, nativeTheme, nativeImage, session, shell, screen, dialog, systemPreferences } = require('electron');
 const path = require('node:path');
 const os = require('node:os');
 const { pathToFileURL } = require('node:url');
@@ -50,6 +50,15 @@ if (!app.isPackaged) {
   try { backendRoot = fs.readFileSync(path.join(__dirname, 'backend-build', 'latest.txt'), 'utf8').trim(); } catch {}
 }
 const qa = process.env.VV_PREVIEW_TEST_PROFILE === '1';
+const {LaunchPreference}=require('./launch-preferences.cjs');
+const launchPreference=new LaunchPreference(path.join(app.getPath('userData'),'launch-preferences.json'),{
+  permission:()=>qa&&process.env.VV_BACKEND_VERIFY==='1'?'granted':systemPreferences.getMediaAccessStatus('microphone')
+});
+ipcMain.handle('preview:startup', (event, action, enabled) => {
+  if(!trusted(event)||!['state','set','claim','cancel'].includes(action))throw new Error('Invalid startup request');
+  if(action==='set')return launchPreference.set(enabled);
+  return action==='claim'?launchPreference.claim():action==='cancel'?launchPreference.cancel():launchPreference.snapshot();
+});
 const backendProfile = path.join(app.getPath('userData'), 'Backend');
 const manager = new BackendManager({ root: backendRoot, profile: backendProfile,
   sourceProfile: qa ? (process.env.VV_BACKEND_SOURCE_PROFILE || path.join(backendProfile, 'EmptySource')) : path.dirname(observerDirectory),
@@ -97,6 +106,10 @@ ipcMain.handle('preview:environment', event => {
   return { platform: process.platform, release: os.release(), version: app.getVersion(), packaged: app.isPackaged,
     sourceRevision: build.sourceRevision, buildId: build.buildId, appearance };
 });
+ipcMain.handle('preview:releases',event=>{
+  if(!trusted(event))throw new Error('Untrusted release-page request');
+  return shell.openExternal('https://github.com/KevinAwesomeCoding/VerseView-Detector/releases');
+});
 ipcMain.handle('preview:set-theme', (event, value, themedIcon = true) => {
   if (!trusted(event) || !validTheme(value) || typeof themedIcon !== 'boolean') throw new Error('Invalid appearance request');
   theme = value;
@@ -125,8 +138,23 @@ for (const [channel, action] of [['preview:start-engine', 'start'], ['preview:st
     return commands.submit(sessionId, action);
   });
 }
+ipcMain.handle('preview:export-session',async(event,sessionId,exportId)=>{
+  if(!trusted(event))throw new Error('Untrusted export sender');
+  const {exportSession}=require('./session-export.cjs');
+  return exportSession({reader:observer,manager,sessionId,exportId,chooseDestination:options=>dialog.showSaveDialog(window,options)});
+});
+ipcMain.handle('preview:profile-transfer',async(event,sessionId,revision,kind,includeCredentials)=>{
+  if(!trusted(event))throw new Error('Untrusted profile sender');
+  if(kind==='export'){
+    const packet=(await observer.poll()).session?.control?.connections?.export;
+    if(typeof includeCredentials!=='boolean'||packet?.include_credentials!==includeCredentials)throw new Error('Credential scope changed. Prepare the settings export again.');
+    const {exportSession}=require('./session-export.cjs');
+    return exportSession({reader:observer,manager,sessionId,exportId:revision,scope:'connections',chooseDestination:o=>dialog.showSaveDialog(window,o)});
+  }
+  return require('./profile-transfer.cjs').importProfile({reader:observer,manager,commands,sessionId,revision,kind,includeCredentials,chooseFile:o=>dialog.showOpenDialog(window,o)});
+});
 ipcMain.handle('preview:operator', (event, sessionId, action, value) => {
-  if(!trusted(event)||!['list_sessions','preview_session','resume_saved','save_session','set_worship','emergency_save','set_context','verse_preview','chapter_browse','send_reference'].includes(action))throw new Error('Invalid operator request');
+  if(!trusted(event)||!['list_sessions','preview_session','resume_saved','save_session','set_worship','emergency_save','set_context','verse_preview','chapter_browse','send_reference','preview_suggestion','dismiss_suggestion','clear_suggestions','clear_history','grid_preview', 'connection_action', 'generate_notes', 'cancel_notes', 'prepare_export', 'prepare_memory_clear', 'clear_memory'].includes(action))throw new Error('Invalid operator request');
   return commands.submit(sessionId,action,undefined,undefined,undefined,undefined,undefined,value);
 });
 ipcMain.handle('preview:window-pin', (event, enabled) => {

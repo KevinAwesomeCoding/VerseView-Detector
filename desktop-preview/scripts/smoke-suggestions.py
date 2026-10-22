@@ -3,6 +3,7 @@
 All speech/model/browser services are explicitly mocked by the QA adapter.
 """
 import json
+import datetime as dt
 import os
 from pathlib import Path
 import subprocess
@@ -18,7 +19,7 @@ with tempfile.TemporaryDirectory(prefix='vv-watcher-smoke-') as temporary:
     values=dict(language='English',stt_engine='deepgram',deepgram_api_key='SECRET-QA-STT',
         sarvam_api_key='SECRET-QA-SARVAM',dual_stt_enabled=True,secondary_language='ml',secondary_stt_engine='sarvam',
         manual_confirm=True,verify=False,llm_enabled=False,auto_save_notes=False,watcher_enabled=True,
-        watcher_provider='local',local_llm_enabled=True,local_llm_model='SECRET-QA-MODEL')
+        watcher_provider='local',local_llm_enabled=True,local_llm_model='qa:model')
     (profile/'settings.json').write_text(json.dumps(values),encoding='utf-8')
     child=None
     with (directory/'backend.log').open('wb') as log:
@@ -56,13 +57,18 @@ with tempfile.TemporaryDirectory(prefix='vv-watcher-smoke-') as temporary:
             selected=next(row for row in value['control']['suggestions']['rows'] if row['stream']=='primary')
             bad=command(value,'send_suggestion',suggestion_id=selected['id'],reference='John 3:21')
             value=wait_for(lambda s:any(row['id']==bad and row['outcome']=='rejected' for row in s['control']['results']))
+            # An operator preview does not send. Wait out the existing live delivery
+            # cooldown before this single explicit send; never bypass or retry it.
+            command(value,'preview_suggestion',suggestion_id=selected['id'])
+            value=wait_for(lambda s:s['control']['verses']['selected'] and s['control']['verses']['selected']['status']=='ready')
+            value=wait_for(lambda s:bool([e for e in s['delivery_events'] if e['outcome']=='COMMAND_ACCEPTED']) and time.time()-max(dt.datetime.fromisoformat(e['timestamp']).timestamp() for e in s['delivery_events'] if e['outcome']=='COMMAND_ACCEPTED')>3.5)
             command(value,'send_suggestion',suggestion_id=selected['id'])
             value=wait_for(lambda s:any(row['id']==selected['id'] and row['state']=='accepted' for row in s['control']['suggestions']['rows']))
             row=next(row for row in value['control']['suggestions']['rows'] if row['id']==selected['id'])
             accepted=[e for e in value['delivery_events'] if e['candidate_id']==row['candidate_id'] and e['outcome']=='COMMAND_ACCEPTED']
             assert len(accepted)==1 and accepted[0]['source']=='WATCHER-MANUAL' and accepted[0]['stream']=='primary'
             duplicate=command(value,'send_suggestion',suggestion_id=selected['id'])
-            value=wait_for(lambda s:any(row['id']==duplicate and row['outcome']=='failed' for row in s['control']['results']))
+            value=wait_for(lambda s:any(row['id']==duplicate and row['outcome']=='rejected' for row in s['control']['results']))
             command(value,'stop')
             value=wait_for(lambda s:s['control']['state']=='stopped')
             stopped=command(value,'send_suggestion',suggestion_id=selected['id'])

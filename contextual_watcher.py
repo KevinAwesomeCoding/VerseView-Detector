@@ -372,6 +372,7 @@ class ContextualVerseWatcher:
             "last_cycle_ts": 0.0,    # wall-clock of the most recent cycle
             "suggested":     0,      # cycles that produced an AUTO/PASSIVE suggestion
             "discarded":     0,      # cycles read but gated out (low conf / no ref)
+            "cycle_state":   "waiting",
             "last_status":   "",     # short human summary of the most recent cycle
         }
 
@@ -507,16 +508,19 @@ class ContextualVerseWatcher:
         snap["enabled"]     = self.enabled
         snap["has_clients"] = bool(self._primary_client or self._fallback_client)
         snap["provider"]    = self._cfg.provider
-        snap["streams"]     = list(self._streams.keys())
+        with self._lock:
+            snap["scanning"] = any(st.in_flight for st in self._streams.values())
+            snap["streams"] = list(self._streams.keys())
         return snap
 
     def _record_cycle(self, status_text: str, *, suggested: bool = False,
-                      discarded: bool = False) -> None:
+                      discarded: bool = False, state: str = "waiting") -> None:
         """Update the activity heartbeat after each reasoning cycle."""
         with self._stats_lock:
             self._stats["cycles"]       += 1
             self._stats["last_cycle_ts"] = self._now()
             self._stats["last_status"]   = status_text
+            self._stats["cycle_state"] = "suggested" if suggested else state
             if suggested:
                 self._stats["suggested"] += 1
             if discarded:
@@ -628,14 +632,14 @@ class ContextualVerseWatcher:
             # No usable reply (no client wired / timeout / provider error /
             # rate-limited). Still a "cycle" for heartbeat purposes so the GUI
             # can show the watcher IS trying even when the LLM isn't answering.
-            self._record_cycle("no LLM response — check API key / rate limit")
+            self._record_cycle("no LLM response — check API key / rate limit", state="failed")
             return
 
         parsed = self._parse_json(raw_text)
         if parsed is None:
             # Parsing failed → log + discard this cycle silently (per spec).
             self._log.debug(f"🔭 watcher: unparseable LLM reply ({role}) — cycle discarded")
-            self._record_cycle("read, but reply was unreadable")
+            self._record_cycle("read, but reply was unreadable", state="failed")
             return
 
         result = self._evaluate(role, snap, parsed)

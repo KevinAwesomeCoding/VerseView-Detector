@@ -48,4 +48,7 @@ desktop-preview/test-results/
 !tests/test_desktop_backend.py
 !tests/test_service_schedule.py
 !tests/test_desktop_recovery.py
+!tests/test_desktop_notes.py
+!tests/test_desktop_setup.py
+!tests/test_desktop_connections.py
 desktop-preview/backend-build/

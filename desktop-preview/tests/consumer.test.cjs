@@ -112,7 +112,7 @@ test('Live speech setup contains languages and stream controls, Settings keeps m
  root.querySelectorAll=()=>[];
  s.session.control.settings={revision:'c'.repeat(32),devices:[{id:0,label:'Test microphone'}],values:{language:'English',stt_engine:'deepgram',dual_stt_enabled:true,secondary_language:'ml',secondary_stt_engine:'sarvam',mic_index:0,remote_url:'http://127.0.0.1:50010/control.html',bible_translation:'KJV'}};
  s.session.control.state='stopped';s.session.control.actions=['save_settings'];
- const window={settingsPolicy:policy,previewShell:{getMode:()=> 'observer'}};
+ const window={settingsPolicy:policy,sessionPolicy:require('../src/session-policy.js'),previewShell:{getMode:()=> 'observer'}};
  vm.runInNewContext(source('settings.js'),{window,document:{getElementById:()=>root},Event,setTimeout});
  const speech=window.detectorSettings.render(s,'speech'),connection=window.detectorSettings.render(s,'settings');
  for(const key of ['language','stt_engine','dual_stt_enabled','secondary_language','secondary_stt_engine']){assert.match(speech,new RegExp('data-detector-setting="'+key+'"'));assert.doesNotMatch(connection,new RegExp('data-detector-setting="'+key+'"'));}

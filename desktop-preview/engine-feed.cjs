@@ -2,6 +2,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const settingsPolicy = require('./src/settings-policy.js');
+const optionsPolicy = require('./src/options-policy.js');
 
 const MAX_BYTES = 2 * 1024 * 1024;
 const FRESH_MS = 6000;
@@ -17,11 +18,14 @@ function feedDirectory({ platform, appData, home }) {
 function decodeControl(value) {
   if (!value || !/^[a-f0-9]{32}$/.test(value.id) || !['stopped', 'starting', 'running', 'stopping', 'closed'].includes(value.state)) return null;
   return { id: value.id, state: value.state,
-    actions: Array.isArray(value.actions) ? value.actions.filter(action => ['start', 'stop', 'save_settings', 'panic', 'restore_session', 'discard_session', 'send_suggestion', 'edit_outline', 'start_bot', 'stop_bot', 'pull_settings', 'list_sessions', 'preview_session', 'resume_saved', 'save_session', 'set_worship', 'emergency_save', 'set_context', 'verse_preview', 'chapter_browse', 'send_reference'].includes(action)) : [],
+    actions: Array.isArray(value.actions) ? value.actions.filter(action => ['start', 'stop', 'save_settings', 'panic', 'restore_session', 'discard_session', 'send_suggestion', 'edit_outline', 'start_bot', 'stop_bot', 'pull_settings', 'list_sessions', 'preview_session', 'resume_saved', 'save_session', 'set_worship', 'emergency_save', 'set_context', 'verse_preview', 'chapter_browse', 'send_reference', 'preview_suggestion', 'dismiss_suggestion', 'clear_suggestions', 'clear_history', 'grid_preview', 'connection_action', 'generate_notes', 'cancel_notes', 'prepare_export', 'prepare_memory_clear', 'clear_memory'].includes(action)) : [],
     recovery: decodeRecovery(value.recovery),
     operator: decodeOperator(value.operator),
     verses: decodeVerses(value.verses),
     suggestions: decodeSuggestions(value.suggestions),
+    notes:decodeNotes(value.notes),
+    connections:decodeConnections(value.connections),
+    session_setup:decodeSetup(value.session_setup),
     outline:decodeOutline(value.outline),
     bot:decodeBot(value.bot),
     sync:decodeSync(value.sync),
@@ -36,12 +40,39 @@ function decodeControl(value) {
       .map(item => ({ id: item.id, action: text(item.action, 16), outcome: text(item.outcome, 24), reason: text(item.reason, 200) })) };
 }
 
+function decodeConnections(v){
+ const id=x=>/^[a-f0-9]{32}$/.test(x||'')?x:null;
+ if(!v||!['idle','running','complete','failed','cancelled'].includes(v.status))return null;
+ const p=v.export,r=v.atem_review;
+ return {local_targets:Object.fromEntries(['verse','outline','summary','watcher'].map(r=>[r,{endpoint:text(v.local_targets?.[r]?.endpoint,512),model:text(v.local_targets?.[r]?.model,160),keep_alive:text(v.local_targets?.[r]?.keep_alive,20)}])),status:v.status,message:text(v.message,500),operation:text(v.operation,40),endpoint:text(v.endpoint,512),model:text(v.model,160),role:text(v.role,20),completed_at:timestamp(v.completed_at),busy:v.busy===true,gcp_configured:v.gcp_configured===true,discovered:text(v.discovered,48),credentials:Object.fromEntries(optionsPolicy.secrets.map(k=>[k,v.credentials?.[k]===true])),
+ export:p&&id(p.id)&&id(p.source_id)&&/^[a-f0-9]{64}$/.test(p.sha256||'')?{id:p.id,source_id:p.source_id,sha256:p.sha256,kind:'profile',name:'VerseView-settings.json',include_credentials:p.include_credentials===true}:null,
+ atem_review:r&&id(r.id)&&id(r.settings_revision)?{id:r.id,target:text(r.target,48),settings_revision:r.settings_revision,message:text(r.message,500)}:null};
+}
+
+function decodeSetup(v){
+ if(!v||!['ready','invalid'].includes(v.status))return null;
+ return {status:v.status,message:text(v.message,400),problem:text(v.problem,240),timezone:text(v.timezone,80),clock:text(v.clock,64),selected:text(v.selected,20),language:text(v.language,20),provider:text(v.provider,40),dual:v.dual===true,secondary_language:text(v.secondary_language,10),secondary_provider:text(v.secondary_provider,40)};
+}
+
+function decodeNotes(v){
+  const id=x=>/^[a-f0-9]{32}$/.test(x||'')?x:null;
+  if(!v||!id(v.revision))return null;
+  const e=v.export,a=v.auto||{},r=v.memory_review;
+  return {revision:v.revision,status:['idle','generating','ready','failed','cancelled','interrupted'].includes(v.status)?v.status:'failed',
+    message:text(v.message,500),busy:v.busy===true,pending_auto:v.pending_auto===true,route:text(v.route,240),request:v.request&&id(v.request.source_id)?{source_id:v.request.source_id,captured_at:timestamp(v.request.captured_at)}:null,text:text(v.text,200000),
+    source_id:id(v.source_id),captured_at:timestamp(v.captured_at),generated_at:timestamp(v.generated_at),result_route:text(v.result_route,240),
+    auto:{status:text(a.status,32),saved_at:timestamp(a.saved_at),transcript_path:text(a.transcript_path,1024),notes_path:text(a.notes_path,1024),message:text(a.message,500)},
+    export:e&&id(e.id)&&id(e.source_id)&&/^[a-f0-9]{64}$/.test(e.sha256||'')&&['notes','transcript','references','all'].includes(e.kind)?{id:e.id,kind:e.kind,sha256:e.sha256,source_id:e.source_id,name:text(e.name,100)}:null,
+    memory_review:r&&id(r.revision)?{revision:r.revision,source_id:id(r.source_id),scope:text(r.scope,700)}:null};
+}
+
 function decodeVerses(v){
   const id=x=>/^[a-f0-9]{32}$/.test(x||'')?x:null;
   if(!v||!id(v.context?.revision))return null;
   const status=x=>['loading','ready','unavailable','stale'].includes(x)?x:'unavailable';
   const selected=v.selected,chapter=v.chapter,sent=v.last_send;
   return {context:{revision:v.context.revision,book:text(v.context.book,64),chapter:text(v.context.chapter,3),verse:text(v.context.verse,3),staged:v.context.staged===true},
+    history_revision:id(v.history_revision),grid:v.grid&&id(v.grid.revision)?{reference:text(v.grid.reference,128),revision:v.grid.revision,count:Number.isInteger(v.grid.count)&&v.grid.count>0&&v.grid.count<=176?v.grid.count:null,current:text(v.grid.current,3),numbering:'KJV',note:text(v.grid.note,240)}:null,
     translation:text(v.translation,64),message:text(v.message,400),lookup_busy:v.lookup_busy===true,send_busy:v.send_busy===true,
     books:(Array.isArray(v.books)?v.books:[]).slice(0,66).filter(b=>b&&text(b.name,64)&&Number.isInteger(b.chapters)&&b.chapters>0&&b.chapters<=150).map(b=>({name:text(b.name,64),chapters:b.chapters})),
     history:(Array.isArray(v.history)?v.history:[]).slice(-128).filter(r=>r&&text(r.reference,128)).map(r=>({reference:text(r.reference,128),time:text(r.time,32)})),
@@ -94,7 +125,7 @@ function decodeOutline(value){
 function decodeSuggestions(value) {
   if (!value || typeof value.enabled !== 'boolean') return null;
   const count = key => Number.isSafeInteger(value[key]) ? Math.max(0, Math.min(1000000, value[key])) : 0;
-  return {enabled:value.enabled,active:value.active === true,has_clients:value.has_clients === true,busy:value.busy === true,
+  return {revision:/^[a-f0-9]{32}$/.test(value.revision||'')?value.revision:null,phase:['off','stopped','waiting','scanning','suggested','configuration_required','rate_limited','budget_limited','failed'].includes(value.phase)?value.phase:'waiting',effective_route:['free-profile','groq','cerebras','mistral','local'].includes(value.effective_route)?value.effective_route:'',enabled:value.enabled,active:value.active === true,has_clients:value.has_clients === true,busy:value.busy === true,
     cycles:count('cycles'),suggested:count('suggested'),discarded:count('discarded'),
     rows:(Array.isArray(value.rows) ? value.rows : []).slice(-6)
       .filter(row => row && /^[a-f0-9]{32}$/.test(row.id || '') && text(row.reference,128) && timestamp(row.created_at)
@@ -103,7 +134,7 @@ function decodeSuggestions(value) {
         confidence:Number.isFinite(row.confidence) ? Math.min(1,Math.max(0,row.confidence)) : 0,
         candidate_id:/^[a-f0-9]{32}$/.test(row.candidate_id || '') ? row.candidate_id : null,
         stream:role(row.stream),language:['en','ml','hi','multi'].includes(row.language) ? row.language : 'und',
-        reasoning:text(row.reasoning,400)}))};
+        reasoning:text(row.reasoning,400),outcome:text(row.outcome,64),message:text(row.message,400)}))};
 }
 
 function decodeRecovery(value) {
@@ -140,7 +171,7 @@ function decodeSnapshot(value, now = Date.now()) {
   }
   const transcripts = value.transcripts.slice(-48).filter(item => item && timestamp(item.timestamp) && text(item.text))
     .map(item => ({ id: text(item.id, 128), stream: role(item.stream), timestamp: item.timestamp,
-      language: text(item.language, 24), provider: text(item.provider, 64), text: text(item.text),
+      language: text(item.language, 24), provider: text(item.provider, 64), text: text(item.text), text_kind:item.text_kind==='transliteration'?'transliteration':'transcription',
       translation: text(item.translation), is_final: item.is_final === true }));
   const delivery_events = value.delivery_events.slice(-192).filter(item => item && text(item.candidate_id) && timestamp(item.timestamp))
     .map(item => ({ candidate_id: text(item.candidate_id, 128), reference: text(item.reference, 128),
@@ -150,8 +181,18 @@ function decodeSnapshot(value, now = Date.now()) {
     started_at: value.started_at, updated_at: value.updated_at, revision: value.revision,
     host: value.host?.managed === true ? { managed: true, verification: value.host.verification === true,
       notice: text(value.host.notice, 500), warmup: decodeWarmup(value.host.warmup) } : null,
+    remote_connection: decodeRemoteConnection(value.remote_connection),
+    connection_events: (Array.isArray(value.connection_events) ? value.connection_events : []).slice(-16).map(decodeRemoteConnection).filter(Boolean),
     engine_state: text(value.engine_state, 64), history_available: value.history_available === true,
     config, streams, transcripts, delivery_events, control: decodeControl(value.control) };
+}
+
+function decodeRemoteConnection(value) {
+  if (!value || !['connecting','retrying','connected','failed','cancelled'].includes(value.status)
+    || !Number.isInteger(value.attempt) || value.attempt < 1 || value.attempt > 5 || !timestamp(value.timestamp)) return null;
+  return {status: value.status, attempt: value.attempt, maximum: 5, timestamp: value.timestamp,
+    reason: ['browser','remote','controls'].includes(value.reason) ? value.reason : '',
+    retry_seconds: value.status === 'retrying' ? 5 : 0};
 }
 
 function decodeWarmup(value) {
@@ -204,7 +245,7 @@ class EngineFeedReader {
         if (!['primary','secondary'].includes(row.stream) || !timestamp(row.timestamp) || row.is_final !== true
           || typeof row.text !== 'string' || row.text.length > 32768) throw new Error('Invalid transcript');
         return { id: row.id, stream: row.stream, timestamp: row.timestamp, language: text(row.language,24),
-          text: row.text, translation: text(row.translation), is_final: true };
+          text: row.text, text_kind:row.text_kind==='transliteration'?'transliteration':'transcription', translation: text(row.translation), is_final: true };
       });
       return { available: true, rows, next: offset + end, complete: offset + bytesRead >= stat.size,
         pending: end < bytesRead };
@@ -261,7 +302,7 @@ class EngineFeedReader {
     sessions.sort((left, right) => Date.parse(right.updated_at) - Date.parse(left.updated_at));
     const fresh = session => this.clock() - Date.parse(session.updated_at) <= FRESH_MS;
     const active = sessions.filter(fresh);
-    // Follow only the session change caused by our own acknowledged Start request.
+    // Follow only a session change caused by our own acknowledged Start or Clear Memory.
     const transition = this.commandTransition;
     if (transition) {
       const replacement = sessions.find(item => item.pid === transition.pid && item.control?.id === transition.controlId

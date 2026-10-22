@@ -17,6 +17,9 @@ from desktop_outline import OutlineError
 from desktop_bot import BotError
 from desktop_sync import SyncError
 from desktop_verses import VerseError
+from desktop_suggestions import SuggestionError
+from desktop_notes import NotesError
+from desktop_connections import ConnectionError
 
 _HEX = re.compile(r"^[a-f0-9]{32}$")
 
@@ -26,7 +29,7 @@ def now_seconds():
 
 
 class DesktopControl:
-    def __init__(self, publisher, state, start, stop, *, enabled=False, clock=now_seconds, settings=None, panic=None, recovery=None, suggestions=None, outline=None, bot=None, sync=None, operator=None, verses=None):
+    def __init__(self, publisher, state, start, stop, *, enabled=False, clock=now_seconds, settings=None, panic=None, recovery=None, suggestions=None, outline=None, bot=None, sync=None, operator=None, verses=None, notes=None, connections=None):
         self.publisher, self.state = publisher, state
         self.start, self.stop, self.enabled, self.clock = start, stop, enabled, clock
         self.settings, self.panic = settings, panic
@@ -37,6 +40,8 @@ class DesktopControl:
         self.sync = sync
         self.operator = operator
         self.verses = verses
+        self.notes = notes
+        self.connections = connections
         self.control_id = uuid.uuid4().hex
         self.directory = publisher.directory / f"control-{os.getpid()}-{self.control_id}"
         self.session_id = None
@@ -71,7 +76,7 @@ class DesktopControl:
                 actions.append('panic')
             suggestions = self.suggestions.snapshot() if self.suggestions else None
             if state == 'running' and suggestions and suggestions['active'] and not suggestions['busy']:
-                actions.append('send_suggestion')
+                actions.extend(['send_suggestion', 'dismiss_suggestion', 'clear_suggestions'])
             settings = self.settings.snapshot() if self.settings else None
             if state == 'stopped' and settings:
                 actions.append('save_settings')
@@ -96,12 +101,34 @@ class DesktopControl:
                 if operator['busy']: actions = [a for a in actions if a not in ('start', 'restore_session', 'discard_session')]
             verses = self.verses.snapshot() if self.verses else None
             if verses and state in ('stopped', 'running'):
-                if not verses['lookup_busy']: actions.extend(['verse_preview', 'chapter_browse'])
+                actions.append('clear_history')
+                if not verses['lookup_busy']: actions.append('grid_preview')
+                if not verses['lookup_busy']:
+                    actions.extend(['verse_preview', 'chapter_browse'])
+                    if suggestions and suggestions['active']: actions.append('preview_suggestion')
                 if (not verses['send_busy'] and not (operator and operator['busy']) and (not recovery or recovery['status'] not in ('available', 'invalid'))): actions.append('set_context')
                 if state == 'running' and not verses['send_busy'] and not (operator and operator['emergency']): actions.append('send_reference')
+            if (verses and verses['send_busy']) or (suggestions and suggestions['busy']):
+                actions = [a for a in actions if a not in ('send_reference', 'send_suggestion')]
+            connections = self.connections.snapshot() if self.connections else None
+            if connections and state in ('stopped','running'):
+                actions.append('connection_action')
+                if connections['busy']: actions=[a for a in actions if a not in ('start','resume_saved','restore_session','discard_session','save_settings','pull_settings','generate_notes','prepare_memory_clear','clear_memory')]
+            notes = self.notes.snapshot() if self.notes else None
+            if notes and state in ('stopped', 'running'):
+                actions.append('prepare_export')
+                if notes['busy'] or notes['pending_auto']:
+                    actions.append('cancel_notes')
+                    actions = [a for a in actions if a not in ('start','resume_saved','restore_session','discard_session','save_settings','pull_settings')]
+                else:
+                    actions.append('generate_notes')
+                    if state == 'stopped' and not (operator and operator['busy']):
+                        actions.extend(['prepare_memory_clear', 'clear_memory'])
+            if connections and connections['busy']:
+                actions=[a for a in actions if a not in ('start','resume_saved','restore_session','discard_session','save_settings','pull_settings','generate_notes','prepare_memory_clear','clear_memory')]
             self.publisher.emit('control', value={
                 'id': self.control_id, 'state': state, 'actions': actions, 'settings': settings, 'recovery': recovery, 'suggestions': suggestions,
-                'outline': self.outline.snapshot() if self.outline else None,
+                'connections': connections, 'notes': notes, 'session_setup': getattr(self, 'session_setup', None), 'outline': self.outline.snapshot() if self.outline else None,
                 'bot': bot, 'operator': operator, 'verses': verses,
                 'sync': sync,
                 'pending': [{key: item[key] for key in ('candidate_id', 'reference', 'confidence', 'stream', 'source')}
@@ -151,9 +178,12 @@ class DesktopControl:
             reason = 'Invalid, expired, or stale command'
             created = request.get('created_at')
             fields = {
+                'connection_action': {'settings_revision','operation','role','review_id','isolated','attachment_id','include_credentials'},
+                'generate_notes': {'revision'}, 'prepare_export': {'revision', 'kind'}, 'clear_memory': {'revision'},
                 'approve': {'candidate_id'}, 'reject': {'candidate_id'},
                 'save_settings': {'settings_revision', 'changes'},
                 'restore_session': {'recovery_revision'}, 'discard_session': {'recovery_revision'},
+                'grid_preview': {'reference', 'context_revision'}, 'preview_suggestion': {'suggestion_id'}, 'dismiss_suggestion': {'suggestion_id'}, 'clear_suggestions': {'revision'}, 'clear_history': {'history_revision'},
                 'send_suggestion': {'suggestion_id'}, 'edit_outline': {'outline_revision', 'outline_text'},
                 'list_sessions': {'page'}, 'preview_session': {'record_id', 'page'},
                 'resume_saved': {'record_id', 'record_revision'}, 'set_worship': {'enabled'},
@@ -168,7 +198,35 @@ class DesktopControl:
             if valid:
                 try:
                     state = self.state()
-                    if action in ('set_context', 'verse_preview', 'chapter_browse', 'send_reference') and self.verses and action in self.publisher.snapshot()['control']['actions']:
+                    if action=='connection_action' and self.connections and action in self.publisher.snapshot()['control']['actions']:
+                        op=request.get('operation');revision=request.get('settings_revision')
+                        if op=='cancel':self.connections.cancel()
+                        elif op=='prepare_atem':self.connections.prepare_atem(revision)
+                        elif op=='prepare_export':self.connections.prepare_export(revision,request.get('include_credentials'))
+                        elif op=='import':self.connections.import_file(revision,request.get('attachment_id'),request.get('include_credentials'))
+                        else:self.connections.run(op,revision,request.get('role','verse'),request.get('review_id'),request.get('isolated',False))
+                        outcome,reason='requested','Connection action acknowledged. Observe its result.'
+                    elif action in ('generate_notes', 'cancel_notes', 'prepare_export', 'prepare_memory_clear', 'clear_memory') and self.notes and action in self.publisher.snapshot()['control']['actions']:
+                        if action == 'generate_notes': self.notes.generate(request.get('revision'))
+                        elif action == 'cancel_notes': self.notes.cancel()
+                        elif action == 'prepare_export': self.notes.prepare_export(request.get('revision'), request.get('kind'))
+                        elif action == 'prepare_memory_clear': self.notes.prepare_clear()
+                        else:
+                            self._cancel_pending()
+                            self.notes.clear_memory(request.get('revision'))
+                        outcome, reason = 'requested', 'Session request acknowledged. Observe notes, export or memory status.'
+                    elif action == 'grid_preview' and self.verses and action in self.publisher.snapshot()['control']['actions']:
+                        self.verses.grid_preview(request.get('context_revision'), request.get('reference'))
+                        outcome, reason = 'requested', 'Read-only verse preview requested. Nothing was presented.'
+                    elif action == 'clear_history' and self.verses and action in self.publisher.snapshot()['control']['actions']:
+                        self.verses.clear_history(request.get('history_revision'))
+                        outcome, reason = 'cleared', 'Current verse history cleared. Saved sessions and delivery diagnostics were retained.'
+                    elif action in ('preview_suggestion', 'dismiss_suggestion', 'clear_suggestions') and self.suggestions and action in self.publisher.snapshot()['control']['actions']:
+                        if action == 'clear_suggestions': self.suggestions.clear(request.get('revision'))
+                        elif action == 'dismiss_suggestion': self.suggestions.dismiss(request.get('suggestion_id'))
+                        else: self.verses.preview(self.suggestions.select(request.get('suggestion_id'))['reference'])
+                        outcome, reason = 'requested', 'Suggestion request acknowledged. Preview is read-only; Display uses the delivery guards.'
+                    elif action in ('set_context', 'verse_preview', 'chapter_browse', 'send_reference') and self.verses and action in self.publisher.snapshot()['control']['actions']:
                         if action == 'set_context':
                             self.verses.set_context(request.get('context_revision'), request.get('reference'))
                             self._cancel_pending()
@@ -211,7 +269,7 @@ class DesktopControl:
                     elif action == 'panic' and state == 'running' and self.panic:
                         self.panic()
                         outcome, reason = 'requested', 'Clear command requested; verify the visible output.'
-                    elif action == 'send_suggestion' and state == 'running' and self.suggestions:
+                    elif action == 'send_suggestion' and state == 'running' and self.suggestions and action in self.publisher.snapshot()['control']['actions']:
                         suggestion_id = request.get('suggestion_id')
                         if not isinstance(suggestion_id, str) or not _HEX.fullmatch(suggestion_id):
                             raise ValueError('Invalid suggestion identity')
@@ -237,11 +295,11 @@ class DesktopControl:
                             reason = 'Candidate is no longer awaiting approval'
                     else:
                         reason = 'Action unavailable in the current engine state'
-                except (SettingsError, RecoveryError, OutlineError, BotError, SyncError, VerseError) as exc:
+                except (SettingsError, RecoveryError, OutlineError, BotError, SyncError, VerseError, SuggestionError, NotesError, ConnectionError) as exc:
                     outcome, reason = 'rejected', str(exc)
                 except Exception:
                     outcome, reason = 'failed', 'Detector control failed; inspect the detector log'
-            self.results.append(dict(id=command_id, action=action if action in ('start', 'stop', 'approve', 'reject', 'save_settings', 'panic', 'restore_session', 'discard_session', 'send_suggestion', 'edit_outline', 'start_bot', 'stop_bot', 'pull_settings', 'list_sessions', 'preview_session', 'resume_saved', 'save_session', 'set_worship', 'emergency_save', 'set_context', 'verse_preview', 'chapter_browse', 'send_reference') else 'unknown',
+            self.results.append(dict(id=command_id, action=action if action in ('start', 'stop', 'approve', 'reject', 'save_settings', 'panic', 'restore_session', 'discard_session', 'send_suggestion', 'edit_outline', 'start_bot', 'stop_bot', 'pull_settings', 'list_sessions', 'preview_session', 'resume_saved', 'save_session', 'set_worship', 'emergency_save', 'set_context', 'verse_preview', 'chapter_browse', 'send_reference', 'preview_suggestion', 'dismiss_suggestion', 'clear_suggestions', 'clear_history', 'grid_preview', 'connection_action', 'generate_notes', 'cancel_notes', 'prepare_export', 'prepare_memory_clear', 'clear_memory') else 'unknown',
                                      outcome=outcome, reason=reason))
             self.results = self.results[-32:]
             self.refresh()

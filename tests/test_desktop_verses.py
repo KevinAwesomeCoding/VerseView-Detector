@@ -26,6 +26,46 @@ class VerseToolsTests(unittest.TestCase):
         self.tools.preview(value);self.tools.lookup_worker.join(2)
         return self.tools.snapshot()['selected']
 
+    def test_complete_local_grid_and_stale_click_protection_without_lookup(self):
+        from bible_metadata import KJV_CHAPTER_SIZES, verse_count
+        from parse_reference_eng import BOOK_CHAPTER_COUNTS
+        self.assertEqual(set(KJV_CHAPTER_SIZES), {b.lower() for b in BOOK_CHAPTER_COUNTS})
+        for book, chapters in BOOK_CHAPTER_COUNTS.items():
+            self.assertEqual(len(KJV_CHAPTER_SIZES[book.lower()]), chapters, book)
+        self.assertEqual(sum(map(len, KJV_CHAPTER_SIZES.values())), 1189)
+        self.assertEqual(sum(sum(v) for v in KJV_CHAPTER_SIZES.values()), 31102)
+        for book, chapter, count in [('John',3,36),('Leviticus',27,34),('Psalms',119,176),('3 John',1,14),('Revelation',22,21)]:
+            self.assertEqual(verse_count(book,chapter),count)
+        self.assertIsNone(verse_count('John',22));self.assertIsNone(verse_count('Unknown',1))
+        self.context('John','3','17');snapshot=self.tools.snapshot()
+        self.assertEqual(snapshot['grid']['count'],36);self.assertEqual(snapshot['grid']['current'],'17')
+        self.lookup.assert_not_called();self.engine.deliver_verse.assert_not_called()
+        with self.assertRaises(VerseError):reference(self.engine,'3 John 1:15',True)
+        revision=snapshot['grid']['revision'];self.context('John','4','1')
+        with self.assertRaisesRegex(VerseError,'changed'):self.tools.grid_preview(revision,'John 3:16')
+        self.lookup.assert_not_called()
+        revision=self.tools.grid()['revision']
+        with self.assertRaises(VerseError):self.tools.grid_preview(revision,'John 3:16')
+        self.code='web';self.assertIn('omit or renumber',self.tools.grid()['note'])
+
+    def test_invalid_translation_keeps_snapshot_available_without_exposing_raw_setting(self):
+        self.code='INVALID/PRIVATE-SETTING'
+        value=self.tools.snapshot()
+        self.assertEqual(value['translation'],'')
+        self.assertNotIn('PRIVATE',str(value))
+        self.lookup.assert_not_called();self.engine.deliver_verse.assert_not_called()
+
+    def test_clear_history_is_revision_bound_and_keeps_evidence_and_context(self):
+        rows=[{'ref':'John 3:16','time':'12:00'}]
+        self.engine.get_verse_history=lambda:rows
+        self.engine.clear_verse_history=Mock(side_effect=rows.clear)
+        self.context('John','3','16');revision=self.tools.snapshot()['history_revision']
+        rows.append({'ref':'John 3:17','time':'12:01'})
+        with self.assertRaisesRegex(VerseError,'changed'):self.tools.clear_history(revision)
+        self.tools.clear_history(self.tools.snapshot()['history_revision'])
+        self.assertEqual(rows,[]);self.assertEqual(self.tools.context()['verse'],'16')
+        self.engine.set_context.assert_not_called();self.engine.deliver_verse.assert_not_called()
+
     def test_reference_validation_exact_aliases_unique_prefixes_and_ambiguous_or_range_rejection(self):
         for typed,expected in [('gen 3 2','Genesis 3:2'),('1pe 3:8','1 Peter 3:8'),('John chapter 3 verse 16','John 3:16'),('Song of Solomon 1:2','Song of Solomon 1:2')]:
             self.assertEqual(reference(self.engine,typed,True)[0],expected)

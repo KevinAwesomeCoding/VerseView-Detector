@@ -18,3 +18,20 @@
 #verseview-prototype .vv-verse-row span{font-size:13px;font-weight:400}
 #verseview-prototype .vv-verse-outcome{border-top:1px solid var(--vv-border);margin-top:20px;padding-top:16px}
 @media(max-width:760px){#verseview-prototype .vv-verse-content{grid-template-columns:minmax(0,1fr);max-height:48vh}#verseview-prototype .vv-verse-preview{border-left:0;border-top:1px solid var(--vv-border);padding:18px 0 0}#verseview-prototype .vv-verse-dialog{padding:16px}}
+.vv-live-reference { padding: 18px; margin: 18px 0; }
+.vv-live-reference-form { display: flex; align-items: flex-end; gap: 12px; }
+.vv-live-reference-form label { display: flex; flex: 1; flex-direction: column; gap: 8px; min-width: 0; font-size: 13px; font-weight: 600; }
+.vv-live-reference-form input { box-sizing: border-box; width: 100%; min-width: 0; padding: 10px 12px; border: 1px solid var(--vv-border); border-radius: 9px; color: var(--vv-ink); background: var(--vv-panel); font: inherit; }
+.vv-reference-tools { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0; }
+.vv-live-reference>details { border-top: 1px solid var(--vv-border); margin-top: 14px; padding-top: 12px; }
+.vv-live-reference summary { cursor: pointer; font-weight: 600; font-size: 13px; }
+.vv-live-reference-preview { margin-top: 14px; }
+.vv-live-reference-preview .vv-verse-text { max-height: 30vh; overflow: auto; font-size: 15px; line-height: 1.7; white-space: pre-wrap; }
+.vv-live-reference-preview .vv-verse-outcome { margin-top: 12px; padding-top: 12px; }
+@media(max-width:540px){.vv-live-reference-form{align-items:stretch;flex-direction:column}.vv-live-reference{padding:14px}}
+
+.vv-chapter-grid-panel { margin-block: .75rem; }
+.vv-chapter-grid-panel summary { cursor: pointer; padding-block: .4rem; }
+.vv-chapter-grid { display: grid; grid-template-columns: repeat(auto-fill,minmax(2.6rem,1fr)); gap: .35rem; margin-block: .65rem; }
+.vv-chapter-grid .vv-btn { min-width: 0; padding: .5rem .25rem; }
+.vv-chapter-grid [aria-current="true"] { border-color: var(--vv-accent, #9ad6bd); box-shadow: inset 0 0 0 1px currentColor; font-weight: 800; }

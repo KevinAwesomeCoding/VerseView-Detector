@@ -49,7 +49,15 @@ def content(raw):
     for role in ('primary', 'secondary'):
         text = speech.get(role, '')
         if not isinstance(text, str) or len(text) > MAX_TEXT: raise RecoveryError('Saved speech exceeds its limit.')
-    return {'data': data, 'outline': outline, 'speech': {role: speech.get(role, '') for role in ('primary', 'secondary')}}
+    notes = raw.get('notes', '')
+    if not isinstance(notes, str) or len(notes) > 100_000 or '\x00' in notes: raise RecoveryError('Saved notes are invalid.')
+    complete = raw.get('speech_complete', True)
+    if type(complete) is not bool: raise RecoveryError('Saved transcript completeness is invalid.')
+    manglish = raw.get('speech_transliterated', {'primary':False,'secondary':False})
+    if not isinstance(manglish,dict) or any(type(manglish.get(role,False)) is not bool for role in ('primary','secondary')): raise RecoveryError('Saved speech provenance is invalid.')
+    return {'data': data, 'outline': outline, 'notes': notes, 'speech_complete': complete,
+            'speech_transliterated': {role:manglish.get(role,False) for role in ('primary','secondary')},
+            'speech': {role: speech.get(role, '') for role in ('primary', 'secondary')}}
 
 
 class SessionLibrary:
@@ -137,7 +145,7 @@ class SessionLibrary:
     def save(self, raw, reason):
         with self.lock:
             value = content(raw)
-            if not meaningful(value['data']) and not value['outline'].strip() and not any(value['speech'].values()):
+            if not meaningful(value['data']) and not value['outline'].strip() and not any(value['speech'].values()) and not value['notes'].strip():
                 raise RecoveryError('There is no session content to save yet.')
             key = AUTOSAVE_ID if reason == 'autosave' else uuid.uuid4().hex
             record = {'schema': 1, 'id': key, 'saved_at': dt.datetime.now(dt.timezone.utc).isoformat(), 'reason': reason, **value}

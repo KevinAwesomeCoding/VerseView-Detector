@@ -1,0 +1,80 @@
+key,legacy_source,status,destination,note
+language,vv_gui.py:2240,Implemented,Live Speech setup,Typed stopped-only shared boundary; preserved saved values reach existing engine configuration. See Group 1–7 verification.
+bible_translation,vv_gui.py:2241,Implemented,Settings: microphone / VerseVIEW,Typed stopped-only shared boundary; preserved saved values reach existing engine configuration. See Group 1–7 verification.
+display_screen,vv_gui.py:2242,Replaced deliberately,Live / Outline output,"Native monitor/window selection replaces legacy screen index; old value retained, not automatically routed."
+remote_url,vv_gui.py:2243,Implemented,Settings: microphone / VerseVIEW,Typed stopped-only shared boundary; preserved saved values reach existing engine configuration. See Group 1–7 verification.
+confidence,vv_gui.py:2244,Implemented,Settings: detection behavior,Typed stopped-only shared boundary; preserved saved values reach existing engine configuration. See Group 1–7 verification.
+manual_confirm,vv_gui.py:2245,Implemented,Settings: detection behavior,Typed stopped-only shared boundary; preserved saved values reach existing engine configuration. See Group 1–7 verification.
+verify,vv_gui.py:2246,Implemented,Settings: detection behavior,Typed stopped-only shared boundary; preserved saved values reach existing engine configuration. See Group 1–7 verification.
+verse_interrupt,vv_gui.py:2247,Implemented,Settings: detection behavior,Typed stopped-only shared boundary; preserved saved values reach existing engine configuration. See Group 1–7 verification.
+spoken_numeral_mode,vv_gui.py:2248,Implemented,Settings: detection behavior,Typed stopped-only shared boundary; preserved saved values reach existing engine configuration. See Group 1–7 verification.
+smart_amen,vv_gui.py:2249,Implemented,Settings: detection behavior,Typed stopped-only shared boundary; preserved saved values reach existing engine configuration. See Group 1–7 verification.
+auto_save_notes,vv_gui.py:2250,Implemented,Settings: notes automation,Typed stopped-only shared boundary; preserved saved values reach existing engine configuration. See Group 1–7 verification.
+auto_start,vv_gui.py:2251,Replaced deliberately,Settings / Startup,Legacy flag is preserved but does not grant microphone permission; local explicit opt-in and countdown replace it.
+smart_schedule,vv_gui.py:2252,Implemented,Settings: Startup / schedule,Typed stopped-only shared boundary; preserved saved values reach existing engine configuration. See Group 1–7 verification.
+show_malayalam_raw,vv_gui.py:2253,Implemented,Live speech display options,Typed stopped-only shared boundary; preserved saved values reach existing engine configuration. See Group 1–7 verification.
+malayalam_transliteration,vv_gui.py:2254,Implemented,Live language options / Settings default,Typed stopped-only shared boundary; preserved saved values reach existing engine configuration. See Group 1–7 verification.
+panic_key,vv_gui.py:2255,Replaced deliberately,Settings / Panic shortcut,Focused-window validated shortcut replaces legacy background single key; no global shortcut claim.
+dual_stt_enabled,vv_gui.py:2256,Implemented,Live Speech setup,Typed stopped-only shared boundary; preserved saved values reach existing engine configuration. See Group 1–7 verification.
+secondary_language,vv_gui.py:2257,Implemented,Live Speech setup,Typed stopped-only shared boundary; preserved saved values reach existing engine configuration. See Group 1–7 verification.
+secondary_stt_engine,vv_gui.py:2258,Implemented,Live Speech setup,Typed stopped-only shared boundary; preserved saved values reach existing engine configuration. See Group 1–7 verification.
+stt_engine,vv_gui.py:2259,Implemented,Live Speech setup,Typed stopped-only shared boundary; preserved saved values reach existing engine configuration. See Group 1–7 verification.
+assemblyai_api_key,vv_gui.py:2260,Implemented,Settings / Connections,Existing write-only provider credential replacement and presence; keys never echoed.
+live_points_prompt,vv_gui.py:2261,Implemented,Settings: outline behavior,Typed stopped-only shared boundary; preserved saved values reach existing engine configuration. See Group 1–7 verification.
+live_points_llm_enabled,vv_gui.py:2262,Implemented,Live Notes tool,Typed stopped-only shared boundary; preserved saved values reach existing engine configuration. See Group 1–7 verification.
+rate,vv_gui.py:2263,Implemented,Developer: audio/timing,Typed stopped-only shared boundary; preserved saved values reach existing engine configuration. See Group 1–7 verification.
+chunk,vv_gui.py:2264,Implemented,Developer: audio/timing,Typed stopped-only shared boundary; preserved saved values reach existing engine configuration. See Group 1–7 verification.
+cooldown,vv_gui.py:2265,Implemented,Developer: audio/timing,Typed stopped-only shared boundary; preserved saved values reach existing engine configuration. See Group 1–7 verification.
+dedup_window,vv_gui.py:2266,Implemented,Developer: audio/timing,Typed stopped-only shared boundary; preserved saved values reach existing engine configuration. See Group 1–7 verification.
+silence_timeout,vv_gui.py:2267,Implemented,Developer: audio/timing,Typed stopped-only shared boundary; preserved saved values reach existing engine configuration. See Group 1–7 verification.
+aai_turn_cutoff,vv_gui.py:2268,Implemented,Developer: audio/timing,Typed stopped-only shared boundary; preserved saved values reach existing engine configuration. See Group 1–7 verification.
+gcp_interim_flush,vv_gui.py:2269,Implemented,Developer: audio/timing,Typed stopped-only shared boundary; preserved saved values reach existing engine configuration. See Group 1–7 verification.
+llm_enabled,vv_gui.py:2270,Implemented,Developer: audio/timing,Typed stopped-only shared boundary; preserved saved values reach existing engine configuration. See Group 1–7 verification.
+deepgram_api_key,vv_gui.py:2271,Implemented,Settings / Connections,Existing write-only provider credential replacement and presence; keys never echoed.
+groq_api_key,vv_gui.py:2272,Implemented,Settings / Connections,Existing write-only provider credential replacement and presence; keys never echoed.
+gemini_api_key,vv_gui.py:2273,Implemented,Settings / Connections,Existing write-only provider credential replacement and presence; keys never echoed.
+cerebras_api_key,vv_gui.py:2274,Implemented,Settings / Additional credentials,Write-only replacement with presence readback; headers only in Developer Mode.
+mistral_api_key,vv_gui.py:2275,Implemented,Settings / Additional credentials,Write-only replacement with presence readback; headers only in Developer Mode.
+sarvam_api_key,vv_gui.py:2276,Implemented,Settings / Connections,Existing write-only provider credential replacement and presence; keys never echoed.
+sarvam_api_key_backup,vv_gui.py:2277,Implemented,Settings / Connections,Existing write-only provider credential replacement and presence; keys never echoed.
+gladia_api_key,vv_gui.py:2278,Implemented,Settings / Connections,Existing write-only provider credential replacement and presence; keys never echoed.
+gcp_credentials_path,vv_gui.py:2279,Implemented,Settings / Connection tools,Native Google JSON import validates a private managed copy; presence only is public.
+local_whisper_endpoint,vv_gui.py:2280,Implemented,Settings: speech connections,Typed stopped-only shared boundary; preserved saved values reach existing engine configuration. See Group 1–7 verification.
+discord_webhook_url,vv_gui.py:2282,Implemented,Settings / Additional credentials,Write-only replacement with presence readback; headers only in Developer Mode.
+discord_log_webhook_url,vv_gui.py:2283,Implemented,Settings / Additional credentials,Write-only replacement with presence readback; headers only in Developer Mode.
+discord_notes_webhook_url,vv_gui.py:2284,Implemented,Settings / Additional credentials,Write-only replacement with presence readback; headers only in Developer Mode.
+mic_index,vv_gui.py:2285,Implemented,Settings: microphone / VerseVIEW,Typed stopped-only shared boundary; preserved saved values reach existing engine configuration. See Group 1–7 verification.
+atem_enabled,vv_gui.py:2286,Implemented,Settings: ATEM setup; Live integration actions,Typed stopped-only shared boundary; preserved saved values reach existing engine configuration. See Group 1–7 verification.
+atem_ip,vv_gui.py:2287,Implemented,Settings: ATEM setup; Live integration actions,Typed stopped-only shared boundary; preserved saved values reach existing engine configuration. See Group 1–7 verification.
+atem_key_duration,vv_gui.py:2288,Implemented,Settings: ATEM setup; Live integration actions,Typed stopped-only shared boundary; preserved saved values reach existing engine configuration. See Group 1–7 verification.
+settings_sync_url,vv_gui.py:2289,Implemented,Settings / Connections,Existing approved Drive sync URL editor and guarded manual/startup pull retained.
+local_llm_enabled,vv_gui.py:2291,Implemented,Settings: AI / Local models,Typed stopped-only shared boundary; preserved saved values reach existing engine configuration. See Group 1–7 verification.
+local_llm_endpoint,vv_gui.py:2295,Implemented,Settings: AI / Local models,Typed stopped-only shared boundary; preserved saved values reach existing engine configuration. See Group 1–7 verification.
+local_llm_auth_token,vv_gui.py:2297,Implemented,Settings / Additional credentials,Write-only replacement with presence readback; headers only in Developer Mode.
+local_llm_extra_headers,vv_gui.py:2298,Implemented,Settings / Additional credentials,Write-only replacement with presence readback; headers only in Developer Mode.
+local_llm_model,vv_gui.py:2299,Implemented,Settings: AI / Local models,Typed stopped-only shared boundary; preserved saved values reach existing engine configuration. See Group 1–7 verification.
+local_llm_timeout,vv_gui.py:2300,Implemented,Settings: AI / Local models,Typed stopped-only shared boundary; preserved saved values reach existing engine configuration. See Group 1–7 verification.
+local_llm_warm_at_start,vv_gui.py:2301,Implemented,Settings: AI / Local models,Typed stopped-only shared boundary; preserved saved values reach existing engine configuration. See Group 1–7 verification.
+local_llm_on_failure,vv_gui.py:2302,Implemented,Settings: AI / Local models,Typed stopped-only shared boundary; preserved saved values reach existing engine configuration. See Group 1–7 verification.
+local_llm_role_verse,vv_gui.py:2304,Implemented,Settings: AI / Local models,Typed stopped-only shared boundary; preserved saved values reach existing engine configuration. See Group 1–7 verification.
+local_llm_role_outline,vv_gui.py:2305,Implemented,Settings: AI / Local models,Typed stopped-only shared boundary; preserved saved values reach existing engine configuration. See Group 1–7 verification.
+local_llm_role_summary,vv_gui.py:2306,Implemented,Settings: AI / Local models,Typed stopped-only shared boundary; preserved saved values reach existing engine configuration. See Group 1–7 verification.
+local_llm_model_verse,vv_gui.py:2307,Implemented,Settings: AI / Local models,Typed stopped-only shared boundary; preserved saved values reach existing engine configuration. See Group 1–7 verification.
+local_llm_model_outline,vv_gui.py:2308,Implemented,Settings: AI / Local models,Typed stopped-only shared boundary; preserved saved values reach existing engine configuration. See Group 1–7 verification.
+local_llm_model_summary,vv_gui.py:2309,Implemented,Settings: AI / Local models,Typed stopped-only shared boundary; preserved saved values reach existing engine configuration. See Group 1–7 verification.
+watcher_enabled,vv_gui.py:2311,Implemented,Settings: watcher; Developer tuning,Typed stopped-only shared boundary; preserved saved values reach existing engine configuration. See Group 1–7 verification.
+watcher_provider,vv_gui.py:2313,Implemented,Settings: watcher; Developer tuning,Typed stopped-only shared boundary; preserved saved values reach existing engine configuration. See Group 1–7 verification.
+watcher_batch_interval,vv_gui.py:2315,Implemented,Settings: watcher; Developer tuning,Typed stopped-only shared boundary; preserved saved values reach existing engine configuration. See Group 1–7 verification.
+watcher_auto_confidence,vv_gui.py:2316,Implemented,Settings: watcher; Developer tuning,Typed stopped-only shared boundary; preserved saved values reach existing engine configuration. See Group 1–7 verification.
+watcher_passive_confidence,vv_gui.py:2317,Implemented,Settings: watcher; Developer tuning,Typed stopped-only shared boundary; preserved saved values reach existing engine configuration. See Group 1–7 verification.
+watcher_window_lines,vv_gui.py:2318,Implemented,Settings: watcher; Developer tuning,Typed stopped-only shared boundary; preserved saved values reach existing engine configuration. See Group 1–7 verification.
+watcher_window_seconds,vv_gui.py:2319,Implemented,Settings: watcher; Developer tuning,Typed stopped-only shared boundary; preserved saved values reach existing engine configuration. See Group 1–7 verification.
+watcher_cooldown,vv_gui.py:2320,Implemented,Settings: watcher; Developer tuning,Typed stopped-only shared boundary; preserved saved values reach existing engine configuration. See Group 1–7 verification.
+discord_bot_token,vv_gui.py:2322,Implemented,Settings / Additional credentials,Write-only replacement with presence readback; headers only in Developer Mode.
+vv_host,vv_gui.py:2323,Replaced deliberately,Owned Discord bridge,Legacy arbitrary host preserved but unused; authenticated owned loopback and dynamic port replace it.
+vv_port,vv_gui.py:2324,Replaced deliberately,Owned Discord bridge,Legacy port preserved but unused; dynamic owned bridge port replaces it.
+vv_guild_id,vv_gui.py:2325,Implemented,Settings: Discord setup,Typed stopped-only shared boundary; preserved saved values reach existing engine configuration. See Group 1–7 verification.
+free_cloud_enabled,vv_gui.py:2238,Implemented,Developer / Cloud tuning,Reviewed free-only profile enable control; production free-only precedence retained.
+free_cloud_config,vv_gui.py:2238,Bounded deliberately,Developer / Cloud tuning,Only reviewed routes/models/lower budgets editable. Unknown nested fields preserved; not arbitrary provider configuration.
+cloudflare_api_token,vv_gui.py:2238,Implemented,Settings / Connections,Existing write-only provider credential replacement and presence; keys never echoed.
+cloudflare_account_id,vv_gui.py:2238,Implemented,Settings / Connections,Existing write-only provider credential replacement and presence; keys never echoed.

@@ -83,6 +83,18 @@ class ObserverTests(unittest.TestCase):
         self.assertEqual(data["transcripts"], [])
         self.assertEqual(data["origin"], "engine")
 
+    def test_connection_activity_is_typed_bounded_private_and_reset_on_start(self):
+        for _ in range(20):
+            self.publisher.emit('remote_connection', status='retrying', attempt=2,
+                                reason='remote', exception='PRIVATE', url='SECRET', retry_seconds=999)
+        self.publisher.emit('remote_connection',status='failed',attempt=True)
+        data=self.snapshot()
+        self.assertEqual(len(data['connection_events']),16)
+        self.assertEqual(data['remote_connection']['retry_seconds'],5)
+        self.assertNotIn('PRIVATE',json.dumps(data));self.assertNotIn('SECRET',json.dumps(data))
+        self.publisher.begin(CONFIG)
+        self.assertIsNone(self.snapshot()['remote_connection'])
+
     def test_snapshot_is_atomic_private_and_stops_cleanly(self):
         self.publisher.close()
         data = self.snapshot()

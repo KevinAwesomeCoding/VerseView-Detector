@@ -9,7 +9,7 @@ from unittest.mock import Mock, patch
 import uuid
 
 import settings as config
-from desktop_settings import DesktopSettings, GuiSettings, SettingsError, project, validate_changes, providers_for, PROVIDERS
+from desktop_settings import DesktopSettings, GuiSettings, SettingsError, project, validate_changes, providers_for, PROVIDERS, DETECTION_WIDGETS, WATCHER_DEFAULTS, WATCHER_ENTRIES, WATCHER_PROVIDERS
 from desktop_control import DesktopControl
 from observer_feed import ObserverPublisher
 
@@ -38,12 +38,16 @@ class FakeGUI:
             setattr(self, name, Widget(value))
         for name in ('stt_engine_menu', 'sec_engine_menu', 'sec_lang_menu', 'ml_raw_cb', 'ml_translit_cb'):
             setattr(self, name, Widget())
+        for key, name in DETECTION_WIDGETS.items(): setattr(self, name, Widget(config.DEFAULTS[key]))
+        self.watcher_enabled_var=Widget(False); self.watcher_provider_var=Widget('Groq')
+        for key,name in WATCHER_ENTRIES.items(): setattr(self,name,Widget(str(WATCHER_DEFAULTS[key])))
+        self.conf_val_label = Widget(text='Confidence Threshold: 75%')
         self._set_dual_log_view = Mock()
         self._update_log_headers = Mock()
 
     def _collect_settings(self):
         provider_code = lambda label: next((code for code, value in PROVIDERS.items() if value == label), 'legacy-invalid')
-        return {**self._s, 'language': self.lang_var.get(), 'stt_engine': provider_code(self.stt_engine_var.get()),
+        return {**self._s, 'watcher_enabled':self.watcher_enabled_var.get(), 'watcher_provider':next(k for k,v in WATCHER_PROVIDERS.items() if v==self.watcher_provider_var.get()), **{k:float(getattr(self,n).get()) if k in ('watcher_auto_confidence','watcher_passive_confidence','watcher_batch_interval') else int(getattr(self,n).get()) for k,n in WATCHER_ENTRIES.items()}, **{key: getattr(self, name).get() for key, name in DETECTION_WIDGETS.items()}, 'language': self.lang_var.get(), 'stt_engine': provider_code(self.stt_engine_var.get()),
                 'dual_stt_enabled': self.dual_stt_var.get(),
                 'secondary_language': {'English': 'en', 'Malayalam': 'ml', 'Hindi': 'hi'}[self.sec_lang_var.get()] if self.dual_stt_var.get() else None,
                 'secondary_stt_engine': provider_code(self.sec_engine_var.get()),
@@ -64,6 +68,22 @@ class SettingsTests(unittest.TestCase):
         self.path.write_text(json.dumps({**self.gui._collect_settings(), 'future_option': {'keep': True}}))
         self.binding = GuiSettings(self.gui, config)
         self.settings = DesktopSettings(self.binding.read, self.binding.apply)
+
+    def test_watcher_can_be_configured_while_off_and_saved_transactionally(self):
+        self.settings.save(self.settings.snapshot()['revision'],{'watcher_enabled':False,'watcher_provider':'local',
+            'watcher_batch_interval':20.,'watcher_window_lines':12,'watcher_auto_confidence':.9})
+        current=self.settings.snapshot()['values']
+        self.assertFalse(current['watcher_enabled']);self.assertEqual(current['watcher_provider'],'local')
+        self.assertEqual(self.gui.watcher_provider_var.get(),'Local LLM')
+        self.assertEqual(self.gui.watcher_interval_entry.get(),'20.0')
+        for patch_value in ({'watcher_provider':'unknown'},{'watcher_enabled':'yes'},{'watcher_batch_interval':0},
+                            {'watcher_window_lines':1.5},{'watcher_cooldown':float('nan')},
+                            {'watcher_auto_confidence':.2,'watcher_passive_confidence':.8}):
+            with self.assertRaises(SettingsError):self.settings.save(self.settings.snapshot()['revision'],patch_value)
+        before=self.gui.watcher_interval_entry.get()
+        with patch.object(config,'save',return_value=False):
+            with self.assertRaises(SettingsError):self.settings.save(self.settings.snapshot()['revision'],{'watcher_batch_interval':25.})
+        self.assertEqual(self.gui.watcher_interval_entry.get(),before)
 
     def test_projection_drops_credentials_and_credential_bearing_url(self):
         self.assertNotIn('private-key', str(self.settings.snapshot()))
@@ -93,7 +113,7 @@ class SettingsTests(unittest.TestCase):
         saved['deepgram_api_key'] = 'external-key'
         self.path.write_text(json.dumps(saved))
         self.gui._s['deepgram_api_key'] = 'unsaved-gui-key'
-        self.gui._s['confidence'] = .99
+        self.gui.conf_var.set(.99)
         self.settings.refresh()
         self.settings.save(self.settings.snapshot()['revision'], {'mic_index': 2})
         persisted = json.loads(self.path.read_text())
@@ -101,7 +121,7 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(persisted['future_option'], {'external': 'latest'})
         self.assertEqual(persisted['confidence'], config.DEFAULTS['confidence'])
         self.assertEqual(self.gui._s['deepgram_api_key'], 'unsaved-gui-key')
-        self.assertEqual(self.gui._s['confidence'], .99)
+        self.assertEqual(self.gui.conf_var.get(), .99)
         self.assertEqual(self.gui.sec_lang_var.get(), 'Malayalam')
         self.assertEqual(self.gui.sec_engine_var.get(), 'Sarvam AI')
 
@@ -116,7 +136,8 @@ class SettingsTests(unittest.TestCase):
                     self.settings.save(old, {'mic_index': 2})
 
     def test_rejects_arbitrary_or_invalid_fields_and_provider_language_pairs(self):
-        for changes in ({'deepgram_api_key': 'oops'}, {'manual_confirm': False}, {'mic_index': True},
+        for changes in ({'deepgram_api_key': 'oops'}, {'manual_confirm': 'false'}, {'confidence': True},
+                        {'confidence': .49}, {'confidence': float('nan')}, {'confidence': 1.01}, {'mic_index': True},
                         {'mic_index': 99}, {'language': 'Malayalam', 'stt_engine': 'deepgram'},
                         {'dual_stt_enabled': True, 'secondary_language': 'ml', 'secondary_stt_engine': 'assemblyai_pro'},
                         {'remote_url': 'file:///tmp/test'}, {'remote_url': 'http://host/?key=secret'},
@@ -124,6 +145,20 @@ class SettingsTests(unittest.TestCase):
             with self.subTest(changes=changes):
                 with self.assertRaises(SettingsError):
                     self.settings.save(self.settings.snapshot()['revision'], changes)
+
+    def test_detection_save_persists_all_switches_and_rolls_back_on_failure(self):
+        changes = dict(confidence=.9, manual_confirm=False, verify=False, verse_interrupt=True,
+                       spoken_numeral_mode=True, smart_amen=False)
+        before = self.gui._collect_settings()
+        with patch.object(config, 'save', return_value=False):
+            with self.assertRaises(SettingsError): self.settings.save(self.settings.snapshot()['revision'], changes)
+        self.assertEqual(self.gui._collect_settings(), before)
+        self.assertEqual(self.gui.conf_val_label.cget('text'), 'Confidence Threshold: 75%')
+        self.settings.save(self.settings.snapshot()['revision'], changes)
+        for key, value in changes.items():
+            self.assertEqual(self.settings.snapshot()['values'][key], value)
+            self.assertEqual(json.loads(self.path.read_text())[key], value)
+        self.assertEqual(self.gui.conf_val_label.cget('text'), 'Confidence Threshold: 90%')
 
     def test_unavailable_microphone_may_be_preserved_but_not_newly_selected(self):
         values = self.settings.snapshot()['values']

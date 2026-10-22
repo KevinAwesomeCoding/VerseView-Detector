@@ -77,6 +77,9 @@ jobs:
       - name: Check frozen private settings sync with mocked downloads
         run: python desktop-preview/scripts/ci-run.py sync python desktop-preview/scripts/smoke-sync.py
         working-directory: .
+      - name: Check frozen settings and connection guards without live services
+        run: python desktop-preview/scripts/ci-run.py connections python desktop-preview/scripts/smoke-connections.py
+        working-directory: .
       - name: Package dashboard with the native companion
         run: python scripts/ci-run.py package node scripts/package-native.cjs --platform=${{ matrix.platform }} --arch=${{ matrix.arch }}
       - name: Verify final dashboard and backend package

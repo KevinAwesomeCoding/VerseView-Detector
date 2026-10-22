@@ -2,10 +2,13 @@
 import copy
 import hashlib
 import json
+import math
 import re
 import threading
 from urllib.parse import urlsplit
 import uuid
+import desktop_setup
+import desktop_options
 
 LANGUAGES = {'English': 'en', 'Malayalam': 'ml', 'Hindi': 'hi', 'Multi-Language': 'multi'}
 PROVIDERS = {'deepgram': 'Deepgram', 'sarvam': 'Sarvam AI',
@@ -13,8 +16,38 @@ PROVIDERS = {'deepgram': 'Deepgram', 'sarvam': 'Sarvam AI',
              'assemblyai_multilingual': 'AssemblyAI (Universal-3 Multilingual)',
              'gladia': 'Gladia', 'gcp': 'Google Cloud STT', 'local_whisper': 'Local Whisper'}
 BIBLES = ['KJV', 'WEB', 'ASV', 'NET', 'NLT', 'NIV', 'ESV', 'NASB', 'NKJV', 'AMP', 'CSB', 'MSG', 'OEB', 'WEBBE']
+DETECTION_DEFAULTS = {'confidence': .75, 'manual_confirm': True, 'verify': True,
+                      'verse_interrupt': False, 'spoken_numeral_mode': False, 'smart_amen': True, 'auto_save_notes': True}
+DETECTION_WIDGETS = {'confidence': 'conf_var', 'manual_confirm': 'manual_var',
+                     'verify': 'verify_var', 'verse_interrupt': 'verse_interrupt_var',
+                     'spoken_numeral_mode': 'spoken_numeral_var', 'smart_amen': 'smart_amen_var', 'auto_save_notes': 'auto_save_var'}
+WATCHER_DEFAULTS = {'watcher_enabled': False, 'watcher_provider': 'groq', 'watcher_batch_interval': 5.,
+                    'watcher_auto_confidence': .85, 'watcher_passive_confidence': .60,
+                    'watcher_window_lines': 10, 'watcher_window_seconds': 40, 'watcher_cooldown': 60}
+WATCHER_PROVIDERS = {'groq': 'Groq', 'cerebras': 'Cerebras', 'mistral': 'Mistral', 'local': 'Local LLM'}
+WATCHER_ENTRIES = dict(watcher_batch_interval='watcher_interval_entry', watcher_auto_confidence='watcher_auto_conf_entry',
+                       watcher_passive_confidence='watcher_passive_conf_entry', watcher_window_lines='watcher_window_lines_entry',
+                       watcher_window_seconds='watcher_window_seconds_entry', watcher_cooldown='watcher_cooldown_entry')
+
+
+def valid_watcher(key, value):
+    if key == 'watcher_enabled': return type(value) is bool
+    if key == 'watcher_provider': return isinstance(value, str) and value in WATCHER_PROVIDERS
+    if type(value) not in (int, float) or not math.isfinite(value): return False
+    bounds = {'watcher_batch_interval': (1, 300), 'watcher_auto_confidence': (0, 1), 'watcher_passive_confidence': (0, 1),
+              'watcher_window_lines': (1, 100), 'watcher_window_seconds': (5, 600), 'watcher_cooldown': (0, 3600)}
+    low, high = bounds[key]
+    return low <= value <= high and (key not in ('watcher_window_lines', 'watcher_window_seconds', 'watcher_cooldown') or type(value) is int)
+
+
 FIELDS = {'language', 'stt_engine', 'dual_stt_enabled', 'secondary_language',
-          'secondary_stt_engine', 'mic_index', 'remote_url', 'bible_translation'}
+          'secondary_stt_engine', 'mic_index', 'remote_url', 'bible_translation'} | DETECTION_DEFAULTS.keys() | WATCHER_DEFAULTS.keys() | desktop_setup.DEFAULTS.keys() | desktop_options.DEFAULTS.keys()
+
+
+def valid_detection(key, value):
+    if key == 'confidence':
+        return type(value) in (int, float) and math.isfinite(value) and .5 <= value <= 1
+    return type(value) is bool
 
 
 class SettingsError(ValueError):
@@ -50,21 +83,33 @@ def project(raw):
     """Explicit allowlist: never export a settings dictionary or provider credentials."""
     language = {'Hindi Nova-3': 'Hindi', 'Hindi Sarvam AI': 'Hindi'}.get(raw.get('language'), raw.get('language'))
     provider = lambda key: 'assemblyai_pro' if raw.get(key) == 'assemblyai' else raw.get(key)
-    return {'language': language if language in LANGUAGES else '',
+    return {**desktop_options.project(raw), **desktop_setup.project(raw), 'language': language if language in LANGUAGES else '',
             'stt_engine': provider('stt_engine') if provider('stt_engine') in PROVIDERS else '',
             'dual_stt_enabled': raw.get('dual_stt_enabled') is True,
             'secondary_language': raw.get('secondary_language') if raw.get('secondary_language') in ('en', 'ml', 'hi') else None,
             'secondary_stt_engine': provider('secondary_stt_engine') if provider('secondary_stt_engine') in PROVIDERS else '',
             'mic_index': raw.get('mic_index') if type(raw.get('mic_index')) is int else -1,
             'remote_url': raw.get('remote_url') if valid_url(raw.get('remote_url')) else '',
-            'bible_translation': str(raw.get('bible_translation', '')).upper() if str(raw.get('bible_translation', '')).upper() in BIBLES else ''}
+            'bible_translation': str(raw.get('bible_translation', '')).upper() if str(raw.get('bible_translation', '')).upper() in BIBLES else '',
+            **{key: raw.get(key, default) if valid_detection(key, raw.get(key, default)) else default
+               for key, default in DETECTION_DEFAULTS.items()},
+            **{key: raw.get(key, default) if valid_watcher(key, raw.get(key, default)) else default
+               for key, default in WATCHER_DEFAULTS.items()}}
 
 
 def validate_changes(changes, current, devices):
     if not isinstance(changes, dict) or not changes or not set(changes) <= FIELDS:
-        raise SettingsError('Only the displayed connection and speech settings can be changed.')
+        raise SettingsError('Only the displayed speech, detection and connection settings can be changed.')
     for key, value in changes.items():
-        if key == 'dual_stt_enabled':
+        if key in desktop_options.DEFAULTS:
+            valid = desktop_options.valid(key, value)
+        elif key in desktop_setup.DEFAULTS:
+            valid = desktop_setup.valid(key, value)
+        elif key in WATCHER_DEFAULTS:
+            valid = valid_watcher(key, value)
+        elif key in DETECTION_DEFAULTS:
+            valid = valid_detection(key, value)
+        elif key == 'dual_stt_enabled':
             valid = type(value) is bool
         elif key == 'mic_index':
             valid = type(value) is int
@@ -73,9 +118,14 @@ def validate_changes(changes, current, devices):
         else:
             valid = isinstance(value, str)
         if not valid:
+            if key == 'schedule_timezone': raise SettingsError('Time zone unavailable. Use system, UTC or an IANA zone supported on this computer.')
+            if key == 'service_schedule': raise SettingsError('Use up to 16 valid day/time/language entries without duplicate slots.')
+            if key == 'desktop_panic_shortcut': raise SettingsError('Use Shift+Escape or a supported modified shortcut. Quit/debug shortcuts are reserved.')
             raise SettingsError('Invalid settings value.')
     result = dict(current)
     result.update(changes)
+    if result['watcher_passive_confidence'] > result['watcher_auto_confidence']:
+        raise SettingsError('Watcher suggestion threshold must not exceed its high-confidence threshold.')
     if result['language'] not in LANGUAGES or result['stt_engine'] not in providers_for(LANGUAGES[result['language']]):
         raise SettingsError('Choose a supported primary language and provider combination.')
     if type(result['dual_stt_enabled']) is not bool or result['secondary_language'] not in (None, 'en', 'ml', 'hi'):
@@ -131,6 +181,8 @@ class DesktopSettings:
             if isinstance(changes, dict) and set(changes) == {'cloud_settings'}:
                 from desktop_cloud_settings import validate_cloud
                 checked = validate_cloud(changes['cloud_settings'], self.raw['values'])
+            elif isinstance(changes,dict) and set(changes)=={'connection_secrets'}:
+                checked=desktop_options.validate_secrets(changes['connection_secrets'])
             else:
                 checked = validate_changes(changes, self.view['values'], self.view['devices'])
             storage_revision = self.raw.get('storage_revision')
@@ -155,11 +207,22 @@ class GuiSettings:
 
     def read(self):
         _, revision = self.storage()
-        return {'values': self.gui._collect_settings(), 'storage_revision': revision,
+        saved, _ = self.storage()
+        return {'values': {**saved, **self.gui._collect_settings()}, 'storage_revision': revision,
                 'devices': [{'id': index, 'label': label} for label, index in self.gui.mic_map.items()]}
 
     def widgets(self, values):
         gui = self.gui
+        for key, name in {'malayalam_transliteration':'ml_translit_var', 'show_malayalam_raw':'ml_raw_var', 'smart_schedule':'smart_schedule_var'}.items():
+            if hasattr(gui, name): getattr(gui, name).set(values[key])
+        for key, name in DETECTION_WIDGETS.items():
+            getattr(gui, name).set(values[key])
+        gui.watcher_enabled_var.set(values['watcher_enabled'])
+        gui.watcher_provider_var.set(WATCHER_PROVIDERS[values['watcher_provider']])
+        for key, name in WATCHER_ENTRIES.items():
+            getattr(gui, name).delete(0, 'end')
+            getattr(gui, name).insert(0, str(values[key]))
+        gui.conf_val_label.configure(text=f"Confidence Threshold: {round(values['confidence'] * 100)}%")
         gui.lang_var.set(values['language'])
         gui.stt_engine_var.set(PROVIDERS[values['stt_engine']])
         gui.stt_engine_menu.configure(values=[PROVIDERS[key] for key in providers_for(LANGUAGES[values['language']])])
@@ -193,17 +256,20 @@ class GuiSettings:
         before_safe = project(before)
         updated = {**before_safe, **changes}
         variable_names = ['lang_var', 'stt_engine_var', 'dual_stt_var', 'sec_lang_var',
-                          'sec_engine_var', 'mic_var', 'bible_var']
+                          'sec_engine_var', 'mic_var', 'bible_var', 'watcher_enabled_var', 'watcher_provider_var', *DETECTION_WIDGETS.values()]
+        variable_names.extend(name for name in ('ml_translit_var', 'ml_raw_var', 'smart_schedule_var') if hasattr(gui, name))
         variables = [(getattr(gui, name), getattr(gui, name).get()) for name in variable_names]
         menu_properties = [('stt_engine_menu', ('values',)), ('sec_engine_menu', ('values', 'state')),
                            ('sec_lang_menu', ('state',)), ('ml_raw_cb', ('state',)), ('ml_translit_cb', ('state',))]
         menus = [(getattr(gui, name), {key: getattr(gui, name).cget(key) for key in keys})
                  for name, keys in menu_properties]
+        entries = [(getattr(gui, name), getattr(gui, name).get()) for name in WATCHER_ENTRIES.values()]
         old_url = gui.url_entry.get()
+        old_confidence_label = gui.conf_val_label.cget('text')
         try:
             self.widgets(updated)
             # A dashboard save never commits unrelated legacy GUI drafts or credentials.
-            merged = {**self.config.DEFAULTS, **saved, **updated}
+            merged = {**self.config.DEFAULTS, **saved, **changes}
             merged['bible_translation'] = merged['bible_translation'].lower()
             if not self.config.save(merged):
                 raise SettingsError('Could not save settings.')
@@ -211,14 +277,18 @@ class GuiSettings:
             try:
                 for variable, value in variables:
                     variable.set(value)
+                for entry, value in entries:
+                    entry.delete(0, 'end'); entry.insert(0, value)
                 for menu, properties in menus:
                     menu.configure(**properties)
                 gui.url_entry.delete(0, 'end')
                 gui.url_entry.insert(0, old_url)
+                gui.conf_val_label.configure(text=old_confidence_label)
                 gui._set_dual_log_view(before_safe['dual_stt_enabled'])
                 gui._update_log_headers()
             except Exception:
                 raise SettingsError('Settings save failed. Check the detector window before continuing.') from None
             raise SettingsError('Could not apply settings. Previous values were retained.') from None
-        gui._s = {**gui._s, **updated}
-        gui._s["bible_translation"] = updated["bible_translation"].lower()
+        gui._s = {**gui._s, **changes}
+        if 'bible_translation' in changes:
+            gui._s['bible_translation'] = changes['bible_translation'].lower()

@@ -93,6 +93,28 @@ test('explicit process selection follows only our acknowledged start across sess
   fs.writeFileSync(file, JSON.stringify(fixture));
   assert.equal((await reader.poll()).connection, 'unavailable');
 });
+test('Clear Memory follows only its exact acknowledged rotation and stays stopped', async t => {
+  const f = setup(t), reader = new EngineFeedReader({ directory: f.directory, clock: () => f.now });
+  const fixture = { ...f.session, schema: 1, revision: 1, origin: 'engine', started_at: new Date(f.now).toISOString(),
+    engine_state: 'stopped', config: { streams: { primary: { enabled: true }, secondary: { enabled: false } } },
+    transcripts: [], delivery_events: [] };
+  fixture.control.actions = ['clear_memory'];
+  const file = path.join(f.directory, 'engine-123.json');
+  fs.writeFileSync(file, JSON.stringify(fixture));
+  await reader.poll(); await reader.select(f.sessionId);
+  const client = new EngineCommands(reader, { clock: () => f.now });
+  const result = await client.submit(f.sessionId, 'clear_memory', undefined, undefined, undefined, undefined, undefined, { revision: 'e'.repeat(32) });
+  fixture.session_id = 'c'.repeat(32); fixture.revision++;
+  fixture.control.results = [{ id: 'f'.repeat(32), action: 'clear_memory', outcome: 'requested' }];
+  fs.writeFileSync(file, JSON.stringify(fixture));
+  assert.equal((await reader.poll()).connection, 'unavailable');
+  fixture.revision++; fixture.control.results = [{ id: result.id, action: 'clear_memory', outcome: 'requested' }];
+  fs.writeFileSync(file, JSON.stringify(fixture));
+  const cleared = await reader.poll();
+  assert.equal(cleared.selected, fixture.session_id);
+  assert.equal(cleared.connection, 'connected');
+  assert.equal(cleared.session.control.state, 'stopped');
+});
 test('control decoder exposes only bounded typed fields', t => {
   const f = setup(t);
   const decoded = decodeSnapshot({ ...f.session, schema: 1, revision: 1, origin: 'engine',
@@ -195,4 +217,12 @@ test('operator decoder bounds archived content and removes private fields',t=>{
   const op=decodeSnapshot(fixture).control.operator;
   assert.equal(op.library.selected.primary.length,4000);assert.equal(op.library.selected.secondary,'മലയാളം');assert.equal(op.worship,true);
   assert.equal(JSON.stringify(op).includes('PRIVATE'),false);
+});
+
+test('connection commands bind saved revision, exact role/review and credential scope without accepting paths or URLs',async t=>{
+ const f=setup(t),revision='d'.repeat(32);f.session.control.actions=['connection_action'];f.session.control.settings={revision};
+ const send=v=>f.client.submit(f.sessionId,'connection_action',undefined,undefined,undefined,undefined,undefined,v);
+ for(const v of [{operation:'local_test',settings_revision:revision,role:'verse',endpoint:'http://other'}, {operation:'import',settings_revision:revision,attachment_id:'../../key.json',include_credentials:true},{operation:'atem_on',settings_revision:revision,review_id:'e'.repeat(32),isolated:false},{operation:'local_warm',settings_revision:revision,role:'other'}])await assert.rejects(send(v));
+ const payload={operation:'local_warm',settings_revision:revision,role:'summary'};const result=await send(payload);const r=JSON.parse(fs.readFileSync(path.join(f.inbox,`command-${result.id}.json`)));assert.deepEqual(Object.fromEntries(Object.keys(payload).map(k=>[k,r[k]])),payload);
+ f.snapshot.connection='stale';await assert.rejects(send(payload));
 });

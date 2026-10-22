@@ -50,13 +50,40 @@ class SuggestionTests(unittest.TestCase):
         self.assertEqual(len(self.inbox.snapshot()['rows']),1)
         self.engine.deliver_verse.assert_not_called()
 
+    def test_preview_dismiss_clear_and_mode_change_invalidate_advice_without_delivery(self):
+        self.callback(self.suggestion(kind='auto_suggest'))
+        row=self.inbox.snapshot()['rows'][0];revision=self.inbox.snapshot()['revision']
+        self.assertEqual(self.inbox.select(row['id'])['reference'],'John 3:19')
+        self.callback(self.suggestion('John 3:20'))
+        with self.assertRaises(ValueError):self.inbox.clear(revision)
+        self.inbox.dismiss(row['id'])
+        with self.assertRaises(ValueError):self.inbox.select(row['id'])
+        self.inbox.clear(self.inbox.snapshot()['revision']);self.assertEqual(self.inbox.snapshot()['rows'],[])
+        self.engine.get_watcher_status=lambda:dict(has_clients=True,cycle_state='suggested')
+        self.assertEqual(self.inbox.snapshot()['phase'],'waiting')
+        self.callback(self.suggestion());identity=self.inbox.snapshot()['rows'][0]['id']
+        self.engine._delivery_epoch=1
+        self.assertEqual(self.inbox.snapshot()['rows'],[])
+        with self.assertRaises(ValueError):self.inbox.send(identity)
+        self.engine.deliver_verse.assert_not_called()
+
+    def test_status_only_reports_evidenced_states_without_private_provider_details(self):
+        status={'has_clients':True,'cycle_state':'waiting','effective_route':'free-profile','private':'SECRET'}
+        self.engine.get_watcher_status=lambda:status
+        self.assertEqual(self.inbox.snapshot()['phase'],'waiting')
+        for phase in ('failed','rate_limited','budget_limited','configuration_required'):
+            status['cycle_state']=phase;self.assertEqual(self.inbox.snapshot()['phase'],phase)
+        status['scanning']=True;self.assertEqual(self.inbox.snapshot()['phase'],'scanning')
+        self.assertNotIn('SECRET',str(self.inbox.snapshot()))
+        self.inbox.cancel();self.assertEqual(self.inbox.snapshot()['phase'],'stopped')
+
     def test_manual_send_uses_guarded_path_with_candidate_and_actual_acceptance(self):
         self.callback(self.suggestion());identity=self.inbox.snapshot()['rows'][0]['id']
         self.inbox.send(identity);self.inbox.join()
         row=self.inbox.snapshot()['rows'][0]
         self.assertEqual(row['state'],'accepted')
-        self.engine.deliver_verse.assert_called_once_with('John 3:19',self.engine._controller,bypass_cooldown=True,
-            confidence=1.0,source='WATCHER-MANUAL',stream='secondary',candidate_id=row['candidate_id'])
+        self.engine.deliver_verse.assert_called_once_with('John 3:19',self.engine._controller,bypass_cooldown=False,
+            confidence=1.0,source='WATCHER-MANUAL',stream='secondary',candidate_id=row['candidate_id'],expected_epoch=0)
         self.engine.set_context.assert_called_once_with('John','3','19')
         with self.assertRaises(ValueError):self.inbox.send(identity)
 

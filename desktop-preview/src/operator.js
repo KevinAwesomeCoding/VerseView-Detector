@@ -10,11 +10,26 @@
   function render(s){
     const op=s.session?.control?.operator;
     if(!op)return '';
-    return `<section class="vv-panel vv-operator-tools" aria-label="Session tools"><div class="vv-control-actions"><button class="vv-btn" type="button" data-verse="open" ${s.session.control.verses&&s.connection==='connected'?'':'disabled'}>Verse tools</button><button class="vv-btn vv-sessions-launch" type="button" data-operator="open" ${ready(s,'list_sessions')?'':'disabled'}><strong>Saved sessions</strong><span class="vv-caption">${s.session.control.recovery?.status==='available'?'Recovery available':op.saved?'Latest session saved':'Browse sessions'}</span></button><button class="vv-btn" type="button" data-operator="worship" aria-pressed="${op.worship}" ${ready(s,'set_worship')&&!pending?'':'disabled'}>Worship ${op.worship?'on':'off'}</button><button class="vv-btn" type="button" data-operator="pin" aria-pressed="${pinned}">Always on top ${pinned?'on':'off'}</button><button class="vv-btn" type="button" data-operator="save" ${ready(s,'save_session')&&!pending?'':'disabled'}>Save session</button></div>${op.worship?'<p class="vv-caption">Worship is on. Speech and detected references stay here; new verses are not sent to VerseVIEW.</p>':''}<p class="vv-caption" role="status">${escape(notice||op.message)}</p>${op.saved?`<p class="vv-caption">Saved ${escape(new Date(op.saved.saved_at).toLocaleString())}</p>`:''}</section>`;
+    const message=notice||op.message||(op.worship?'Worship is on. Speech continues; new verses are not sent to VerseVIEW.':'');
+    return message?`<p class="vv-caption vv-operator-notice" role="status">${escape(message)}</p>`:'';
   }
-  function safety(s){
+  function header(s){
+    const op=s.session?.control?.operator;
+    return `<button class="vv-btn" type="button" data-operator="worship" aria-pressed="${op?.worship===true}" ${op&&ready(s,'set_worship')&&!pending?'':'disabled'}>Worship ${op?.worship?'on':'off'}</button><button class="vv-btn" type="button" data-operator="pin" aria-pressed="${pinned}">Always on top ${pinned?'on':'off'}</button><button class="vv-btn" type="button" data-operator="save" ${ready(s,'save_session')&&!pending?'':'disabled'}>Save session</button>`;
+  }
+  function navigation(s,mark=''){
+    const op=s.session?.control?.operator,recovery=s.session?.control?.recovery;
+    const label=['available','invalid'].includes(recovery?.status)?'Recovery needs a choice':op?.saved?.saved_at?`Saved ${new Date(op.saved.saved_at).toLocaleTimeString()}`:op?'Browse sessions':'Prepare speech setup to browse';
+    return `<button type="button" class="vv-sessions-launch" data-operator="open" aria-label="Saved sessions" aria-haspopup="dialog" ${ready(s,'list_sessions')?'':'disabled'}>${mark}<span class="vv-sessions-nav-text">Saved sessions<small>${escape(label)}</small></span></button>`;
+  }
+  function recoveryNotice(s){
+    const recovery=s.session?.control?.recovery;
+    if(!['available','invalid'].includes(recovery?.status))return '';
+    return `<div class="vv-recovery-prompt" role="status"><span>${recovery.status==='invalid'?'Saved session needs attention.':'Saved session available.'} Choose Resume or Start new before listening.</span><button type="button" class="vv-btn" data-operator="recovery" ${ready(s,'list_sessions')?'':'disabled'}>Choose session</button></div>`;
+  }
+  function safety(s,showWorship=true){
     const op=s.session?.control?.operator;if(!op)return '';
-    return `${op.worship?'<span class="vv-badge">Worship on</span>':''}<button class="vv-btn vv-emergency" type="button" data-operator="emergency" ${ready(s,'emergency_save')?'':'disabled'}>${op.emergency&&op.busy?'Stopping & saving…':'Emergency Stop & Save'}</button>`;
+    return `${op.worship&&showWorship?'<span class="vv-badge">Worship on</span>':''}<button class="vv-btn vv-emergency" type="button" data-operator="emergency" ${ready(s,'emergency_save')?'':'disabled'}>${op.emergency&&op.busy?'Stopping & saving…':'Emergency Stop & Save'}</button>`;
   }
   async function send(action,value={}){
     if(pending&&action!=='emergency_save')return;
@@ -47,7 +62,7 @@
   }
   function open(button){
     opener=button;
-    if(!dialog){dialog=document.createElement('dialog');dialog.className='vv-session-dialog';dialog.setAttribute('aria-labelledby','vv-sessions-title');root.append(dialog);dialog.addEventListener('close',()=>{signature='';opener?.focus();});}
+    if(!dialog){dialog=document.createElement('dialog');dialog.className='vv-session-dialog';dialog.setAttribute('aria-labelledby','vv-sessions-title');root.append(dialog);dialog.addEventListener('close',()=>{signature='';const target=opener?.isConnected&&opener.getClientRects().length?opener:[...root.querySelectorAll('[data-operator="open"]')].find(b=>!b.disabled&&b.getClientRects().length);target?.focus();});}
     signature='';dialog.showModal();sync();dialog.querySelector('[autofocus]')?.focus();send('list_sessions',{page:0});
   }
   root.addEventListener('preview:observer',sync);
@@ -55,7 +70,7 @@
   root.addEventListener('click',async event=>{
     const button=event.target.closest('[data-operator]');if(!button||button.disabled)return;
     const action=button.dataset.operator,s=get(),op=s.session?.control?.operator;
-    if(action==='open'){open(button);return;}
+    if(action==='open'||action==='recovery'){open(button);return;}
     if(action==='close'){dialog.close();return;}
     if(action==='pin'){
       try{pinned=(await window.verseviewDesktop.setAlwaysOnTop(!pinned)).alwaysOnTop;notice='';}catch(error){notice=error.message;}refresh();return;
@@ -69,5 +84,5 @@
     if(action==='resume'&&op.library.selected)send('resume_saved',{record_id:op.library.selected.id,record_revision:op.library.selected.revision});
   });
   window.verseviewDesktop?.windowState?.().then(value=>{pinned=value.alwaysOnTop===true;refresh();}).catch(()=>{});
-  window.operatorTools=Object.freeze({render,safety});
+  window.operatorTools=Object.freeze({render,safety,header,navigation,recoveryNotice});
 })();

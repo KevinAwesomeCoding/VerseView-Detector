@@ -9,7 +9,9 @@ const values = { language: 'English', stt_engine: 'deepgram', dual_stt_enabled: 
   bible_translation: 'KJV', remote_url: 'http://127.0.0.1:50010/control.html' };
 test('settings boundary allows only typed non-secret fields', () => {
   assert.deepEqual(policy.validatePatch({ mic_index: 2, dual_stt_enabled: true }), { mic_index: 2, dual_stt_enabled: true });
-  for (const patch of [{ api_key: 'private' }, { manual_confirm: false }, { mic_index: true }, { mic_index: -1 },
+  assert.deepEqual(policy.validatePatch({confidence:.9,manual_confirm:false,verify:true,verse_interrupt:true,spoken_numeral_mode:true,smart_amen:false}),
+    {confidence:.9,manual_confirm:false,verify:true,verse_interrupt:true,spoken_numeral_mode:true,smart_amen:false});
+  for (const patch of [{ api_key: 'private' }, { manual_confirm: 'false' }, { confidence: NaN }, { confidence: .49 }, { confidence: true }, { confidence: 1.01 }, { mic_index: true }, { mic_index: -1 },
     { changes: {} }, { language: [] }, { stt_engine: 'unknown' }, { bible_translation: 'bad' }]) {
     assert.throws(() => policy.validatePatch(patch));
   }
@@ -66,4 +68,11 @@ test('running, stale, read-only and changed settings reject submission without w
   f.session.control.actions = ['save_settings']; update.revision = 'd'.repeat(32);
   await assert.rejects(f.client.submit(f.session.session_id, 'save_settings', undefined, update));
   assert.deepEqual(fs.readdirSync(f.inbox), []);
+});
+
+test('watcher settings expose setup while Off and strictly bound developer tuning',()=>{
+ assert.deepEqual(policy.validatePatch({watcher_enabled:false,watcher_provider:'local',watcher_window_lines:12}),{watcher_enabled:false,watcher_provider:'local',watcher_window_lines:12});
+ for(const value of [{watcher_enabled:'yes'},{watcher_provider:'bad'},{watcher_batch_interval:0},{watcher_cooldown:NaN},{watcher_window_lines:1.5},{watcher_passive_confidence:1.1}])assert.throws(()=>policy.validatePatch(value));
+ const decoded=policy.decode({revision:'a'.repeat(32),devices:[],values:{...values,watcher_enabled:false,watcher_provider:'local',watcher_api_key:'PRIVATE'}});
+ assert.equal(decoded.values.watcher_provider,'local');assert.equal(decoded.values.watcher_enabled,false);assert.equal(JSON.stringify(decoded).includes('PRIVATE'),false);
 });

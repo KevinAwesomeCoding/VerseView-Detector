@@ -2035,6 +2035,7 @@ full_sermon_transcript_secondary = ""  # clean secondary-only buffer
 # callback was supplied.
 _verse_watcher: "ContextualVerseWatcher | None" = None
 WATCHER_SUGGESTION_CALLBACK = None
+WATCHER_REQUIRE_APPROVAL = False
 
 
 def _watcher_clients_for_provider(provider: str):
@@ -2079,7 +2080,8 @@ def _handle_watcher_suggestion(sug) -> None:
     """on_suggestion sink for the ContextualVerseWatcher (runs on the engine
     asyncio loop thread).
 
-    • AUTO_SUGGEST → present immediately through the SAME pathway the existing
+    • Desktop approval-only mode forwards all advice without presenting it.
+    • Legacy AUTO_SUGGEST → present immediately through the SAME pathway the existing
       LLM fallback uses (deliver_verse → controller.send_verse). This is
       independent of the GUI, so auto-presentation still works even with no
       Suggestions panel attached.
@@ -2093,6 +2095,7 @@ def _handle_watcher_suggestion(sug) -> None:
         if suggestion_epoch is not None and suggestion_epoch != _delivery_epoch: return
 
         if (WatcherStatus is not None
+                and not WATCHER_REQUIRE_APPROVAL
                 and sug.status == WatcherStatus.AUTO_SUGGEST
                 and ref):
             ctrl = _controller
@@ -2143,6 +2146,12 @@ def get_watcher_status() -> dict:
         }
     try:
         st = w.status()
+        st["approval_only"] = WATCHER_REQUIRE_APPROVAL
+        st["effective_route"] = "free-profile" if _free_cloud_router is not None else st.get("provider", "")
+        if _free_cloud_router is not None:
+            kind = _free_cloud_router.snapshot().get("watcher", {}).get("kind")
+            if kind in ("rate", "quota", "budget"): st["cycle_state"] = "rate_limited" if kind == "rate" else "budget_limited"
+            elif kind in ("auth", "entitlement"): st["cycle_state"] = "configuration_required"
         st["active"] = True
         return st
     except Exception as e:
@@ -2246,8 +2255,8 @@ def check_smart_amen(text, controller):
         if pos == -1:
             continue
 
-        # (a) Position check: keyword must appear in the last 60% of the text
-        if text_len > 0 and pos < text_len * 0.60:
+        # Measure the phrase end, so a standalone "Let us pray" is eligible too.
+        if text_len > 0 and pos + len(kw) < text_len * 0.60:
             logger.debug(f"🙏 Smart Amen suppressed: '{kw}' too early in text (pos {pos}/{text_len})")
             continue
 
@@ -2265,13 +2274,19 @@ def check_smart_amen(text, controller):
         _cancel_smart_amen_timer()
         logger.info(f"🙏 Smart Amen armed (2.5s debounce) by phrase: '{kw}'")
 
+        epoch = _delivery_epoch
         def _do_clear(ctrl=controller, keyword=kw):
             global _smart_amen_timer
+            if _smart_amen_timer is not timer:
+                return
             _smart_amen_timer = None
+            if epoch != _delivery_epoch or _shutdown_flag.is_set() or not SMART_AMEN_ENABLED:
+                return
             logger.info(f"🙏 Smart Amen triggered: closing presentation (keyword: '{keyword}')")
             ctrl.close_presentation()
 
-        _smart_amen_timer = threading.Timer(2.5, _do_clear)
+        timer = threading.Timer(2.5, _do_clear)
+        _smart_amen_timer = timer
         _smart_amen_timer.daemon = True
         _smart_amen_timer.start()
         return True
@@ -2412,33 +2427,40 @@ async def live_points_loop(interval=90):
 
 
 # ── SERMON SUMMARY  (Mistral → Cerebras → Groq) ──────────────────────────────
-def generate_sermon_summary():
+def generate_sermon_summary(snapshot=None, *, notify=True, strict=False):
     global full_sermon_transcript, full_sermon_transcript_secondary, verses_cited, LLM_ENABLED
     global groq_client, cerebras_client, mistral_client
 
     primary, secondary, cited = (full_sermon_transcript,
                                  full_sermon_transcript_secondary, tuple(verses_cited))
 
+    if snapshot is not None:
+        primary, secondary, cited = snapshot['transcript'], snapshot['transcript_secondary'], tuple(snapshot['verses_cited'])
+    def unavailable(message):
+        if strict: raise ValueError('Sermon summary unavailable or failed')
+        return message
+
     if not LLM_ENABLED or not _role_has_llm("summary", mistral_client, cerebras_client, groq_client):
         if _free_cloud_router:
-            return '⚠️ Summary unavailable: ' + _free_cloud_router.snapshot().get('summary', {}).get('message', 'Check free provider settings.')
-        return "⚠️ LLM disabled — add a Mistral, Cerebras, or Groq API key to generate summaries."
+            return unavailable('⚠️ Summary unavailable: ' + _free_cloud_router.snapshot().get('summary', {}).get('message', 'Check free provider settings.'))
+        return unavailable("⚠️ LLM disabled — add a Mistral, Cerebras, or Groq API key to generate summaries.")
 
-    if len(primary.strip()) < 100:
-        return "⚠️ Transcript is too short to generate a meaningful summary."
+    if len((primary + secondary).strip()) < 100:
+        return unavailable("⚠️ Transcript is too short to generate a meaningful summary.")
 
     import datetime
     today_str = datetime.datetime.now().strftime("%B %d, %Y  ·  %I:%M %p")
 
     verse_list = "\n".join([f"- {v}" for v in cited]) if cited else "None detected"
 
+    languages = snapshot.get("stream_languages", {}) if snapshot is not None else {}
     # ── Dual-transcript prompt ──────────────────────────────────────────────
     has_secondary = bool(secondary.strip())
     if has_secondary:
         transcript_section = (
-            f"PRIMARY TRANSCRIPT ({DEEPGRAM_LANGUAGE.upper() if not USE_SARVAM else 'Malayalam/translated'}):\n"
+            f"PRIMARY TRANSCRIPT ({languages.get('primary') or (DEEPGRAM_LANGUAGE.upper() if not USE_SARVAM else 'Malayalam/translated')}):\n"
             f"{primary}\n\n"
-            f"SECONDARY TRANSCRIPT ({SECONDARY_LANGUAGE.upper() if SECONDARY_LANGUAGE else 'secondary'}):\n"
+            f"SECONDARY TRANSCRIPT ({languages.get('secondary') or (SECONDARY_LANGUAGE.upper() if SECONDARY_LANGUAGE else 'secondary')}):\n"
             f"{secondary}\n\n"
             "Both transcripts are from the SAME sermon captured by two parallel STT engines. "
             "Synthesize the most accurate notes by using the best of both transcripts — "
@@ -2552,20 +2574,46 @@ def generate_sermon_summary():
 
         summary = fetch_summary()
         if not summary:
-            return "⚠️ Summary failed: All LLM clients failed or none available."
+            return unavailable("⚠️ Summary failed: All LLM clients failed or none available.")
 
         verse_str = "\n".join([f"- {v}" for v in cited])
         if verse_str:
             summary += "\n\n### Verses Cited:\n" + verse_str
 
         logger.info("✅ Sermon Summary generated!")
-        send_sermon_notes_to_discord(summary)
+        if notify: send_sermon_notes_to_discord(summary)
         return summary
     except CloudError as e:
-        return f'⚠️ Summary stopped: {e}'
+        return unavailable(f'⚠️ Summary stopped: {e}')
     except Exception as e:
         logger.error(f"❌ Failed to generate summary: {e}")
-        return f"Error generating summary: {e}"
+        return unavailable(f"Error generating summary: {e}")
+
+
+def reset_desktop_memory():
+    """Called only after owned engine work stops and a recoverable save succeeds."""
+    set_delivery_mode(worship=WORSHIP_MODE, hold=DELIVERY_HOLD)
+    clear_sermon_buffer()
+    _session_verse_high_water.clear()
+    _gate_pending.clear()
+    _exit_scripture_read_mode(reason='memory-clear')
+    values = dict(full_sermon_transcript_secondary='', current_book=None, current_chapter=None, current_verse=None,
+        _sermon_anchor_book=None, _sermon_anchor_chapter=None, _sermon_anchor_verse=None,
+        _xref_anchor_book=None, _xref_anchor_chapter=None, _xref_anchor_verse=None, _xref_anchor_time=0.,
+        _last_presented_book_chapter=None, _last_presented_time=0., _last_presented_verse_num=0,
+        _last_presented_verse_book_chap='', _manual_context_set_time=0., _quarantine_transcript_offset=0,
+        _advance_transcript_offset=0, _llm_last_key=None, _llm_last_time=0., _llm_last_dispatch_len=0,
+        _last_explicit_ref_time=0., _last_book_context_book=None, _last_book_context_hash=None,
+        _last_book_context_time=0., _range_latch_active=False, _range_latch_ref=None,
+        _queue_last_check_time=0., _queue_last_excerpt='', _vtc_last_check_time=0., _vtc_last_excerpt='',
+        _onwards_last_check_time=0., _onwards_last_excerpt='', _last_transcript_time=0.)
+    globals().update(values)
+    controller = _controller
+    if controller is not None:
+        controller.history.clear()
+        controller.last_sent = controller.pending_verse = None
+        controller.last_time = 0
+    session_log_stream.seek(0); session_log_stream.truncate(0)
 
 
 def clear_sermon_buffer():
@@ -2805,6 +2853,7 @@ def configure(
     gcp_interim_flush=4,
     malayalam_transliteration=False,
     watcher_suggestion_callback=None,
+    watcher_require_approval=False,
     watcher_enabled=False,
     watcher_provider="groq",
     watcher_batch_interval=5.0,
@@ -2839,6 +2888,7 @@ def configure(
     free_cloud_config=None,
     cloudflare_api_token='',
     cloudflare_account_id='',
+    begin_observer_session=True,
 ):
     global DEEPGRAM_API_KEY, GROQ_API_KEY, GEMINI_API_KEY, CEREBRAS_API_KEY, MISTRAL_API_KEY, SARVAM_API_KEY
     global SARVAM_API_KEY_BACKUP, _sarvam_using_backup
@@ -3303,8 +3353,9 @@ def configure(
     # touched by feed()/note_fastpath_reference() (both guard on `is not None`),
     # no run() task is created in main(), and no LLM ever fires. The GUI panel
     # simply stays empty. The feature also stays inert if the module is missing.
-    global _verse_watcher, WATCHER_SUGGESTION_CALLBACK
+    global _verse_watcher, WATCHER_SUGGESTION_CALLBACK, WATCHER_REQUIRE_APPROVAL
     WATCHER_SUGGESTION_CALLBACK = watcher_suggestion_callback
+    WATCHER_REQUIRE_APPROVAL = bool(watcher_require_approval)
     _verse_watcher = None
     if ContextualVerseWatcher is not None and watcher_enabled:
         try:
@@ -3345,11 +3396,12 @@ def configure(
     else:
         logger.info("🔭 Contextual Verse Watcher : OFF (disabled in settings)")
 
-    _observer_begin({"streams": {
-        "primary": {"language": PRIMARY_LANGUAGE, "provider": _stream_engine(False), "enabled": True},
-        "secondary": {"language": SECONDARY_LANGUAGE, "provider": _stream_engine(True),
-                      "enabled": bool(DUAL_STT_ENABLED and SECONDARY_LANGUAGE)}},
-        "bible_translation": BIBLE_TRANSLATION})
+    if begin_observer_session:
+        _observer_begin({"streams": {
+            "primary": {"language": PRIMARY_LANGUAGE, "provider": _stream_engine(False), "enabled": True},
+            "secondary": {"language": SECONDARY_LANGUAGE, "provider": _stream_engine(True),
+                          "enabled": bool(DUAL_STT_ENABLED and SECONDARY_LANGUAGE)}},
+            "bible_translation": BIBLE_TRANSLATION})
 
 
 # ── CONTEXT TRACKING ─────────────────────────────────────────────────────────
@@ -3630,7 +3682,7 @@ def set_delivery_mode(*, worship, hold=False):
         _clear_verse_queue('Operator delivery mode changed')
     _stop_onwards()
     if _verse_watcher is not None: _verse_watcher.reset()
-    if _smart_amen_timer: _smart_amen_timer.cancel()
+    _cancel_smart_amen_timer()
 
 
 def deliver_verse(ref: str, controller, bypass_cooldown=False, confidence=1.0, source="UNKNOWN", stream=None, candidate_id=None, expected_epoch=None):
@@ -4860,6 +4912,7 @@ class VerseController:
     def connect(self):
         self.box = None
         self.btn = None
+        self.connection_failure = 'browser'
         try:
             from selenium import webdriver
             from selenium.webdriver.chrome.service import Service
@@ -4902,6 +4955,7 @@ class VerseController:
                 service=Service(_driver_path),
                 options=options,
             )
+            self.connection_failure = 'remote'
             self.driver.get(REMOTE_URL)
             wait     = WebDriverWait(self.driver, 15)
 
@@ -4920,6 +4974,7 @@ class VerseController:
             # ── Locate Bible reference input ──
             # Primary: correct V10/V11 ID from the actual VerseVIEW DOM.
             # Fallback: legacy underscored ID used by older builds / test pages.
+            self.connection_failure = 'controls'
             box = None
             for _box_id in ("remotebibleRefID", "remote_bibleRefID"):
                 try:
@@ -4959,6 +5014,7 @@ class VerseController:
                 raise RuntimeError("PRESENT button unavailable")
 
             self.btn = btn
+            self.connection_failure = ''
             logger.info(f"Connected to VerseView (headless mode) — version: {self.vv_version}")
             return True
         except Exception as e:
@@ -5027,36 +5083,14 @@ class VerseController:
             if ":" not in ref:
                 _parts = ref.split()
                 if len(_parts) >= 2:
-                    _hw = _session_verse_high_water.get(ref)
-                    if _hw:
-                        # We've already been tracking verses in this chapter this session —
-                        # upgrade to the last known verse so display resumes correctly.
-                        # Validate first — if the upgraded ref is out of range, skip display
-                        # rather than sending a bad ref that will cause the browser to alert.
-                        _upgraded = f"{ref}:{_hw}"
-                        if _reject_verse_out_of_range(_upgraded):
-                            logger.warning(
-                                f"⚠️ Skipping chapter resume — hw verse {_hw} is out of range for {ref}"
-                            )
-                            new_book    = " ".join(_parts[:-1])
-                            new_chapter = _parts[-1]
-                            current_book    = new_book
-                            current_chapter = new_chapter
-                            current_verse   = None
-                            event("chapter_context", "SUPPRESSED", "Chapter resume is out of range")
-                            return False
-                        ref = _upgraded
-                        logger.info(f"📍 Resuming: chapter ref → {ref} (last known verse this session)")
-                    else:
-                        # Pure chapter-only: just update context, skip display
-                        new_book    = " ".join(_parts[:-1])
-                        new_chapter = _parts[-1]
-                        current_book    = new_book
-                        current_chapter = new_chapter
-                        current_verse   = None
-                        logger.info(f"📌 Chapter context set (no display): {new_book} {new_chapter}")
-                        event("chapter_context", "SUPPRESSED", "Chapter-only reference updates context without display")
-                        return False
+                    # A chapter carries no verse evidence. In particular, shorthand
+                    # misparsed as a chapter must never resume a remembered verse.
+                    current_book = " ".join(_parts[:-1])
+                    current_chapter = _parts[-1]
+                    current_verse = None
+                    logger.info(f"📌 Chapter context set (no display): {current_book} {current_chapter}")
+                    event("chapter_context", "SUPPRESSED", "Chapter-only reference updates context without display")
+                    return False
 
             # ── MANUAL CONFIRMATION ──
             if confidence < CONFIDENCE_THRESHOLD and not bypass_cooldown:
@@ -5554,6 +5588,9 @@ def _reject_verse_out_of_range(ref: str) -> bool:
         chap_num    = int(chap_str)
         verse_num   = int(verse_str.split()[0])
 
+        if str(BIBLE_TRANSLATION).lower() == "kjv":
+            from bible_metadata import KJV_CHAPTER_SIZES
+            _CHAPTER_VERSE_COUNTS = {**KJV_CHAPTER_SIZES, "psalms": KJV_CHAPTER_SIZES["psalm"]}
         counts = _CHAPTER_VERSE_COUNTS.get(book_key)
         if counts and 1 <= chap_num <= len(counts):
             max_verse = counts[chap_num - 1]
@@ -5871,6 +5908,9 @@ def _is_structurally_impossible(ref: str, text: str) -> bool:
         "titus":         [16,15,15],
     }
 
+    if str(BIBLE_TRANSLATION).lower() == "kjv":
+        from bible_metadata import KJV_CHAPTER_SIZES
+        _CHAPTER_VERSE_COUNTS = {**KJV_CHAPTER_SIZES, "psalms": KJV_CHAPTER_SIZES["psalm"]}
     counts = _CHAPTER_VERSE_COUNTS.get(book_key)
 
     # 1. Chapter exceeds total chapters for the book
@@ -7343,7 +7383,7 @@ def create_sarvam_transcript_handler(controller, is_secondary: bool, tag: str, p
 
         _observer_transcript_id = _observer_emit(
             "transcript", stream="secondary" if is_secondary else "primary",
-            text=sentence, is_final=is_final)
+            text=sentence, is_final=is_final, text_kind='transliteration' if transliteration else 'transcription')
 
         # Translate raw Malayalam/Manglish → English for verse detection.
         english_text = translate_to_english(sentence)
@@ -7590,7 +7630,7 @@ def build_stt_provider(engine_name: str, controller, is_secondary: bool = False)
             "api_key_backup": SARVAM_API_KEY_BACKUP,
             "on_key_switch":  _mark_sarvam_backup_active,
             "language_code":  SARVAM_LANGUAGE,
-            "transliteration": MALAYALAM_TRANSLITERATION,
+            "transliteration": MALAYALAM_TRANSLITERATION and ((SECONDARY_LANGUAGE if is_secondary else PRIMARY_LANGUAGE) == "ml"),
             "rate":           RATE,
             "chunk":          CHUNK,
             "tag":            tag,
@@ -7649,6 +7689,42 @@ def build_stt_provider(engine_name: str, controller, is_secondary: bool = False)
 
 
 # ── MAIN ──────────────────────────────────────────────────────────────────────
+async def _connect_verseview(controller):
+    """One bounded connection sequence; public progress contains no raw errors."""
+    connected = False
+    for attempt in range(1, 6):
+        logger.info(f"Connection attempt {attempt}/5...")
+        if stop_event.is_set():  # type: ignore
+            logger.info("Stop requested — aborting connection.")
+            _observer_emit('remote_connection', status='cancelled', attempt=attempt)
+            _observer_emit("state", state="stopped")
+            return False
+        _observer_emit('remote_connection', status='connecting', attempt=attempt)
+        success = controller.connect()
+        if stop_event.is_set():  # type: ignore
+            _observer_emit('remote_connection', status='cancelled', attempt=attempt)
+            _observer_emit("state", state="stopped")
+            return False
+        if success:
+            connected = True
+            _observer_emit('remote_connection', status='connected', attempt=attempt)
+            break
+        if attempt < 5:
+            logger.warning("Retrying in 5s...")
+            _observer_emit('remote_connection', status='retrying', attempt=attempt,
+                           reason=getattr(controller, 'connection_failure', ''), retry_seconds=5)
+            await asyncio.sleep(5)
+
+    if not connected:
+        logger.error("Could not connect to VerseView after 5 attempts.")
+        _observer_emit('remote_connection', status='failed', attempt=5,
+                       reason=getattr(controller, 'connection_failure', ''))
+        _observer_emit("state", state="connection_failed")
+        return False
+
+    return True
+
+
 async def main():
     global stop_event, engine_loop, _controller
     _observer_emit("state", state="starting")
@@ -7685,25 +7761,7 @@ async def main():
     # This prevents "session not created" errors when Chrome auto-updates.
     reconcile_chromedriver_cache()
 
-    for attempt in range(1, 6):
-        logger.info(f"Connection attempt {attempt}/5...")
-        if stop_event.is_set():  # type: ignore
-            logger.info("Stop requested — aborting connection.")
-            _observer_emit("state", state="stopped")
-            return
-        if _controller.connect():
-            connected = True
-            break
-        if stop_event.is_set():  # type: ignore
-            _observer_emit("state", state="stopped")
-            return
-        if attempt < 5:
-            logger.warning("Retrying in 5s...")
-            await asyncio.sleep(5)
-
-    if not connected:
-        logger.error("Could not connect to VerseView after 5 attempts.")
-        _observer_emit("state", state="connection_failed")
+    if not await _connect_verseview(_controller):
         return
 
     # ── Start Discord-bot bridge (port 50011) ─────────────────────────────────

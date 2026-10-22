@@ -9,12 +9,13 @@ fs.mkdirSync(output, { recursive: true });
 (async () => {
   if (!process.env.OBSERVER_PYTHON) throw new Error('Set OBSERVER_PYTHON to the approved existing Python');
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'vv-settings-ui-'));
-  let application, fixture, lines, stderr = '';
+  let application, fixture, lines, testProfile, stderr = '';
   const errors = [], checks = [];
   const executablePath = process.env.PREVIEW_EXECUTABLE || require('electron');
   async function launch() {
     application = await _electron.launch({ executablePath, args: process.env.PREVIEW_EXECUTABLE ? [] : [root],
-      env: { ...process.env, VV_PREVIEW_TEST_PROFILE: '1', VV_OBSERVER_TEST_DIRECTORY: directory } });
+      env: { ...process.env, VV_PREVIEW_TEST_PROFILE: '1', VV_PREVIEW_TEST_PROFILE_TAG: `detection-settings-${process.pid}`, VV_OBSERVER_TEST_DIRECTORY: directory } });
+    testProfile=await application.evaluate(({app})=>app.getPath('userData'));
     const page = await application.firstWindow(); await enableDeveloper(page);
     page.on('pageerror', error => errors.push(error.message));
     return page;
@@ -49,6 +50,12 @@ fs.mkdirSync(output, { recursive: true });
     await field('secondary_language').selectOption('en');
     await field('secondary_stt_engine').selectOption('deepgram');
     await field('bible_translation').selectOption('WEB');
+    await field('confidence').fill('90');
+    await field('manual_confirm').uncheck();
+    await field('verify').uncheck();
+    await field('verse_interrupt').check();
+    await field('spoken_numeral_mode').check();
+    await field('smart_amen').uncheck();
     await field('remote_url').fill('file:///tmp/invalid');
     assert.equal(await page.locator('[data-save-settings]').isEnabled(), false);
     await field('remote_url').fill(target);
@@ -66,6 +73,9 @@ fs.mkdirSync(output, { recursive: true });
     const saved = await page.evaluate(() => window.previewShell.getObserver().session.control.settings.values);
     assert.equal(saved.language, 'Malayalam'); assert.equal(saved.stt_engine, 'gcp');
     assert.equal(saved.secondary_language, 'en'); assert.equal(saved.remote_url, target);
+    assert.equal(saved.confidence,.9);assert.equal(saved.manual_confirm,false);assert.equal(saved.verify,false);
+    assert.equal(saved.verse_interrupt,true);assert.equal(saved.spoken_numeral_mode,true);assert.equal(saved.smart_amen,false);
+    checks.push('All six detection fields save through the typed boundary, production GUI binding and private settings store');
     checks.push('Typed stopped-engine settings save reaches the production GUI binding with fake widgets and temporary disk settings');
     checks.push('Language/provider choices, invalid URL blocking, and draft/focus preservation during incoming events');
 
@@ -113,7 +123,7 @@ fs.mkdirSync(output, { recursive: true });
       for (const layout of ['studio', 'focus']) {
         await page.locator('#preview-layout').selectOption(layout);
         for (const theme of ['sage', 'midnight', 'glass', 'galaxy', 'aurora', 'ember']) {
-          await page.locator('[data-setting="theme"]').selectOption(theme);
+          await page.locator(`[data-theme-choice="${theme}"]`).click();
           await page.locator('[data-reload-settings]').scrollIntoViewIfNeeded();
           const bounds = await page.locator('#preview-surface').evaluate(surface => ({ client: surface.clientWidth, scroll: surface.scrollWidth }));
           assert.ok(bounds.scroll <= bounds.client + 1, JSON.stringify({ width, layout, theme, bounds }));
@@ -134,11 +144,34 @@ fs.mkdirSync(output, { recursive: true });
     await page.waitForFunction(() => !!window.previewShell.getObserver().session?.control?.settings);
     await navSettings();
     assert.equal(await field('mic_index').inputValue(), '2');
+    assert.equal(await field('confidence').inputValue(),'90');assert.equal(await field('spoken_numeral_mode').isChecked(),true);
     assert.equal(await field('remote_url').inputValue(), target);
     assert.equal(await page.locator('[data-save-settings]').isEnabled(), false);
     assert.equal((await page.content()).includes('private-key-never-export'), false);
     assert.equal(await page.evaluate(() => JSON.stringify(window.previewShell.getObserver()).includes('private-key-never-export')), false);
     checks.push('Saved settings survive dashboard restart; samples remain separate; fixture credentials never enter the renderer');
+    await page.evaluate(()=>window.previewShell.setDeveloper(false));
+    await navSettings();
+    assert.equal(await field('manual_confirm').isVisible(),true);
+    assert.equal(await field('spoken_numeral_mode').isVisible(),true);
+    await field('confidence').fill('49');
+    assert.equal(await page.locator('[data-save-settings]').isEnabled(),false);
+    await field('confidence').fill('90');
+    await page.locator('.vv-detection-settings').screenshot({path:path.join(output,'consumer-detection-settings.png')});
+    checks.push('Detection controls are available in normal consumer Settings; invalid confidence is blocked; saved values survive restart');
+    await page.locator('#preview-surface').getByRole('button',{name:'Live',exact:true}).filter({visible:true}).click();
+    fixture.stdin.write('remote-fail\n');
+    await page.waitForFunction(()=>window.previewShell.getObserver().session?.remote_connection?.status==='failed');
+    assert.match(await page.locator('[aria-label="VerseVIEW connection"]').textContent(),/after 5 attempts/);
+    assert.equal(await page.getByRole('button',{name:'Retry connection',exact:true}).isEnabled(),true);
+    await page.locator('[data-connection-history] summary').click();
+    assert.equal(await page.locator('[data-connection-history] li').count(),10);
+    fixture.stdin.write('noise\n');
+    await page.waitForTimeout(900);
+    assert.equal(await page.locator('[data-connection-history]').evaluate(e=>e.open),true);
+    await page.screenshot({path:path.join(output,'consumer-remote-failure.png')});
+    checks.push('Five synthetic connection attempts and final failure are visible in normal Live; explicit Retry stays usable; activity remains expanded through transcript events');
+    await navSettings();
     await page.locator('.vv-detector-settings h2').evaluate(element => {
       const range = document.createRange(); range.selectNodeContents(element);
       const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range);
@@ -146,7 +179,7 @@ fs.mkdirSync(output, { recursive: true });
     fixture.stdin.end('finish\n');
     await page.waitForFunction(() => window.previewShell.getObserver().connection === 'stale');
     assert.equal(await field('remote_url').isEnabled(), false);
-    assert.equal(await page.evaluate(() => window.getSelection().toString()), 'Speech and VerseVIEW settings');
+    assert.equal(await page.evaluate(() => window.getSelection().toString()), 'Microphone and VerseVIEW');
     await page.evaluate(() => window.getSelection().removeAllRanges());
     checks.push('Closed/stale backend disables editing even while settings text is selected');
     assert.deepEqual(errors, []);
@@ -167,5 +200,6 @@ fs.mkdirSync(output, { recursive: true });
       if (fixture.exitCode === null) fixture.kill('SIGTERM');
     }
     fs.rmSync(directory, { recursive: true, force: true });
+    if(testProfile&&path.basename(testProfile)===`detection-settings-${process.pid}`&&path.basename(path.dirname(testProfile))==='QA')fs.rmSync(testProfile,{recursive:true,force:true});
   }
 })().catch(error => { console.error(error); process.exitCode = 1; });

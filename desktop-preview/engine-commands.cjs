@@ -8,7 +8,7 @@ const { randomUUID } = require('node:crypto');
 class EngineCommands {
   constructor(reader, { clock = Date.now } = {}) { this.reader = reader; this.clock = clock; }
   async submit(sessionId, action, candidateId, settingsChange, recoveryRevision, suggestionId, outlineChange, operatorChange) {
-    if (!['start', 'stop', 'approve', 'reject', 'save_settings', 'panic', 'restore_session', 'discard_session', 'send_suggestion', 'edit_outline', 'start_bot', 'stop_bot', 'pull_settings', 'list_sessions', 'preview_session', 'resume_saved', 'save_session', 'set_worship', 'emergency_save', 'set_context', 'verse_preview', 'chapter_browse', 'send_reference'].includes(action) || !/^[a-f0-9]{32}$/.test(sessionId || '')) {
+    if (!['start', 'stop', 'approve', 'reject', 'save_settings', 'panic', 'restore_session', 'discard_session', 'send_suggestion', 'edit_outline', 'start_bot', 'stop_bot', 'pull_settings', 'list_sessions', 'preview_session', 'resume_saved', 'save_session', 'set_worship', 'emergency_save', 'set_context', 'verse_preview', 'chapter_browse', 'send_reference', 'preview_suggestion', 'dismiss_suggestion', 'clear_suggestions', 'clear_history', 'grid_preview', 'connection_action', 'generate_notes', 'cancel_notes', 'prepare_export', 'prepare_memory_clear', 'clear_memory'].includes(action) || !/^[a-f0-9]{32}$/.test(sessionId || '')) {
       throw new Error('Invalid detector command');
     }
     if (['approve', 'reject'].includes(action) && (typeof candidateId !== 'string' || !candidateId || candidateId.length > 128)) {
@@ -36,15 +36,40 @@ class EngineCommands {
       if(['list_sessions','preview_session'].includes(action)&&(!Number.isInteger(value.page)||value.page<0||value.page>(action==='list_sessions'?499:8388608)))throw new Error('Invalid session page');
       operatorPayload=value;
     }
-    const verseActions=['set_context','verse_preview','chapter_browse','send_reference'];
+    const verseActions=['set_context','verse_preview','chapter_browse','send_reference','grid_preview'];
     if(verseActions.includes(action)){
       const v=operatorChange||{};
-      const keys=action==='set_context'?['reference','context_revision']:action==='send_reference'?['selection_id']:action==='chapter_browse'?['reference','page']:['reference'];
+      const keys=['set_context','grid_preview'].includes(action)?['reference','context_revision']:action==='send_reference'?['selection_id']:action==='chapter_browse'?['reference','page']:['reference'];
       if(!v||typeof v!=='object'||Array.isArray(v)||Object.keys(v).some(k=>!keys.includes(k)))throw new Error('Invalid verse tool request');
       if(action!=='send_reference'&&(typeof v.reference!=='string'||!v.reference.trim()||v.reference.length>128||v.reference.includes('\0')))throw new Error('Enter a bounded Bible reference');
-      if(action==='set_context'&&!/^[a-f0-9]{32}$/.test(v.context_revision||''))throw new Error('Reload the current context');
+      if(['set_context','grid_preview'].includes(action)&&!/^[a-f0-9]{32}$/.test(v.context_revision||''))throw new Error('Reload the current context');
       if(action==='send_reference'&&!/^[a-f0-9]{32}$/.test(v.selection_id||''))throw new Error('Preview a reference before sending');
       if(action==='chapter_browse'&&(!Number.isInteger(v.page)||v.page<0||v.page>24))throw new Error('Invalid chapter page');
+      operatorPayload=v;
+    }
+    if(['preview_suggestion','dismiss_suggestion','clear_suggestions','clear_history'].includes(action)){
+      const key=action==='clear_history'?'history_revision':action==='clear_suggestions'?'revision':'suggestion_id';
+      const v=operatorChange;
+      if(!v||typeof v!=='object'||Array.isArray(v)||Object.keys(v).length!==1||!/^[a-f0-9]{32}$/.test(v[key]||''))throw new Error('Invalid review action');
+      operatorPayload={[key]:v[key]};
+    }
+    if(action==='connection_action'){
+      const v=operatorChange,ops=['cancel','prepare_atem','prepare_export','import','local_test','local_warm','atem_discover','atem_on','atem_off'];
+      if(!v||typeof v!=='object'||Array.isArray(v)||!ops.includes(v.operation))throw new Error('Invalid connection action');
+      const keys=v.operation==='cancel'?['operation']:['operation','settings_revision',...(['local_test','local_warm'].includes(v.operation)?['role']:['atem_on','atem_off'].includes(v.operation)?['review_id','isolated']:v.operation==='prepare_export'?['include_credentials']:v.operation==='import'?['attachment_id','include_credentials']:[])];
+      if(Object.keys(v).some(k=>!keys.includes(k))||keys.some(k=>!Object.hasOwn(v,k)))throw new Error('Invalid connection fields');
+      for(const k of ['settings_revision','review_id','attachment_id'])if(k in v&&!/^[a-f0-9]{32}$/.test(v[k]||''))throw new Error('Reload the current connection state');
+      if('isolated'in v&&v.isolated!==true)throw new Error('Approve the exact isolated target first');
+      if('include_credentials'in v&&typeof v.include_credentials!=='boolean')throw new Error('Choose credential scope');
+      if('role'in v&&!['verse','outline','summary','watcher'].includes(v.role))throw new Error('Invalid model role');
+      operatorPayload=v;
+    }
+    if(['generate_notes','cancel_notes','prepare_export','prepare_memory_clear','clear_memory'].includes(action)){
+      const v=operatorChange||{};
+      const keys=action==='prepare_export'?['revision','kind']:['generate_notes','clear_memory'].includes(action)?['revision']:[];
+      if(!v||typeof v!=='object'||Array.isArray(v)||Object.keys(v).some(k=>!keys.includes(k))||keys.some(k=>!Object.hasOwn(v,k)))throw new Error('Invalid notes request');
+      if(keys.includes('revision')&&!/^[a-f0-9]{32}$/.test(v.revision||''))throw new Error('Review the latest notes first');
+      if(action==='prepare_export'&&!['notes','transcript','references','all'].includes(v.kind))throw new Error('Invalid export choice');
       operatorPayload=v;
     }
     const snapshot = await this.reader.poll();
@@ -54,7 +79,7 @@ class EngineCommands {
       || this.clock() - Date.parse(session.updated_at) > 6000 || control.state === 'closed') {
       throw new Error('Detector session unavailable; refresh before acting');
     }
-    if (['start', 'stop', 'save_settings', 'panic', 'restore_session', 'discard_session', 'send_suggestion', 'edit_outline', 'start_bot', 'stop_bot', 'pull_settings', 'list_sessions', 'preview_session', 'resume_saved', 'save_session', 'set_worship', 'emergency_save', 'set_context', 'verse_preview', 'chapter_browse', 'send_reference'].includes(action) ? !control.actions.includes(action)
+    if (['start', 'stop', 'save_settings', 'panic', 'restore_session', 'discard_session', 'send_suggestion', 'edit_outline', 'start_bot', 'stop_bot', 'pull_settings', 'list_sessions', 'preview_session', 'resume_saved', 'save_session', 'set_worship', 'emergency_save', 'set_context', 'verse_preview', 'chapter_browse', 'send_reference', 'preview_suggestion', 'dismiss_suggestion', 'clear_suggestions', 'clear_history', 'grid_preview', 'connection_action', 'generate_notes', 'cancel_notes', 'prepare_export', 'prepare_memory_clear', 'clear_memory'].includes(action) ? !control.actions.includes(action)
       : control.state !== 'running' || !control.pending.some(item => item.candidate_id === candidateId)) {
       throw new Error('Action is no longer available');
     }
@@ -86,7 +111,7 @@ class EngineCommands {
       await fs.promises.writeFile(temporary, JSON.stringify(request), { encoding: 'utf8', mode: 0o600, flag: 'wx' });
       await fs.promises.rename(temporary, path.join(directory, `command-${id}.json`));
     } finally { await fs.promises.unlink(temporary).catch(error => { if (error.code !== 'ENOENT') throw error; }); }
-    if (action === 'start') this.reader.commandTransition = { id, pid: session.pid, controlId: control.id,
+    if (['start', 'clear_memory'].includes(action)) this.reader.commandTransition = { id, pid: session.pid, controlId: control.id,
       sessionId, deadline: this.clock() + 12000 };
     // This acknowledges only the local write. Result and engine status arrive through the feed.
     return { id, action, outcome: 'submitted' };

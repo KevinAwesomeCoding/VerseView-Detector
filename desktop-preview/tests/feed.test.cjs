@@ -17,6 +17,16 @@ test('feed location uses native Windows and macOS path conventions', () => {
   assert.equal(feedDirectory({ platform: 'darwin', appData: '/Users/test/Library/Application Support' }),
     '/Users/test/Library/Application Support/VerseView/Observer');
 });
+test('connection status crosses the feed boundary without driver secrets or arbitrary retry counts',()=>{
+  const value=fixture();
+  value.remote_connection={status:'retrying',attempt:2,maximum:999,retry_seconds:999,reason:'remote',timestamp:value.updated_at,url:'SECRET',exception:'PRIVATE'};
+  value.connection_events=Array(20).fill(value.remote_connection);
+  const decoded=decodeSnapshot(value,now);
+  assert.equal(decoded.remote_connection.maximum,5);assert.equal(decoded.remote_connection.retry_seconds,5);
+  assert.equal(decoded.connection_events.length,16);
+  assert.equal(JSON.stringify(decoded).includes('SECRET'),false);assert.equal(JSON.stringify(decoded).includes('PRIVATE'),false);
+  value.remote_connection.attempt=6;assert.equal(decodeSnapshot(value,now).remote_connection,null);
+});
 test('decoder drops extra fields and preserves stream/language/candidate identity', () => {
   const value = fixture();
   value.api_key = 'secret';

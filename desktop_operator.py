@@ -20,6 +20,7 @@ class OperatorTools:
         self.status, self.message, self.saved = 'idle', '', None
         self.pending_restore = None
         self.speech_before = {'primary': '', 'secondary': ''}
+        self.speech_transliterated_before = {'primary': False, 'secondary': False}
         try:
             if self.path.exists():
                 value = json.loads(read_private(self.path))
@@ -48,10 +49,13 @@ class OperatorTools:
                     'status': self.status, 'message': self.message, 'saved': self.saved, 'library': self.library.snapshot()}
 
     def capture(self):
+        if self.pending_restore:
+            return {**self.pending_restore, 'notes': getattr(getattr(self.runtime, 'notes', None), 'result', None).get('text', '') if getattr(getattr(self.runtime, 'notes', None), 'result', None) else self.pending_restore.get('notes', '')}
         raw = self.runtime.session_snapshot()
         if not self.runtime.has_started and self.runtime.recovery.record:
             raw = self.runtime.recovery.record['data']
         speech = dict(self.speech_before)
+        transliterated = dict(self.speech_transliterated_before)
         # Flush the existing bounded journal writer before reading final originals.
         self.runtime.publisher.flush()
         feed = self.runtime.publisher.snapshot() or {}
@@ -65,20 +69,29 @@ class OperatorTools:
                     row = json.loads(line)
                     role = row.get('stream')
                     if role in speech and row.get('is_final') is True and isinstance(row.get('text'), str):
-                        speech[role] += ('\n' if speech[role] else '') + row['text']
+                        manglish = row.get('text_kind') == 'transliteration'
+                        transliterated[role] |= manglish
+                        speech[role] += ('\n' if speech[role] else '') + ('[Provider transliteration] ' if manglish else '') + row['text']
                         if len(speech[role]) > MAX_TEXT: raise RecoveryError('Speech exceeds the session save limit. Previous saves retained.')
-        return {'data': raw, 'outline': self.runtime.outline.snapshot()['text'], 'speech': speech}
+        return {'data': raw, 'outline': self.runtime.outline.snapshot()['text'], 'speech': speech,
+                'speech_transliterated': transliterated,
+                'speech_complete': feed.get('history_available') is not False,
+                'notes': self.runtime.notes.snapshot()['text'] if hasattr(self.runtime, 'notes') else ''}
 
     def prepare_start(self, fresh):
         if self.worker and self.worker.is_alive(): raise RecoveryError('Wait for session saving to finish before starting.')
         self.emergency = False
         if fresh:
             self.speech_before = {'primary': '', 'secondary': ''}
+            self.speech_transliterated_before = {'primary': False, 'secondary': False}
             self.pending_restore = None
         elif self.runtime.has_started and not self.pending_restore:
-            self.speech_before = self.capture()['speech']
+            captured = self.capture()
+            self.speech_before = captured['speech']
+            self.speech_transliterated_before = captured['speech_transliterated']
         if self.pending_restore:
             self.speech_before = dict(self.pending_restore['speech'])
+            self.speech_transliterated_before = dict(self.pending_restore.get('speech_transliterated', {'primary':False,'secondary':False}))
             outline = self.runtime.outline.snapshot()
             self.runtime.outline.edit(outline['revision'], self.pending_restore['outline'])
             self.pending_restore = None
@@ -93,6 +106,7 @@ class OperatorTools:
             if meaningful(current['data']) or current['outline'].strip() or any(current['speech'].values()): self.library.save(current, 'before restore')
         elif self.runtime.recovery.record:
             self.library.save({'data': self.runtime.recovery.record['data']}, 'previous recovery')
+        if hasattr(self.runtime, 'notes'): self.runtime.notes.restore(value.get('notes', ''), value)
         self.runtime.recovery.stage_saved(value['data'])
         self.pending_restore = value
         self.message = 'Session prepared. Press Start listening to resume; nothing was presented.'
@@ -106,6 +120,11 @@ class OperatorTools:
                 self.apply_mode()
                 self.runtime.stop()
                 if hasattr(self.runtime, 'bot'): self.runtime.bot.stop()
+                if hasattr(self.runtime, 'notes') and (self.runtime.notes.busy or self.runtime.notes.pending_auto):
+                    try: self.runtime.notes.cancel()
+                    except Exception:
+                        import logging
+                        logging.getLogger(__name__).exception('Emergency notes cancellation status save failed')
             previous = self.worker
             if previous and previous.is_alive() and not emergency: raise RecoveryError('A session save is already in progress.')
             if self.emergency and self.status == 'stopping' and previous and previous.is_alive(): return

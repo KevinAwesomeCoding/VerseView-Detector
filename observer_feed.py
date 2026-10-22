@@ -63,7 +63,8 @@ class ObserverPublisher:
                           "bible_translation": _text(config.get("bible_translation"), 64)},
                           "streams": {role: {"state": "configured" if streams[role]["enabled"] else "disabled",
                                              "last_transcript_at": None} for role in streams},
-                          "transcripts": [], "delivery_events": [], "history_available": True}
+                          "transcripts": [], "delivery_events": [], "history_available": True,
+                          "remote_connection": None, "connection_events": []}
         if self._thread is None or not self._thread.is_alive():
             self._stop.clear()
             self._thread = threading.Thread(target=self._run, name="VerseViewObserver", daemon=True)
@@ -84,7 +85,8 @@ class ObserverPublisher:
                 row = {"id": uuid.uuid4().hex, "stream": role, "timestamp": _now(),
                        "language": stream["language"], "provider": stream["provider"],
                        "text": _text(values.get("text")), "translation": _text(values.get("translation")),
-                       "is_final": bool(values.get("is_final"))}
+                       "is_final": bool(values.get("is_final")),
+                       "text_kind": "transliteration" if values.get('text_kind') == 'transliteration' else 'transcription'}
                 if not row["text"]:
                     return
                 # One replaceable partial per stream; finals are retained independently.
@@ -117,6 +119,18 @@ class ObserverPublisher:
                     row["stream"] = "unknown"
                 data["delivery_events"].append(row)
                 data["delivery_events"] = data["delivery_events"][-192:]
+            elif kind == 'remote_connection':
+                if values.get('status') not in ('connecting', 'retrying', 'connected', 'failed', 'cancelled'):
+                    return
+                attempt = values.get('attempt')
+                if type(attempt) is not int or not 1 <= attempt <= 5:
+                    return
+                # Public status is categorical: never copy driver exceptions or URLs.
+                row = {'status': values['status'], 'attempt': attempt, 'maximum': 5,
+                       'timestamp': _now(), 'reason': values.get('reason') if values.get('reason') in ('browser', 'remote', 'controls') else '',
+                       'retry_seconds': 5 if values['status'] == 'retrying' else 0}
+                data['remote_connection'] = row
+                data['connection_events'] = (data['connection_events'] + [row])[-16:]
             elif kind == "host":
                 from desktop_warmup import public_status
                 value = values.get("value", {})

@@ -155,6 +155,17 @@ class SessionRecovery:
                 self.pending, self.error = False, ''
                 self.fresh_start = True
 
+    def reset_empty(self):
+        """Explicit Clear Memory only, after the caller saves a library backup."""
+        with self.lock:
+            if self.active: raise RecoveryError('Stop listening before clearing recovery context.')
+            try: self.path.unlink(missing_ok=True)
+            except OSError: raise RecoveryError('Recovery checkpoint could not be reset; working memory was retained.') from None
+            self._signature = None
+            self.record = self.staged = self.revision = None
+            self.pending = self.active = False
+            self.fresh_start, self.error = True, ''
+
     def stage_saved(self, raw):
         """Stage a validated library record without deleting the existing checkpoint."""
         with self.lock:

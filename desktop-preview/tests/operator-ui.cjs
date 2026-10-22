@@ -6,17 +6,17 @@ const root=path.resolve(__dirname,'..'),output=path.join(root,'test-results');fs
 const tmp=fs.mkdtempSync(path.join(os.tmpdir(),'vv-operator-ui-')),source=path.join(tmp,'source');fs.mkdirSync(source);
 fs.writeFileSync(path.join(source,'settings.json'),JSON.stringify({language:'English',stt_engine:'deepgram',deepgram_api_key:'SYNTHETIC-ONLY',sarvam_api_key:'SYNTHETIC-ONLY',dual_stt_enabled:true,secondary_language:'ml',secondary_stt_engine:'sarvam',mic_index:0,remote_url:'http://127.0.0.1:50010/control.html',bible_translation:'KJV',confidence:.75,manual_confirm:true,verify:false,llm_enabled:false,auto_save_notes:false,auto_start:false,settings_sync_url:''}));
 (async()=>{
- let application,page,pid;const errors=[],checks=[];
+ let application,page,pid,qaProfile;const tag=`operator-tools-${process.pid}`,errors=[],checks=[];
  try{
-  application=await _electron.launch({executablePath:process.env.PREVIEW_EXECUTABLE||require('electron'),args:process.env.PREVIEW_EXECUTABLE?[]:[root],env:{...process.env,VV_PREVIEW_TEST_PROFILE:'1',VV_BACKEND_VERIFY:'1',VV_BACKEND_SOURCE_PROFILE:source,VV_OBSERVER_TEST_DIRECTORY:path.join(tmp,'empty')}});
+  application=await _electron.launch({executablePath:process.env.PREVIEW_EXECUTABLE||require('electron'),args:process.env.PREVIEW_EXECUTABLE?[]:[root],env:{...process.env,VV_PREVIEW_TEST_PROFILE:'1',VV_PREVIEW_TEST_PROFILE_TAG:tag,VV_BACKEND_VERIFY:'1',VV_BACKEND_SOURCE_PROFILE:source,VV_OBSERVER_TEST_DIRECTORY:path.join(tmp,'empty')}});
   page=await application.firstWindow();page.on('pageerror',e=>errors.push(e.message));
-  const profile=path.join(await application.evaluate(({app})=>app.getPath('userData')),'Backend');assert.match(profile,/[/\\]QA[/\\]Backend$/);fs.rmSync(profile,{recursive:true,force:true});
+  qaProfile=await application.evaluate(({app})=>app.getPath('userData'));assert.equal(path.basename(qaProfile),tag);const profile=path.join(qaProfile,'Backend');assert.equal(fs.existsSync(profile),false);
   await page.evaluate(()=>localStorage.clear());await page.reload();
   await page.locator('[data-consumer-prepare="settings"]').click();
   await page.waitForFunction(()=>window.previewShell.getObserver().session?.control?.operator,{timeout:30000});
   pid=await page.evaluate(()=>window.previewShell.getBackend().pid);
   const state=await page.evaluate(()=>window.previewShell.getBackend());assert.equal(state.frozen,true);assert.equal(state.guiImported,false);assert.equal(state.verification,true);
-  const tools=()=>page.locator('[data-operator]');const click=action=>page.locator(`[data-operator="${action}"]`).click();
+  const tools=()=>page.locator('[data-operator]');const click=action=>page.locator(`[data-operator="${action}"]`).filter({visible:true}).click();
   await click('pin');assert.equal(await application.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].isAlwaysOnTop()),true);
   await click('pin');assert.equal(await application.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].isAlwaysOnTop()),false);
   checks.push('Native Always on top readback toggles both ways; Detector window only.');
@@ -40,7 +40,7 @@ fs.writeFileSync(path.join(source,'settings.json'),JSON.stringify({language:'Eng
   assert.equal(await page.locator('dialog').evaluate(d=>d.scrollWidth<=d.clientWidth+2),true);
   await page.screenshot({path:path.join(output,'operator-sessions-narrow.png')});
   await page.keyboard.press('Escape');await page.locator('dialog').waitFor({state:'hidden'});
-  assert.equal(await page.evaluate(()=>document.activeElement?.dataset.operator),'open');
+  await page.waitForFunction(()=>document.activeElement?.dataset.operator==='open',null,{timeout:5000});
   await application.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].setSize(1180,880));
   checks.push('Compact Saved sessions popup reads bilingual originals; narrow dialog remains bounded; native Escape closes and returns focus.');
   await click('worship');await page.waitForFunction(()=>!window.previewShell.getObserver().session.control.operator.worship);
@@ -67,5 +67,5 @@ fs.writeFileSync(path.join(source,'settings.json'),JSON.stringify({language:'Eng
   console.log(JSON.stringify({result:'PASS',checks,processInfo},null,2));
   if(process.env.VV_OPERATOR_INSPECT==='1')await page.waitForTimeout(45000);
  }catch(error){if(page)await page.screenshot({path:path.join(output,'operator-failure.png')}).catch(()=>{});throw error;}
- finally{if(application)await application.close();fs.rmSync(tmp,{recursive:true,force:true});}
+ finally{if(application)await application.close();if(qaProfile&&path.basename(qaProfile)===tag&&path.basename(path.dirname(qaProfile))==='QA')fs.rmSync(qaProfile,{recursive:true,force:true});fs.rmSync(tmp,{recursive:true,force:true});}
 })().catch(error=>{console.error(error);process.exitCode=1;});

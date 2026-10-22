@@ -80,14 +80,23 @@ class ProfileStore:
         if not self.config.save(values):
             raise SettingsError('Could not save backend settings; previous values retained.')
 
-    def apply_sync(self,changes,credential,expected_storage):
+    def apply_import(self,changes,credential,expected_storage):
+        return self.apply_sync(changes,credential,expected_storage,imported=True)
+
+    def apply_sync(self,changes,credential,expected_storage,*,imported=False):
         from desktop_sync import SyncError,SyncConflict
         import tempfile
         if self.state()!='stopped':raise SyncConflict('Engine state changed.')
         try:values,revision=self.load()
         except (OSError,ValueError):raise SyncConflict('Private settings are unavailable.') from None
         if revision!=expected_storage:raise SyncConflict('Private settings changed.')
-        if not set(changes)<=self.config.SYNC_ALLOWED_KEYS:raise SyncError('Unsupported sync fields.')
+        allowed=self.config.SYNC_ALLOWED_KEYS
+        if imported:
+            from desktop_settings import FIELDS
+            from desktop_options import SECRETS
+            from desktop_cloud_settings import CREDENTIALS
+            allowed=allowed|FIELDS|set(SECRETS)|set(CREDENTIALS)
+        if not set(changes)<=allowed:raise SyncError('Unsupported settings fields.')
         merged={**values,**changes};created=None
         try:
             if credential is not None:
@@ -125,7 +134,7 @@ def configuration(values, config, engine, confirm):
                   bible_translation=values.get('bible_translation', 'KJV').lower(),
                   local_llm_endpoint=config.resolve_local_llm_endpoint(values),
                   gcp_credentials_path=config.resolve_gcp_credentials_path(values),
-                  confirm_request_callback=confirm, gui_app=None, bot_bridge_enabled=False)
+                  confirm_request_callback=confirm, gui_app=None, bot_bridge_enabled=False, panic_key='')
     return result
 
 
@@ -163,6 +172,11 @@ class EngineRuntime:
             from backend_verification import verification_chapter
             self.verses = VerseTools(self, lookup=verification_chapter)
         else: self.verses = VerseTools(self)
+        from desktop_notes import SessionNotes
+        self.notes = SessionNotes(self)
+        if verification:
+            from backend_verification import verification_summary
+            self.notes.generator = lambda snapshot: verification_summary(self.engine, snapshot, fail=json.loads((self.profile/'settings.json').read_text()).get('qa_notes_failure') is True)
 
     def state(self):
         if not self.thread or not self.thread.is_alive(): return 'stopped'
@@ -172,6 +186,8 @@ class EngineRuntime:
 
     def start(self, values, config, confirm):
         if self.state() != 'stopped': return False
+        if hasattr(self, 'connections') and self.connections.busy: raise BackendError('Wait for the connection action to finish.')
+        if hasattr(self, 'notes') and (self.notes.busy or self.notes.pending_auto): raise BackendError('Wait for the notes call to finish or cancel it before starting a new listening session.')
         restored = self.recovery.for_start()
         problem = start_problem(values)
         if problem: raise BackendError(problem)
@@ -183,6 +199,7 @@ class EngineRuntime:
             self.engine.full_sermon_transcript_secondary = ''
         mapped = configuration(values, config, self.engine, confirm)
         if hasattr(self, 'suggestions'):
+            mapped['watcher_require_approval'] = True
             mapped['watcher_suggestion_callback'] = self.suggestions.prepare(values.get('watcher_enabled'))
         if hasattr(self, 'outline'):
             callback, current, status = self.outline.prepare(values.get('live_points_llm_enabled'))
@@ -241,7 +258,7 @@ class EngineRuntime:
         try:
             if self.verification:
                 from backend_verification import isolated_engine
-                with isolated_engine(self.engine, silent=values.get('qa_bot_silence') is True): self.loop.run_until_complete(self._main(values))
+                with isolated_engine(self.engine, silent=values.get('qa_bot_silence') is True, notes_fixture=values.get('qa_notes_fixture') is True): self.loop.run_until_complete(self._main(values))
             else:
                 self.loop.run_until_complete(self._main(values))
             self.warmup.cancel()
@@ -250,7 +267,7 @@ class EngineRuntime:
             self.stop_requested.set()
             self.checkpoint('stopped')
             if hasattr(self, 'operator'): self.operator.normal_stop_save()
-            if not self.verification and not (hasattr(self, 'operator') and self.operator.emergency):
+            if not (hasattr(self, 'operator') and self.operator.emergency):
                 self._save_session(values)
         except Exception:
             self.warmup.cancel()
@@ -303,18 +320,12 @@ class EngineRuntime:
                 self.operator.save(autosave=True)
 
     def _save_session(self, values):
-        transcript = self.engine.full_sermon_transcript or ''
-        if not transcript.strip(): return
-        directory = self.profile / 'Sessions'
-        directory.mkdir(mode=0o700, exist_ok=True)
-        stamp = dt.datetime.now(dt.timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')
-        target = directory / (stamp + '.txt')
-        with open(target, 'x', encoding='utf-8', opener=lambda path, flags: os.open(path, flags, 0o600)) as handle:
-            handle.write(transcript)
-        if values.get('auto_save_notes') and len(transcript.strip()) > 100:
-            summary = self.engine.generate_sermon_summary()
-            with open(directory / (stamp + '-summary.txt'), 'x', encoding='utf-8', opener=lambda path, flags: os.open(path, flags, 0o600)) as handle:
-                handle.write(summary)
+        if hasattr(self, 'notes'):
+            try: self.notes.on_stop(bool(values.get('auto_save_notes')))
+            except Exception:
+                self.notes.auto.update(status='failed', message='Transcript export could not be saved. Session-library and recovery saves are separate; check their status. No summary request was started.')
+                logging.getLogger(__name__).exception('Stopped session transcript export failed')
+
 
 
 class BackendHost:
@@ -323,11 +334,12 @@ class BackendHost:
         from desktop_settings import DesktopSettings
         self.config, self.publisher, self.runtime = config, publisher, runtime
         self.closing = False
-        self.notice = 'Recognition is stopped. Saved auto-start is not activated in this preview.'
+        self.notice = 'Recognition is stopped. Automatic listening requires this computer’s explicit startup preference.'
         self.devices = devices
         self.clock = clock
         self.store = ProfileStore(config, self.state, lambda: self.devices)
         self.settings = DesktopSettings(self.store.read, self.store.apply)
+        if hasattr(runtime, 'notes'): runtime.notes.prepare_provider = self.prepare_notes_provider
         if hasattr(runtime, 'verses'): runtime.verses.translation = lambda: self.store.load()[0].get('bible_translation', 'kjv')
         from desktop_bot import DesktopBot
         self.bot = DesktopBot(runtime,self.store.load)
@@ -338,12 +350,26 @@ class BackendHost:
             from backend_verification import verification_download
             sync_options['fetch']=verification_download
         self.sync=SettingsSync(config,self.store.load,self.store.apply_sync,self.sync_ready,**sync_options)
-        self.store.blocked=lambda:self.sync.busy
+        from desktop_connections import Connections
+        runtime.connections=Connections(runtime,self.store,self.settings)
+        self.store.blocked=lambda:self.sync.busy or runtime.connections.busy
         self.sync.auto_start()
         self.publisher.begin({'streams': {}}, origin='callback-replay' if runtime.verification else 'engine')
         self.control = DesktopControl(publisher, self.state, self.start, runtime.stop, enabled=True, settings=self.settings,
                                       panic=runtime.panic, recovery=getattr(runtime, 'recovery', None),
-                                      suggestions=getattr(runtime, 'suggestions', None), outline=getattr(runtime, 'outline', None),bot=self.bot,sync=self.sync,operator=getattr(runtime,'operator',None),verses=getattr(runtime,'verses',None))
+                                      suggestions=getattr(runtime, 'suggestions', None), outline=getattr(runtime, 'outline', None),bot=self.bot,sync=self.sync,operator=getattr(runtime,'operator',None),verses=getattr(runtime,'verses',None), notes=getattr(runtime,'notes',None), connections=runtime.connections)
+
+    def prepare_notes_provider(self):
+        # Saved-session summaries can initialize clients without opening audio or Chrome.
+        # Once listening has initialized the engine, saved changes still apply on next Start.
+        if self.runtime.has_started: return
+        if self.runtime.state() != 'stopped' or self.sync.busy: raise BackendError('Wait for settings and engine work to finish.')
+        values, _ = self.store.load()
+        mapped = configuration(values, self.config, self.runtime.engine, None)
+        mapped.update(watcher_enabled=False, watcher_require_approval=True, live_points_enabled=False,
+                      begin_observer_session=False)
+        self.runtime.engine.configure(**mapped)
+        self.runtime.operator.apply_mode()
 
     def sync_ready(self):
         return self.state()=='stopped' and self.bot.snapshot()['status'] in ('stopped','failed')
@@ -356,10 +382,11 @@ class BackendHost:
             self.notice='Wait for settings sync before starting recognition.'
             return False
         values, _ = self.store.load()
-        values, scheduled = effective_start_settings(values, self.clock() if self.clock else None)
-        schedule_notice = ('Smart Schedule selected ' + scheduled +
-                           (' with English secondary. ' if scheduled != 'English' else ' only. ')) if scheduled else ''
+        schedule_notice = ''
         try:
+            values, scheduled = effective_start_settings(values, self.clock() if self.clock else None)
+            schedule_notice = ('Smart Schedule selected ' + scheduled +
+                               (' with English secondary. ' if scheduled != 'English' else ' only. ')) if scheduled else ''
             from desktop_settings import project, validate_changes, SettingsError
             validate_changes(project(values), project(values), self.devices)
             result = self.runtime.start(values, self.config, self.confirm)
@@ -379,6 +406,10 @@ class BackendHost:
     def tick(self):
         self.sync.tick()
         if hasattr(self.runtime, 'autosave'): self.runtime.autosave()
+        if hasattr(self.runtime, 'notes'): self.runtime.notes.tick()
+        from desktop_setup import preview
+        try: self.control.session_setup = preview(self.store.load()[0], self.clock() if self.clock else None, self.devices)
+        except (OSError, ValueError): self.control.session_setup = dict(status='invalid', message='Settings are unavailable.')
         self.control.tick()
         cloud = (self.runtime.engine.free_cloud_status() if hasattr(getattr(self.runtime, 'engine', None), 'free_cloud_status') else {})
         cloud_notice = ' '.join(f'{role}: {state["message"]}' for role, state in cloud.items() if state['kind'] != 'ok')
@@ -395,6 +426,16 @@ class BackendHost:
         if self.runtime.thread: self.runtime.thread.join(timeout=25)
         verses = getattr(self.runtime, 'verses', None)
         if verses: verses.join()
+        notes = getattr(self.runtime, 'notes', None)
+        if notes:
+            if notes.worker: notes.worker.join(timeout=20)
+            notes.tick()
+            if notes.worker: notes.worker.join(timeout=20)
+            if notes.busy or notes.pending_auto: return False
+        connections=getattr(self.runtime,'connections',None)
+        if connections and connections.worker:
+            connections.cancelled.set();connections.worker.join(timeout=2)
+            if connections.busy:return False
         worker = getattr(getattr(self.runtime,'operator',None),'worker',None)
         if not bot_closed or not sync_closed or self.runtime.thread and self.runtime.thread.is_alive() or worker and worker.is_alive(): return False
         self.publisher.close()

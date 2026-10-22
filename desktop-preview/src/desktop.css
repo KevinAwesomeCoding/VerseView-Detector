@@ -126,3 +126,55 @@ html,body{margin:0;min-height:100%;background:transparent}
 .vv-session-reader pre{white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;font-size:13px;line-height:1.7}
 .vv-session-reader h4{font-size:12px;opacity:.75;margin-top:20px}
 @media(max-width:720px){.vv-session-browser{grid-template-columns:1fr}.vv-session-browser nav{max-height:23vh}.vv-session-reader{max-height:36vh}.vv-session-dialog{padding:16px}.vv-consumer-status .vv-control-actions{flex-wrap:wrap}}
+.vv-detection-settings { margin: 20px 0; padding: 16px; border: 1px solid var(--vv-border, #657080); border-radius: 12px; min-width: 0; }
+.vv-detection-settings legend { padding: 0 8px; font-weight: 650; }
+.vv-detection-option { display: flex; flex-direction: column; gap: 6px; }
+.vv-detection-option input { width: auto; }
+#verseview-prototype .vv-detection-settings input[type=number] { box-sizing: border-box; width: 100%; min-width: 0; padding: 10px; border: 1px solid var(--vv-border); border-radius: 8px; background: var(--vv-panel); color: var(--vv-ink); font: inherit; }
+.vv-remote-status { padding: 8px 0; min-width: 0; flex-basis: 100%; font-size: 12px; max-width: 650px; }
+.vv-remote-status p { margin: 4px 0; }
+.vv-remote-status ol { margin: 8px 0; padding-left: 24px; max-height: 160px; overflow-y: auto; }
+
+/* One wrapping operator bar; session browsing belongs in workspace navigation. */
+#verseview-prototype .vv-topline { display: block; }
+#verseview-prototype .vv-topline .vv-live-controls { margin-top: 12px; display: block; min-width: 0; }
+#verseview-prototype .vv-consumer-status { align-items: flex-start; gap: 10px; }
+#verseview-prototype .vv-consumer-status>.vv-badge { margin-top: 8px; }
+#verseview-prototype .vv-consumer-status .vv-control-actions { display: flex; flex-wrap: wrap; flex: 1; min-width: 0; gap: 8px; }
+#verseview-prototype .vv-consumer-status .vv-btn { font-size: 12px; padding: 9px 12px; }
+#verseview-prototype [data-sessions-navigation] .vv-sessions-launch { width: 100%; min-width: 0; white-space: normal; flex-direction: row; align-items: center; gap: 10px; }
+#verseview-prototype .vv-sessions-nav-text { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+#verseview-prototype .vv-sessions-launch small { font-size: 10px; opacity: .85; font-weight: 400; overflow-wrap: anywhere; }
+#verseview-prototype .vv-sessions-launch:disabled { opacity: .55; }
+.vv-recovery-prompt { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 10px; padding: 10px 12px; border: 1px solid var(--vv-border); border-radius: 10px; font-size: 12px; }
+.vv-operator-notice { flex-basis: 100%; margin-top: 8px; }
+#verseview-prototype .vv-narrow-nav [data-sessions-navigation] { display: flex; }
+@media(max-width:680px){#verseview-prototype .vv-narrow-nav .vv-nav{flex-wrap:wrap}#verseview-prototype .vv-topline{padding:10px}#verseview-prototype .vv-sessions-launch small{display:none}}
+
+.vv-notes-preview { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 26rem; overflow: auto; padding: 1rem; border: 1px solid var(--vv-border); border-radius: .7rem; font-family: inherit; line-height: 1.65; }
+.vv-notes > * + * { margin-top: .8rem; }
+.vv-save-path { overflow-wrap: anywhere; user-select: text; }
+.vv-memory-tools { margin-top: 1rem; }
+.vv-memory-dialog { width: min(38rem,90vw); max-height: 85vh; overflow: auto; padding: 1.5rem; border-radius: 1rem; color: var(--vv-ink); background: var(--vv-panel); border: 1px solid var(--vv-border); }
+.vv-memory-dialog::backdrop { background: rgba(0,0,0,.45); }
+.vv-memory-dialog p { line-height: 1.6; margin-block: 1rem; }
+
+#verseview-prototype .vv-notes { padding: 17px; }
+#verseview-prototype .vv-notes > .vv-panel-head { padding: 0 0 12px; }
+#verseview-prototype .vv-notes select { display:block; width:100%; min-width:0; box-sizing:border-box; margin-block:.5rem; padding:.65rem; font:inherit; color:var(--vv-ink); background:var(--vv-panel); border:1px solid var(--vv-border); border-radius:8px; }
+#verseview-prototype .vv-notes progress { width:100%; height:6px; accent-color:var(--vv-accent); }
+
+.vv-schedule-row{display:grid;grid-template-columns:minmax(120px,1fr) minmax(110px,.7fr) minmax(130px,1fr) auto;gap:10px;align-items:end;margin:12px 0}.vv-schedule-row label{min-width:0}.vv-schedule-row select,.vv-schedule-row input{width:100%;box-sizing:border-box}.vv-startup-notice{padding:10px 16px;border-radius:12px;background:var(--vv-panel)}@media(max-width:800px){.vv-schedule-row{grid-template-columns:1fr 1fr}}
+
+#verseview-prototype .vv-session-fields>label:not(.vv-detection-option),#verseview-prototype .vv-schedule-row label{display:grid;gap:7px}#verseview-prototype .vv-session-fields select,#verseview-prototype .vv-session-fields input:not([type=checkbox]){display:block;width:100%;min-width:0;box-sizing:border-box;padding:10px;border:1px solid var(--vv-border);border-radius:8px;background:var(--vv-panel);color:var(--vv-ink);font:inherit}#verseview-prototype .vv-session-fields>button{margin-top:10px}
+
+.vv-connection-setup{margin:16px 0}.vv-connection-setup>summary{font-weight:650;cursor:pointer}.vv-connection-tools>details{margin:16px 0}.vv-connection-tools select{padding:9px;color:var(--vv-ink);background:var(--vv-panel);border:1px solid var(--vv-border);border-radius:8px}.vv-session-fields textarea{display:block;width:100%;min-height:100px;box-sizing:border-box;background:var(--vv-panel);color:var(--vv-ink);border:1px solid var(--vv-border);border-radius:8px}
+/* Keep connection fields consistent with the existing settings forms. */
+.vv-connection-tools input:not([type="checkbox"]),.vv-connection-tools select{box-sizing:border-box;width:100%;min-width:0;padding:10px 12px;border:1px solid var(--vv-border);border-radius:8px;background:var(--vv-soft);color:var(--vv-ink);font:inherit}
+.vv-connection-tools label{display:grid;gap:7px;font-size:13px}
+.vv-connection-tools .vv-detection-option span:first-child{display:flex;align-items:center;gap:8px}
+/* Glass keeps translucent space around opaque reading and navigation surfaces. */
+#verseview-prototype[data-theme="glass"][data-backdrop="native"] .vv-sidebar,
+#verseview-prototype[data-theme="glass"][data-backdrop="native"] #preview-titlebar,
+#verseview-prototype[data-theme="glass"][data-backdrop="native"] .vv-narrow-nav{background:var(--vv-panel)}
+#verseview-prototype[data-theme="glass"][data-backdrop="native"] .vv-narrow-nav{padding:10px;border-radius:12px}

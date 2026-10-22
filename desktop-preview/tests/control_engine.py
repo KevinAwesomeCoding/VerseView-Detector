@@ -1,5 +1,6 @@
 """Real confirmation/delivery code, mocked lifecycle/devices; no live services."""
 import argparse
+import datetime as dt
 import json
 import os
 from pathlib import Path
@@ -100,8 +101,17 @@ try:
         if message == 'fail-save':
             fail_save = True
             print(json.dumps({'event': 'fail-save-ready'}), flush=True)
+        if message == 'diagnostic-burst':
+            for n in range(80):
+                observer_feed.emit('delivery',event=dict(candidate_id=f'QA-DIAGNOSTIC-{n}',reference=f'John 3:{n%36+1}',stream='primary',language='en',source='SYNTHETIC-UI-FIXTURE',stage='ui_stress',outcome='SUPPRESSED',timestamp=dt.datetime.now(dt.timezone.utc).isoformat(),reason='Synthetic scrolling evidence; no presentation command.'))
+        if message and message.startswith('noise:'):
+            observer_feed.emit('transcript',stream='primary',language='en',text='Continuous synthetic UI transcript '+message.split(':',1)[1],is_final=True)
         if message == 'noise':
             observer_feed.emit('transcript', stream='primary', text='Isolated settings check', is_final=True)
+        if message == 'remote-fail':
+            for attempt in range(1,6):
+                observer_feed.emit('remote_connection',status='connecting',attempt=attempt)
+                observer_feed.emit('remote_connection',status='retrying' if attempt<5 else 'failed',attempt=attempt,reason='remote')
         if message == 'hold':
             case.ctrl.send_verse('John 3:18', confidence=.2, source='CONTROL-REPLAY', stream='secondary')
         if message == 'reject':

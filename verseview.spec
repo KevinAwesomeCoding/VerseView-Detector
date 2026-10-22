@@ -14,6 +14,7 @@ datas += collect_data_files('certifi')
 datas += [
     ('settings.py', '.'),
     ('bible_fetcher.py', '.'),
+    ('bible_metadata.LICENSE', '.'),
     ('parse_reference_eng.py', '.'),
     ('parse_reference_hindi.py', '.'),
     ('parse_reference_ml.py', '.'),

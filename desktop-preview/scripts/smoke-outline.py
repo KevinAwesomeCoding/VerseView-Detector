@@ -15,7 +15,7 @@ with tempfile.TemporaryDirectory(prefix='vv-outline-smoke-') as temporary:
     (profile/'settings.json').write_text(json.dumps(dict(language='English',stt_engine='deepgram',deepgram_api_key='SECRET-QA-STT',
         manual_confirm=True,verify=False,llm_enabled=True,auto_save_notes=False,live_points_llm_enabled=True,
         live_points_prompt='Capture only the synthetic spoken material.',local_llm_enabled=True,
-        local_llm_role_outline='local',local_llm_model='SECRET-QA-MODEL')),encoding='utf-8')
+        local_llm_role_outline='local',local_llm_model='qa:model')),encoding='utf-8')
     child=None
     with (directory/'backend.log').open('wb') as log:
         try:

@@ -1,5 +1,209 @@
 # Verse delivery investigation
 
+## October 22: Connections/Developer parity and final acceptance checkpoint
+
+Groups 6–7 are implemented and verified in separate version **0.15.7**, build
+`2026-10-22T05-50-40-417Z-62c990b2-darwin-arm64`. Normal Settings now exposes
+private Google import, credential-scoped settings files, local model setup/checks,
+ATEM setup/review and Discord setup/Live lifecycle. Developer Mode contains typed
+audio/timing, headers, model overrides, outline prompt and existing watcher/cloud
+tuning. All 79 legacy fields have a current disposition. About uses an honest
+manual Releases action. No STT algorithm or safety-guard relaxation was introduced.
+
+257 Python and 99 Node tests pass. Packaged detection, Live, chapter/watcher,
+notes, session setup and connections checks pass; five 36-combination layout suites
+cover the six themes and both layouts. Long notes scroll to the final marker and
+back. An additional packaged renderer stress check keeps 80 synthetic diagnostic
+outcomes scrollable and Stop usable while 150ms synthetic transcripts arrive.
+The six theme screenshots were inspected; Glass navigation now has a dependable
+reading background. Actual native Glass over other apps remains unverified.
+
+The archive extracts to exactly one app and passes signature/runtime/frozen startup
+checks. All 61 frontend runtime source files and 32 companion inputs match current
+source. Exact executable/owned frozen process evidence is retained. These are
+isolated QA results, not microphone/STT or visible VerseVIEW output results.
+
+Progress: **30/32 (93.75%)**, Groups 1–7 plus final regression/handoff. The Mac
+locked before Computer Use; unlock was requested. Current-code Windows/Intel CI
+and current real-path acceptance have not run. Historical CI success is not a new
+result. The repeating task remains active, awaiting those remaining conditions;
+it must not continually rerun already-passed checks while nothing changes.
+
+Installed app and real profiles remain intact; no commit/push/release/security
+change occurred. Build artifacts and diagnostics are retained; disposable QA
+settings/profiles are cleaned. The original intermittent incident remains
+**unresolved**. [Groups 6–7 evidence](CONNECTIONS_DEVELOPER_VERIFICATION.md) and
+[exact final build, acceptance results, remaining gates and installation procedure](FINAL_PARITY_ACCEPTANCE.md).
+
+## October 22: Group 5 session setup verified in separate 0.15.6 package
+
+Added supplied-text/translation/transliteration display choices, labeled Manglish
+provenance through journal/save/export, and stream-limited Malayalam/Sarvam
+configuration. Primary/secondary speech setup stays on Live. Auto-start requires
+fresh per-computer consent, granted microphone permission, ready setup and no
+pending recovery. Its cancellable countdown submits one Start; Stop does not
+restart recognition. Legacy auto-start and credential sync cannot enable it.
+
+Smart Schedule now has a bounded day/time/language editor, system/UTC/available
+IANA zone selection, and saved next-Start preview. Existing provider and safety
+choices are retained, with incompatible combinations reported before automatic
+listening. It never changes active streams. The panic shortcut is configurable
+for the focused detector window; dialogs, typing and reserved quit/debug bindings
+are guarded. Legacy background key capture is disabled for the desktop host.
+
+245 Python and 94 desktop regressions pass. Exact build
+`2026-10-22T05-17-09-895Z-62c990b2-darwin-arm64` passed package integrity, 36 layout
+combinations and packaged workflow checks including fresh next-launch opt-in,
+recovery pause, countdown cancel, single Start, no restart after Stop, schedule
+application, transliteration labeling and guarded shortcut activation. Computer
+Use confirmed the final styled fields, saved a custom shortcut and reset it to
+the saved default. All speech, translation, permission and presentation transports
+in the automated workflow are explicit isolated QA substitutes.
+
+The previous temporary build environment was no longer usable; approved build
+dependencies were recreated in a new temporary environment using the last
+manifest's exact freeze. Installed app and real user settings/sessions remain
+intact. No push, release or security change occurred. Progress is **20/32 (62.5%)**.
+Real microphone/STT, provider accuracy, native permission behavior, visible
+VerseVIEW and Windows/Intel physical acceptance remain unverified for this group.
+The original intermittent incident remains unresolved.
+[Exact build, changes, tests and limits](SESSION_SETUP_VERIFICATION.md).
+
+## October 21: Group 4 sermon notes, export and recoverable memory reset
+
+The separate 0.15.5 Apple Silicon package adds Generate Sermon Notes, full
+bilingual notes/transcript/reference export through a native Save dialog, the
+existing auto-save preference with transcript-first status/location readback, and
+stopped-only Clear Memory with backup/diagnostic retention and Saved sessions
+restore. Notes are generated from an identified immutable snapshot; Outline stays
+separate. Empty input, cancellation, interrupted requests and provider failure
+have explicit states; previous notes survive failures and no automatic retry is
+introduced. Existing cloud allowance and delivery guards remain in effect.
+
+238 Python and 89 desktop regressions pass. Build
+`2026-10-22T04-46-06-993Z-62c990b2-darwin-arm64` passed package verification and its
+36-combination notes acceptance suite. The actual packaged app and owned frozen
+backend ran; speech, model completion and presentation transports were explicit
+QA substitutes. Computer Use exercised scrolling and the real macOS Save dialog;
+its export retained 19,408 characters of full original bilingual text and notes.
+Two packaged session-tracking failures were reproduced and fixed: following the
+acknowledged Clear Memory rotation, and avoiding an unwanted observer rotation
+when initializing notes providers before listening. Pending verse approvals are
+also visible while using Notes.
+
+Installed app, real settings and saved sessions remain intact; no dependency
+installation, push or release occurred. Checklist progress is **16/32 (50%)**.
+Real microphone/STT, live summary providers, visible VerseVIEW and native
+Windows/Intel checks remain unverified for this group. The original intermittent
+incident remains unresolved. [Exact build, changes, evidence and limits](SERMON_NOTES_VERIFICATION.md).
+
+## October 21: Group 3 chapter/history and watcher approval verified
+
+The separate 0.15.4 Apple Silicon package now contains a local KJV chapter grid,
+read-only preview/guarded Send, scoped history clearing, watcher settings/status
+and a bilingual approval inbox. Desktop configuration explicitly prevents the
+high-confidence watcher branch from automatically presenting. Expiry, revision,
+delivery epoch, worship/Stop and existing delivery guards remain active; manual
+watcher Display no longer bypasses cooldown. The KJV grid and engine bounds use
+the same validated metadata; other translations retain existing bounds behavior
+and receive a baseline-numbering notice.
+
+225 Python and 84 desktop tests pass. Exact package
+`2026-10-22T03-32-14-062Z-62c990b2-darwin-arm64` passed the new 36-case UI harness,
+the existing 36-case Live layout regression, inventory/signature verification and
+Computer Use inspection. The actual owned frozen backend accepted an explicit
+John 3:19 candidate after its normal cooldown; an earlier separate build recorded
+cooldown suppression. All speech, model, text and presentation transports in these
+checks were QA substitutes. Real microphone/STT, live providers, visible VerseVIEW
+and native Windows/Intel acceptance remain unverified for this group.
+
+Installed app, real settings and sessions stayed intact. QA profiles/processes
+were cleaned; no dependency install, push or publication occurred. Checklist
+progress is **12/32 (37.5%)**, with Group 4 next. The original intermittent incident
+remains unresolved. [Build provenance, evidence and limits](CHAPTER_WATCHER_VERIFICATION.md).
+
+## October 21: Group 2 Live layout verified in separate 0.15.3 package
+
+The operator controls are grouped in the header; Saved sessions moved to workspace
+navigation with a direct recovery route near Start. Manual reference entry/preview
+now follows the transcripts, while Context/History/Chapter remain in Verse tools
+with a nearby current-chapter shortcut. Full-refresh focus/caret preservation and
+visible-launcher focus return support the relocated controls. No backend/STT or
+delivery policy changed in this group.
+
+82 desktop tests and the final package's inventory/signature checks pass. The
+separate Apple Silicon artifact `2026-10-22T03-04-12-170Z-62c990b2-darwin-arm64`
+passed 36 layout/theme cases and the packaged layout, operator and verse-send
+workflows with the actual owned frozen backend and explicit QA transports. Computer
+Use inspected the earlier same-version test build's controls/chapter shortcut.
+Real microphone/STT, visible presentation and new Windows/Intel acceptance remain
+unverified. Installed app, real settings/keys and sessions stayed intact; no new
+dependencies, security changes, publication or push occurred. Synthetic profiles
+were cleaned. [Provenance, results and limits](LIVE_LAYOUT_VERIFICATION.md).
+Checklist progress is 8/32; the original intermittent incident remains unresolved.
+
+## October 21: Group 1 implemented in separate 0.15.2 test package
+
+The chapter-only high-water substitution identified in the recorded session is
+removed: a chapter without verse evidence updates context and does not present.
+Normal Settings now exposes confidence, manual confirmation, hear-twice
+verification, Verse Interrupt, Spoken Numeral Mode and Smart Amen through typed,
+stopped-only saves. The existing bounded five-attempt startup connection loop now
+publishes safe structured progress/errors to Live, with explicit guarded retry.
+A focused test also reproduced standalone `Let us pray.` being rejected by the
+Smart Amen position guard; phrase-end validation and stale-timer checks fix it.
+
+217 Python/82 Node checks pass. The separate Apple Silicon package
+`2026-10-22T02-43-05-678Z-62c990b2-darwin-arm64` passes signature/inventory checks,
+packaged/frozen settings persistence and restart, normal-mode status/errors and
+36 settings layout/theme cases. External services/audio/presentation were mocked
+or synthetic in these checks; real microphone/STT, visible output and new native
+Windows/Intel acceptance remain unverified. Installed app, real settings/keys and
+saved sessions were retained. No release/push or dependency/security change was
+performed. [Detailed provenance and limits](DETECTION_CONTROLS_VERIFICATION.md).
+The original earlier intermittent incident remains unresolved.
+
+## October 21: shortened live speech parsed as chapter and resumed to wrong verse
+
+The installed backend observer recorded a real primary Deepgram session. At
+02:06:59 UTC, `John chapter three verse sixteen.` produced candidate
+`7ed9d21f08a4`, John 3:16, with command acceptance. At 02:07:12,
+`John three seventeen` produced `1ebd62f376d2`, initially John 3, then John 3:18,
+suppressed pending second detection. At 02:07:27, the full phrase
+`John chapter three verse seventeen.` produced `5fdfabefa6cc`, John 3:17, with
+command acceptance. At 02:07:38, `John three seventeen` produced `0c4016fd1122`,
+initially John 3, then John 3:18, with command acceptance. At 02:07:58,
+`John three eighteen` again parsed as John 3 and resolved to John 3:18, suppressed
+pending verification. These are controller acknowledgments, not observed pixels.
+The user's reported return to 3:16 is not corroborated by these recorded commands.
+
+Saved settings have spoken numeral mode off, hear-twice verification on, and manual
+confirmation on. The English parser intentionally treats unmarked consecutive
+numbers as chapter-only when spoken numeral mode is off. `send_verse` then upgrades
+chapter-only references to the session's remembered high-water verse, explaining
+the recorded John 3 to John 3:18 substitution. This is a demonstrated downstream
+misdelivery mechanism for this session. Without captured audio, whether the
+shortening arose in recognition or the speaker's wording cannot be established.
+No STT/provider/settings/runtime change was made during this read-only diagnosis.
+The original earlier intermittent incident is not thereby conclusively explained.
+
+## October 21: installed 0.15.1 Start listening investigation
+
+Read-only process inspection confirmed the installed Electron application and its
+owned frozen backend were running from `/Applications/VerseView Detector.app`.
+The backend's current observer snapshot (2026-10-22 02:01 UTC) reported stopped,
+successful unchanged credential sync, recovery status `available`, and no `start`
+action or recorded start request. Emergency-save state was also present. Source
+inspection confirms an available recovery checkpoint intentionally removes Start
+until Resume saved session or Start new is chosen; consumer Start directs the
+user to Saved sessions rather than submitting a start request in this state.
+This identifies a current pre-start blocker, not an STT failure. Computer Use
+could not attach: selection by installed path/name resolved the obsolete bundle
+ID, while the current bundle ID was ambiguous across historical previews. No
+window inspection, recovery choice, microphone start, provider call, presentation,
+settings change or installed-app replacement was performed. Listening after the
+recovery choice remains unverified; the original incident remains unresolved.
+
 ## October 21: optional paid signing and automated speech acceptance scope
 
 The user removed paid Apple/Windows publisher signing and notarization from the
