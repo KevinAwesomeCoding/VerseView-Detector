@@ -234,3 +234,23 @@ Publication does not replace the installed app, change real settings or establis
 a cause for the original incident. Once publication is verified, pause the
 repeating parity task under this explicit scope change; physical checks resume
 when the owner requests them.
+
+### First release attempt: Windows fixture failure
+
+Main release run `39797998800` passed both Mac jobs but failed the Windows Node
+regression step at “Clear Memory follows only its exact acknowledged rotation and
+stays stopped.” Publication was correctly skipped. Public check annotations retain
+the failing test identity; full private runner logs were not accessible through
+the unauthenticated API.
+
+A controlled local reproduction fixed file modification times across the test's
+same-size in-place writes. The reader then reused the cached wrong-ack snapshot
+and kept the old session, reproducing the failing assertion. Production
+`ObserverPublisher` uses a temporary file and `os.replace`, unlike those fixture
+writes. The command fixtures now use temporary-file/rename publication too. The
+Clear Memory test deliberately retains identical modification times for wrong and
+correct acknowledgements, and still requires rejection of the wrong ID and a
+stopped state after the correct rotation. All 18 command tests and all 99 desktop
+unit tests pass locally; whitespace checks pass. This is a test-only correction,
+not a runtime cache/STT/delivery change. The corrected native release run must
+still pass before publication is claimed.

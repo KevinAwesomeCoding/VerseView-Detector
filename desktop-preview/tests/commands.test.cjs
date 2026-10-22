@@ -6,6 +6,12 @@ const os = require('node:os');
 const path = require('node:path');
 const { EngineCommands } = require('../engine-commands.cjs');
 const { EngineFeedReader, decodeSnapshot } = require('../engine-feed.cjs');
+// Match ObserverPublisher's atomic replacement, including on coarse-timestamp filesystems.
+function publishFixture(file, value) {
+  const temporary = file + '.next';
+  fs.writeFileSync(temporary, JSON.stringify(value));
+  fs.renameSync(temporary, file);
+}
 function setup(t) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'vv-command-test-'));
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
@@ -80,17 +86,17 @@ test('explicit process selection follows only our acknowledged start across sess
     engine_state: 'configured', config: { streams: { primary: { enabled: true }, secondary: { enabled: false } } },
     transcripts: [], delivery_events: [] };
   const file = path.join(f.directory, 'engine-123.json');
-  fs.writeFileSync(file, JSON.stringify(fixture));
+  publishFixture(file, fixture);
   await reader.poll(); await reader.select(f.sessionId);
   const client = new EngineCommands(reader, { clock: () => f.now });
   const result = await client.submit(f.sessionId, 'start');
   fixture.session_id = 'c'.repeat(32);
   fixture.control.results = [{ id: result.id, action: 'start', outcome: 'requested' }];
-  fs.writeFileSync(file, JSON.stringify(fixture));
+  publishFixture(file, fixture);
   assert.equal((await reader.poll()).selected, fixture.session_id);
   assert.equal(reader.snapshot.connection, 'connected');
   fixture.session_id = 'd'.repeat(32); fixture.control.results = [];
-  fs.writeFileSync(file, JSON.stringify(fixture));
+  publishFixture(file, fixture);
   assert.equal((await reader.poll()).connection, 'unavailable');
 });
 test('Clear Memory follows only its exact acknowledged rotation and stays stopped', async t => {
@@ -100,16 +106,18 @@ test('Clear Memory follows only its exact acknowledged rotation and stays stoppe
     transcripts: [], delivery_events: [] };
   fixture.control.actions = ['clear_memory'];
   const file = path.join(f.directory, 'engine-123.json');
-  fs.writeFileSync(file, JSON.stringify(fixture));
+  publishFixture(file, fixture);
   await reader.poll(); await reader.select(f.sessionId);
   const client = new EngineCommands(reader, { clock: () => f.now });
   const result = await client.submit(f.sessionId, 'clear_memory', undefined, undefined, undefined, undefined, undefined, { revision: 'e'.repeat(32) });
   fixture.session_id = 'c'.repeat(32); fixture.revision++;
   fixture.control.results = [{ id: 'f'.repeat(32), action: 'clear_memory', outcome: 'requested' }];
-  fs.writeFileSync(file, JSON.stringify(fixture));
+  publishFixture(file, fixture);
+  fs.utimesSync(file, 1700000000, 1700000000);
   assert.equal((await reader.poll()).connection, 'unavailable');
   fixture.revision++; fixture.control.results = [{ id: result.id, action: 'clear_memory', outcome: 'requested' }];
-  fs.writeFileSync(file, JSON.stringify(fixture));
+  publishFixture(file, fixture);
+  fs.utimesSync(file, 1700000000, 1700000000);
   const cleared = await reader.poll();
   assert.equal(cleared.selected, fixture.session_id);
   assert.equal(cleared.connection, 'connected');
@@ -127,16 +135,16 @@ test('selected owned backend follows only an acknowledged bot Start with the sam
   const f=setup(t),reader=new EngineFeedReader({directory:f.directory,clock:()=>f.now});
   const fixture={...f.session,schema:1,revision:1,origin:'engine',host:{managed:true},started_at:new Date(f.now).toISOString(),
     config:{streams:{primary:{enabled:true},secondary:{enabled:false}}},transcripts:[],delivery_events:[]};
-  const file=path.join(f.directory,'engine-123.json');fs.writeFileSync(file,JSON.stringify(fixture));
+  const file=path.join(f.directory,'engine-123.json');publishFixture(file, fixture);
   await reader.poll();await reader.select(f.sessionId);
   const id='e'.repeat(32);fixture.session_id='d'.repeat(32);fixture.revision++;
   fixture.control.results=[{id,action:'start',outcome:'requested'}];
   fixture.control.bot={status:'online',events:[]};
-  fs.writeFileSync(file,JSON.stringify(fixture));assert.equal((await reader.poll()).connection,'unavailable');
+  publishFixture(file, fixture);assert.equal((await reader.poll()).connection,'unavailable');
   fixture.revision++;fixture.control.bot.events=[{id,route:'/start',http_status:200,timestamp:new Date(f.now).toISOString(),outcome:'acknowledged'}];
-  fs.writeFileSync(file,JSON.stringify(fixture));assert.equal((await reader.poll()).selected,fixture.session_id);
+  publishFixture(file, fixture);assert.equal((await reader.poll()).selected,fixture.session_id);
   fixture.session_id='c'.repeat(32);fixture.revision++;fixture.control.bot.events=[];
-  fs.writeFileSync(file,JSON.stringify(fixture));assert.equal((await reader.poll()).connection,'unavailable');
+  publishFixture(file, fixture);assert.equal((await reader.poll()).connection,'unavailable');
 });
 test('bot controls require a current explicit capability and never accept renderer credentials',async t=>{
   const f=setup(t);f.session.control.actions=['start_bot'];
