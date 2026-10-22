@@ -189,3 +189,31 @@ checks wait for their return, current target resolution and isolation approval.
 The idle QA profile and its synthetic import are retained for that continuation;
 their cleanup is not yet claimed. Real settings and installed app are untouched.
 Progress remains **30/32**; the original incident remains **unresolved**.
+
+### User-confirmed foreground follow-up
+
+The user answered “I see Settings” to the pending foreground-window question.
+The next native screenshot also showed Settings, matching accessibility. This
+supports stale native capture in the earlier attempt; it does not establish an
+application freeze. No runtime fix was justified by that discrepancy.
+
+With fresh capture available, native Settings scrolling reached Appearance and
+About while the safety controls remained accessible. The Window layout label and
+Studio selector aligned. Native Live captures for Sage, Midnight, Galaxy, Aurora
+and Ember showed readable reference status, last-sent reference, separate English
+and Malayalam panels and usable header controls. They are retained as
+`native-computer-use/live-{sage,midnight,galaxy,aurora,ember}.jpg`. These five
+captures use existing synthetic transcript data and the system's dark appearance.
+
+Switching back to Glass produced ScreenCaptureKit invalid-parameter and
+accessibility invalid-element errors; a refreshed native handle confirmed Glass
+selected, but subsequent captures again showed older Ember pixels. The file named
+`live-glass.jpg` is preserved as evidence of that mismatch, **not** a Glass pass.
+Native half-screen resizing similarly returned a cropped older bitmap, so it
+does not establish narrow-window layout success. The native Return to Previous
+Size action was used afterward. Final accessibility records Settings,
+Glass/Studio, verification microphone and engine stopped in
+`native-computer-use/post-theme-restore-ax.txt`. Real settings were not changed.
+Item 30 remains partial: Glass/backdrop, reliable resized pixels, native independent
+scrolling/focus under incoming transcripts and completed native export save remain
+unverified. No real microphone or presentation test was started.
