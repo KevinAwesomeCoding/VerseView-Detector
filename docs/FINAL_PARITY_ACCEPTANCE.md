@@ -254,3 +254,42 @@ stopped state after the correct rotation. All 18 command tests and all 99 deskto
 unit tests pass locally; whitespace checks pass. This is a test-only correction,
 not a runtime cache/STT/delivery change. The corrected native release run must
 still pass before publication is claimed.
+
+### Published release — October 22, 2:46 PM Chicago
+
+**Published:** [VerseView Detector Beta 238.2](https://github.com/KevinAwesomeCoding/VerseView-Detector/releases/tag/desktop-beta-238-2),
+tag `desktop-beta-238-2`, application version **0.15.7**, source
+`fd3b2baa9f7e56fe27b07bd17fa6370f3e2c3f92`.
+[Release run 39810036082, attempt 2](https://github.com/KevinAwesomeCoding/VerseView-Detector/actions/runs/39810036082)
+reports completed/success, with the publish job completed successfully.
+
+Attempt 1's Intel job lost hosted-runner communication without a failing test.
+After the user supplied signed-in Chrome access, Re-run failed jobs started Intel
+and its dependent publish job at 2:36 PM. Windows and Apple Silicon successful
+results were retained. Intel's direct job record lists every step, including
+native regressions, frozen checks, packaging, archive acceptance, upload and
+Complete job, as success. At the first publication lookup its aggregate job
+status still said in_progress despite those successful steps and the completed
+workflow; this transient status discrepancy was not treated as an app failure.
+The release staging gate verified all three archive reports and package hashes
+before publication.
+
+Exactly three uploaded app assets were verified through the release API; the
+release page also offers GitHub's two automatic source-code archives. Published
+asset digests match the release notes (not a new independent full-download hash):
+
+| Download | Bytes | SHA-256 |
+| --- | ---: | --- |
+| VerseView-Detector-Windows-Setup.exe | 163897710 | `08581ded08a6ae06273e13cd71746a6b01ac5c1ffc8f76d63bb1891a5e4e44e6` |
+| VerseView-Detector-Mac-Apple-Silicon.zip | 191195135 | `9b7f5f9d71d77673a9dc16418ff3665a170bf2adaab02fc281ce7bbdc2b0a6a0` |
+| VerseView-Detector-Mac-Intel.zip | 197718052 | `c0f74002fa59765e6ab57dbdd909526fca0f10f964185aac29fd6d55a9eb6edb` |
+
+Release metadata and job records are retained in
+`desktop-preview/test-results/native-ci/published-release-238-2.json` and
+`release-attempt-2-jobs.json`. The public notes state the correct source, deferred
+visual/real-path tests, intentionally omitted paid signing/notarization and
+unresolved original incident. No installed application, real settings or security
+settings were changed. QA evidence/profile remains retained; no full cleanup or
+new physical acceptance is claimed. **30/32 verified, two owner-deferred.** The
+repeating task is to be paused under that explicit scope change now publication
+is verified; resuming the deferred tests requires a later owner request.

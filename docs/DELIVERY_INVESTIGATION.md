@@ -1687,3 +1687,18 @@ Exact artifacts, commits, CI metadata, screenshots, native AX evidence and remai
 steps are in [FINAL_PARITY_ACCEPTANCE.md](FINAL_PARITY_ACCEPTANCE.md). Synthetic
 callback replay is not microphone/STT acceptance. The original intermittent
 delivery incident remains **unresolved**.
+
+## October 22 — owner-authorized parity beta publication
+
+The owner deferred the final visual and physical microphone/output checks and
+requested release. [Beta 238.2](https://github.com/KevinAwesomeCoding/VerseView-Detector/releases/tag/desktop-beta-238-2)
+was published at 2:46 PM Chicago, app version 0.15.7, source `fd3b2ba`, after
+release run `39810036082` attempt 2 completed successfully. Windows Setup, Apple
+Silicon ZIP and Intel ZIP assets are present, with matching published digests and
+explicit deferred-test notes. The Intel retry followed a hosted-runner
+communication failure; the earlier Windows command test was corrected to publish
+fixtures atomically like the production observer. Neither change establishes a
+cause for the original incident. Exact provenance and limits are in
+[FINAL_PARITY_ACCEPTANCE.md](FINAL_PARITY_ACCEPTANCE.md). Installed app, real
+settings and security settings remain unchanged. Progress stays 30/32 verified,
+two deferred; the repeating task is paused under the explicit scope change.

@@ -285,3 +285,9 @@ Current scope: **Group 8: 2/4 complete**. Total **30/32 (93.75%)**. Current-code
 the owner's explicit request to release now. They remain unchecked. Release is
 authorized through the existing verified beta workflow; pause the repeating task
 after publication is confirmed, without claiming those tests passed.
+
+**Release confirmed:** [Beta 238.2](https://github.com/KevinAwesomeCoding/VerseView-Detector/releases/tag/desktop-beta-238-2)
+published October 22 at 2:46 PM Chicago from `fd3b2ba` after successful release
+run `39810036082` attempt 2. Windows Setup and both Mac ZIP downloads are present.
+The repeating task is paused under the owner's scope change; items 30–31 remain
+deferred and unchecked, not completed.
