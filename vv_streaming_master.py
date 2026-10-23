@@ -7470,7 +7470,13 @@ def launch_stt_task(controller, is_secondary: bool = False):
             _observer_emit("stream", stream=role, state="error")
             raise
         else:
-            _observer_emit("stream", stream=role, state="stopped")
+            # A provider can return after a microphone or service failure
+            # without raising. Only an operator Stop should report stopped.
+            if stop_event.is_set():
+                _observer_emit("stream", stream=role, state="stopped")
+            else:
+                logger.error("Speech stream ended unexpectedly (%s). Check microphone and provider settings.", role)
+                _observer_emit("stream", stream=role, state="error")
 
     return asyncio.create_task(_run_stream())
 

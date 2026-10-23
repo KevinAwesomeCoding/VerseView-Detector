@@ -158,7 +158,7 @@
     const lastEvent = session?.delivery_events.filter(row => row.stream === role && row.reference).at(-1);
     const streamState = session?.streams[role]?.state;
     const streamStatus = config?.enabled === false ? 'Disabled in detector' : ({ configured: 'Configured',
-      starting: 'Starting in detector', transcript_received: 'Transcript received', stopped: 'Stream stopped', error: 'Stream error'
+      starting: 'Starting in detector', transcript_received: 'Transcript received', stopped: 'Stream stopped', error: 'Speech stream ended — check microphone or provider'
     })[streamState] || 'Waiting for status';
     return `<section class="vv-panel vv-stream vv-observed-stream" data-speech-stream="${role}" aria-label="${escape(name)} observed speech">
       <div class="vv-stream-header"><div><h2 lang="${escape(language || 'und')}">${escape(label)}</h2><p class="vv-stream-provider">${role === 'primary' ? 'Primary' : 'Secondary'} · ${escape(config?.provider || 'Provider not reported')}</p></div><span class="vv-badge">${escape(streamStatus)}</span></div>

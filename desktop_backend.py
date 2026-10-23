@@ -389,6 +389,8 @@ class BackendHost:
                                (' with English secondary. ' if scheduled != 'English' else ' only. ')) if scheduled else ''
             from desktop_settings import project, validate_changes, SettingsError
             validate_changes(project(values), project(values), self.devices)
+            if values.get('mic_index') not in {device['id'] for device in self.devices}:
+                raise BackendError('The selected microphone is no longer an input device. Choose a microphone in Settings and save before starting.')
             result = self.runtime.start(values, self.config, self.confirm)
             self.notice = schedule_notice + 'Engine start requested; device/provider readiness is reported separately.'
             return result

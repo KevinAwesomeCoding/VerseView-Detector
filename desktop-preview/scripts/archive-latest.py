@@ -45,7 +45,22 @@ if sys.platform == 'darwin':
     with tempfile.TemporaryDirectory(prefix='vv-download-check-') as temporary:
         subprocess.run(['ditto', '-x', '-k', str(archive), temporary], check=True)
         assert {p.name for p in Path(temporary).iterdir()} == {bundle.name}
-        verify_runtime(Path(temporary) / bundle.name)
+        installed = Path(temporary) / bundle.name
+        verify_runtime(installed)
+        # The helper must replace the app at exactly its old path after its
+        # caller exits. Suppress relaunch for this isolated CI installation.
+        executable = installed / 'Contents/MacOS/VerseView Detector'
+        code = "const p=require(process.argv[1]).prepareMac(process.argv[2],process.argv[3],{relaunch:false});console.log(JSON.stringify(p))"
+        prepared = json.loads(subprocess.check_output(['node', '-e', code, str(root/'update-service.cjs'),
+                                                        str(archive), str(executable)], text=True))
+        try:
+            subprocess.run(['/bin/sh', prepared['script']], check=True, timeout=45)
+            assert installed.is_dir(), 'Update did not keep the original application path'
+            assert Path(prepared['backup']).is_dir(), 'Update did not retain a rollback copy'
+            verify_runtime(installed)
+            report['samePathUpdateVerified'] = True
+        finally:
+            Path(prepared['script']).unlink(missing_ok=True)
     report['singleAppBundleVerified'] = True
 elif sys.platform == 'win32':
     # GitHub's native Windows image includes Inno Setup; never install a tool
@@ -71,6 +86,19 @@ elif sys.platform == 'win32':
             assert (target / (product + '.exe')).is_file(), 'Installed application missing'
             verify_runtime(target)
             report['installerRuntimeVerified'] = True
+            # Exercise the same-path upgrade used by the in-app updater. A
+            # changed runtime must be replaced even when Setup sees this AppId.
+            asar = target / 'resources/app.asar'
+            original_digest = hashlib.sha256(asar.read_bytes()).hexdigest()
+            with asar.open('ab') as handle:
+                handle.write(b'\nverseview-upgrade-check\n')
+            assert hashlib.sha256(asar.read_bytes()).hexdigest() != original_digest
+            subprocess.run([str(archive), '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART',
+                            '/SP-', '/CURRENTUSER', f'/DIR={target}',
+                            f'/LOG={root / "test-results/ci-installer-upgrade.log"}'], check=True, timeout=180)
+            assert hashlib.sha256(asar.read_bytes()).hexdigest() == original_digest, 'Upgrade did not replace the runtime'
+            verify_runtime(target)
+            report['sameDirectoryUpgradeVerified'] = True
         finally:
             uninstaller = target / 'unins000.exe'
             assert uninstaller.is_file(), 'Uninstaller missing'
