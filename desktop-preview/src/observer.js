@@ -4,6 +4,7 @@
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
   })[character]);
   let command = null;
+  let askNotice = '';
   let recoveryOpen = null;
   let suggestionsOpen = null;
   let newSessionBusy = false;
@@ -52,6 +53,7 @@
   }
   function consumerNotice(snapshot){
     const c=snapshot.session?.control,flow=window.consumerFlow?.state();
+    if(askNotice)return askNotice;
     if(newSessionNotice)return newSessionNotice;
     if(flow?.busy)return flow.notice;
     if(snapshot.connection!=='connected'&&window.previewShell.getBackend().owned)return 'Connection lost. Listening status is unknown; reconnect before sending commands.';
@@ -442,7 +444,7 @@
     const snapshot=window.previewShell.getObserver(),control=snapshot.session?.control;
     if(!control?.actions.includes('set_ask_before_sending'))return;
     button.disabled=true;
-    try{await window.verseviewDesktop.operator(snapshot.session.session_id,'set_ask_before_sending',{enabled:!control.ask_before_sending});}
-    catch{button.disabled=false;}
+    try{await window.verseviewDesktop.operator(snapshot.session.session_id,'set_ask_before_sending',{enabled:!control.ask_before_sending});askNotice='';}
+    catch(error){askNotice=error?.message||'Could not change Ask before sending. Try again.';button.disabled=false;root.dispatchEvent(new Event('preview:observer'));}
   });
 })();

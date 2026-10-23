@@ -245,7 +245,7 @@ ipcMain.handle('preview:profile-transfer',async(event,sessionId,revision,kind,in
   return require('./profile-transfer.cjs').importProfile({reader:observer,manager,commands,sessionId,revision,kind,includeCredentials,chooseFile:o=>dialog.showOpenDialog(window,o)});
 });
 ipcMain.handle('preview:operator', (event, sessionId, action, value) => {
-  if(!trusted(event)||!['list_sessions','preview_session','resume_saved','save_session','set_worship','emergency_save','set_context','verse_preview','chapter_browse','send_reference','preview_suggestion','dismiss_suggestion','clear_suggestions','clear_history','grid_preview', 'connection_action', 'generate_notes', 'cancel_notes', 'prepare_export', 'prepare_memory_clear', 'clear_memory', 'new_session'].includes(action))throw new Error('Invalid operator request');
+  if(!trusted(event)||!['list_sessions','preview_session','resume_saved','save_session','set_worship','set_ask_before_sending','emergency_save','set_context','verse_preview','chapter_browse','send_reference','preview_suggestion','dismiss_suggestion','clear_suggestions','clear_history','grid_preview', 'connection_action', 'generate_notes', 'cancel_notes', 'prepare_export', 'prepare_memory_clear', 'clear_memory', 'new_session'].includes(action))throw new Error('Invalid operator request');
   return commands.submit(sessionId,action,undefined,undefined,undefined,undefined,undefined,value);
 });
 ipcMain.handle('preview:window-pin', (event, enabled) => {

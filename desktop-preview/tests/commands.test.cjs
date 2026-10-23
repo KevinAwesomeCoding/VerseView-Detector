@@ -53,6 +53,12 @@ test('ask before sending uses a typed toggle and bounds review context', async t
   assert.equal(control.pending[0].context.before.length,200);
   assert.equal(control.pending[0].context.detected,'John 3:18');
 });
+test('desktop operator bridge exposes the ask before sending command', () => {
+  const source=fs.readFileSync(path.join(__dirname,'../main.cjs'),'utf8');
+  const handler=source.match(/ipcMain\.handle\('preview:operator'[\s\S]*?\n\}\);/)?.[0];
+  assert.ok(handler);
+  assert.match(handler,/['"]set_ask_before_sending['"]/);
+});
 test('new session requires a stopped detector and writes no extra fields', async t => {
   const f = setup(t);
   f.session.control.actions = ['new_session'];
