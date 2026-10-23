@@ -375,7 +375,9 @@ See the [installation and rollback guide](INSTALLATION_AND_ROLLBACK.md) for
 profile locations, one-time settings/managed-credential import, private backups,
 manual updates and uninstall/reinstall. Packaged builds now check GitHub releases
 for a newer verified package on launch and every two minutes while open. A new
-release shows an in-app prompt and **Update** in the title bar. The app downloads
+release shows its change summary once, and **Update** in the title bar always
+reopens the update details. **Later** is remembered across app restarts for that
+release; a newer release prompts again. The app downloads
 and checks the package before replacing it at the
 same location after shutdown. Settings and credentials remain in the profile.
 The [installation verification report](INSTALLATION_VERIFICATION.md) records

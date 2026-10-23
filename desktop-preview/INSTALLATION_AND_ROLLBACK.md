@@ -103,10 +103,12 @@ presentation should start only in the isolated test session approved by the user
 
 Packaged builds check GitHub releases for a newer compatible stable or beta
 package on launch and every two minutes while open. When one is available,
-the app shows an in-app prompt and **Update** appears in the title bar. **Later**
-dismisses the prompt for that release until the app closes; a newer release
-prompts again. Clicking **Update now** or the title-bar **Update** button
-it downloads the whole native package and verifies its published SHA-256 before
+the app shows its release notes once and **Update** appears in the title bar.
+**Later** dismisses that release's prompt across app restarts; a newer release
+prompts once again. The title-bar **Update** button reopens the notes and update
+choice at any time. **Full changelog** opens the changes since the installed
+build on GitHub. Clicking **Update now** downloads the whole native package and
+verifies its published SHA-256 before
 the app quits. On Mac, a helper extracts and verifies the complete app bundle,
 then swaps it into the existing location and keeps the prior bundle as a hidden
 rollback copy. The location must be writable by the current user. On Windows,

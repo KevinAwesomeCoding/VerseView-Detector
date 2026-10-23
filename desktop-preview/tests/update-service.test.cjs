@@ -2,7 +2,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
-const { candidate, checksum, launchInstaller } = require('../update-service.cjs');
+const { candidate, checksum, highlights, launchInstaller } = require('../update-service.cjs');
 
 const name = 'VerseView-Detector-Mac-Apple-Silicon.zip';
 const digest = 'a'.repeat(64);
@@ -38,6 +38,18 @@ test('selects only the matching Intel Mac or Windows installer asset', () => {
     assert.equal(candidate([release()], { ...context, platform, arch }), null);
     assert.equal(candidate([matching], { ...context, platform, arch, channel: 'stable' }), null);
   }
+});
+
+test('update details include readable notes from each newer compatible release', () => {
+  const older = release({ tag_name: 'desktop-beta-239-1', published_at: '2026-10-22T13:00:00Z',
+    body: `## What's new\n\n- Fixed detection.\n\n<details>\n${digest}  ${name}\nSource commit: \`${newer}\`\n</details>` });
+  const latest = release({ body: `## What's new\n\n- Added update dialog.\n\n<details>\n${digest}  ${name}\nSource commit: \`${newer}\`\n</details>` });
+  const chosen = candidate([older, latest], context);
+  assert.equal(chosen.tag, 'desktop-beta-240-1');
+  assert.match(chosen.notes, /Added update dialog/);
+  assert.match(chosen.notes, /Fixed detection/);
+  assert.doesNotMatch(chosen.notes, /details|Source commit/);
+  assert.equal(highlights('No summary'), '');
 });
 
 test('Windows handoff starts the installer in the current executable directory', async () => {

@@ -88,9 +88,14 @@ async function checkUpdates() {
     const releases = await updates.releaseList();
     availableUpdate = updates.candidate(releases, { platform: process.platform, arch: process.arch,
       builtAt: build.builtAt, sourceRevision: build.sourceRevision, channel: updateChannel });
-    publishUpdate(availableUpdate ? { phase: 'available', tag: availableUpdate.tag, prerelease: availableUpdate.prerelease }
+    publishUpdate(availableUpdate ? { phase: 'available', tag: availableUpdate.tag, prerelease: availableUpdate.prerelease,
+      notes: availableUpdate.notes }
       : { phase: 'current' });
-  } catch (error) { publishUpdate({ phase: 'check-failed', message: error.message }); }
+  } catch (error) {
+    if (availableUpdate) publishUpdate({ phase: 'available', tag: availableUpdate.tag,
+      prerelease: availableUpdate.prerelease, notes: availableUpdate.notes });
+    else publishUpdate({ phase: 'check-failed', message: error.message });
+  }
   return updateState;
 }
 
@@ -138,6 +143,11 @@ ipcMain.handle('preview:update-state', event => {
 ipcMain.handle('preview:check-update', event => {
   if (!trusted(event)) throw new Error('Untrusted update request');
   return checkUpdates();
+});
+ipcMain.handle('preview:update-changelog', event => {
+  if (!trusted(event) || !availableUpdate || !/^[a-f0-9]{40}$/.test(build.sourceRevision)
+    || !/^[a-f0-9]{40}$/.test(availableUpdate.sourceRevision)) throw new Error('No update changelog is available');
+  return shell.openExternal(`https://github.com/KevinAwesomeCoding/VerseView-Detector/compare/${build.sourceRevision}...${availableUpdate.sourceRevision}`);
 });
 ipcMain.handle('preview:apply-update', async event => {
   if (!trusted(event) || !availableUpdate || updateBusy || !app.isPackaged) throw new Error('No verified update is ready');

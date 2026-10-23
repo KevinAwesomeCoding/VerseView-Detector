@@ -44,14 +44,17 @@
       </div>
     </header>
     <div id="preview-surface" class="vv-window" data-layout="studio" aria-label="VerseView dashboard"></div>
-    <aside id="preview-update-prompt" class="preview-update-prompt" aria-label="New version available" role="status" aria-live="polite" hidden>
-      <strong>Update available</strong>
+    <dialog id="preview-update-prompt" class="preview-update-prompt" aria-labelledby="preview-update-prompt-title">
+      <h2 id="preview-update-prompt-title">Update available</h2>
       <p id="preview-update-prompt-message"></p>
+      <h3>What's changed</h3>
+      <div id="preview-update-prompt-notes" class="preview-update-prompt-notes"></div>
       <div class="preview-update-prompt-actions">
+        <button type="button" id="preview-update-prompt-changelog">Full changelog</button>
         <button type="button" id="preview-update-prompt-later">Later</button>
         <button type="button" id="preview-update-prompt-apply">Update now</button>
       </div>
-    </aside>
+    </dialog>
     <noscript>This preview needs JavaScript to display the sample dashboard.</noscript>
   </div>
 </body>

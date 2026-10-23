@@ -23,14 +23,26 @@
   const updateStatus = document.getElementById('preview-update-status');
   const updatePrompt = document.getElementById('preview-update-prompt');
   const updatePromptMessage = document.getElementById('preview-update-prompt-message');
+  const updatePromptNotes = document.getElementById('preview-update-prompt-notes');
   const updatePromptLater = document.getElementById('preview-update-prompt-later');
   const updatePromptApply = document.getElementById('preview-update-prompt-apply');
-  let dismissedUpdateTag;
-  let currentUpdateTag;
+  const updatePromptChangelog = document.getElementById('preview-update-prompt-changelog');
+  const promptedReleaseKey = 'verseview-desktop-preview.prompted-release.v1';
+  let promptedReleaseTag;
+  try { promptedReleaseTag = localStorage.getItem(promptedReleaseKey); } catch { /* Session-only reminder. */ }
+  let currentUpdate;
+  let updateSerial = 0;
+  function openUpdatePrompt() {
+    if (!currentUpdate?.tag || !updatePrompt) return;
+    promptedReleaseTag = currentUpdate.tag;
+    try { localStorage.setItem(promptedReleaseKey, promptedReleaseTag); } catch { /* Session-only reminder. */ }
+    if (!updatePrompt.open) updatePrompt.showModal();
+  }
   function showUpdate(value) {
     if (!updateTools || !updateButton || !updateStatus) return;
+    updateSerial++;
     const phase = value?.phase;
-    currentUpdateTag = phase === 'available' ? value.tag : undefined;
+    currentUpdate = phase === 'available' ? value : undefined;
     updateTools.hidden = !['available', 'downloading', 'verified', 'installing', 'error'].includes(phase);
     updateButton.disabled = phase !== 'available';
     updateButton.textContent = phase === 'available' ? 'Update' : phase === 'downloading' ? `Downloading ${value.percent || 0}%…`
@@ -39,25 +51,28 @@
       : phase === 'error' ? value.message || 'Update failed' : '';
     updateStatus.title = updateStatus.textContent;
     if (phase === 'error') updateButton.disabled = false;
-    if (updatePrompt && updatePromptMessage) {
-      const showPrompt = phase === 'available' && Boolean(value.tag) && value.tag !== dismissedUpdateTag;
-      updatePrompt.hidden = !showPrompt;
-      if (showPrompt) updatePromptMessage.textContent = `A new VerseView Detector ${value.prerelease ? 'beta' : 'release'} is ready. Update now?`;
+    if (phase === 'available' && value.tag) {
+      if (updatePromptMessage) updatePromptMessage.textContent = `${value.prerelease ? 'Beta' : 'Release'} ${value.tag} is ready. Would you like to update now?`;
+      if (updatePromptNotes) updatePromptNotes.textContent = value.notes || 'A written summary is unavailable for this release. Open the full changelog to see every change since your installed version.';
+      if (value.tag !== promptedReleaseTag) openUpdatePrompt();
+    } else if (updatePrompt?.open) {
+      updatePrompt.close();
     }
   }
   async function startUpdate() {
     if (!window.verseviewDesktop) return;
     updateButton.disabled = true;
-    if (updatePrompt) updatePrompt.hidden = true;
+    if (updatePrompt?.open) updatePrompt.close();
     if (updateButton.textContent === 'Check again') await window.verseviewDesktop.checkUpdate();
     else await window.verseviewDesktop.applyUpdate();
   }
-  updateButton?.addEventListener('click', startUpdate);
-  updatePromptApply?.addEventListener('click', startUpdate);
-  updatePromptLater?.addEventListener('click', () => {
-    dismissedUpdateTag = currentUpdateTag;
-    if (updatePrompt) updatePrompt.hidden = true;
+  updateButton?.addEventListener('click', () => {
+    if (updateButton.textContent === 'Check again') startUpdate();
+    else openUpdatePrompt();
   });
+  updatePromptApply?.addEventListener('click', startUpdate);
+  updatePromptLater?.addEventListener('click', () => updatePrompt.close());
+  updatePromptChangelog?.addEventListener('click', () => window.verseviewDesktop?.openUpdateChangelog());
   let observer = { connection: 'waiting', message: 'Waiting for an observer-enabled detector', sources: [], session: null };
   let environment = { platform: 'browser', version: '0.1.0', packaged: false, appearance: { mode: 'solid', reason: 'Browser preview' } };
   let backend = { status: 'unavailable', message: 'Checking bundled backend availability', owned: false };
@@ -137,7 +152,10 @@
   });
   if (window.verseviewDesktop) {
     window.verseviewDesktop.onUpdateChanged(showUpdate);
-    window.verseviewDesktop.updateState().then(showUpdate).catch(() => {});
+    const initialUpdateSerial = updateSerial;
+    window.verseviewDesktop.updateState().then(value => {
+      if (updateSerial === initialUpdateSerial) showUpdate(value);
+    }).catch(() => {});
     const updateBackend = value => { backend = value; root.dispatchEvent(new Event('preview:backend')); };
     window.verseviewDesktop.onBackendChanged(updateBackend);
     window.verseviewDesktop.backendState().then(updateBackend).catch(() => {});

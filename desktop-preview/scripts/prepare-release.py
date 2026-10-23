@@ -4,6 +4,7 @@ import hashlib
 import json
 from pathlib import Path
 import shutil
+import subprocess
 
 DOWNLOAD_NAMES = {
     ('win32', 'x64'): 'VerseView-Detector-Windows-Setup.exe',
@@ -13,7 +14,22 @@ DOWNLOAD_NAMES = {
 EXPECTED = set(DOWNLOAD_NAMES)
 
 
-def release_notes(checksums, source_commit=None):
+def changes_since_previous_release(repo):
+    try:
+        tag = subprocess.run(
+            ['git', 'describe', '--tags', '--match', 'desktop-beta-*', '--abbrev=0'],
+            cwd=repo, capture_output=True, text=True, check=True, timeout=10,
+        ).stdout.strip()
+        subjects = subprocess.run(
+            ['git', 'log', '--first-parent', '--format=%s', f'{tag}..HEAD'],
+            cwd=repo, capture_output=True, text=True, check=True, timeout=10,
+        ).stdout.splitlines()
+        return [subject[:160] for subject in subjects if subject.strip()][:15]
+    except (OSError, subprocess.SubprocessError):
+        return []
+
+
+def release_notes(checksums, source_commit=None, changes=()):
     lines = [
         '## Download VerseView Detector', '',
         'Choose the download for your computer under **Assets** below.', '',
@@ -25,6 +41,8 @@ def release_notes(checksums, source_commit=None):
         '**Beta:** final native visual checks and real microphone/STT-to-visible-VerseVIEW acceptance',
         'are deferred by the owner for later testing. Native Windows, Intel Mac and Apple Silicon build checks run before publication.',
         'Paid publisher signing/notarization is intentionally omitted. The original intermittent delivery incident remains unresolved.', '',
+        "## What's new", '',
+        *([f'- {change}' for change in changes] if changes else ['Detailed changes are available in the full changelog.']), '',
         '<details>', '<summary>Technical details and SHA256 checksums</summary>', '',
     ]
     if source_commit:
@@ -35,7 +53,7 @@ def release_notes(checksums, source_commit=None):
     return '\n'.join(lines)
 
 
-def prepare_artifacts(artifacts, output, source_commit=None):
+def prepare_artifacts(artifacts, output, source_commit=None, changes=None):
     artifacts, output = Path(artifacts), Path(output)
     staged, seen, filenames = [], set(), set()
     for report in sorted(artifacts.rglob('*-archive-verification.json')):
@@ -74,7 +92,8 @@ def prepare_artifacts(artifacts, output, source_commit=None):
     for name, package, digest in staged:
         shutil.copy2(package, output / name)
     (output / 'release-notes.md').write_text(
-        release_notes({name: digest for name, _, digest in staged}, source_commit), encoding='utf-8')
+        release_notes({name: digest for name, _, digest in staged}, source_commit,
+                      changes_since_previous_release(Path.cwd()) if changes is None else changes), encoding='utf-8')
     return len(staged)
 
 

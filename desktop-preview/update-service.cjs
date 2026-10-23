@@ -53,10 +53,19 @@ function checksum(body, name) {
   return match?.[1].toLowerCase() || null;
 }
 
+function highlights(body) {
+  const source = String(body || '');
+  const heading = /^## What's new[^\n]*\n/m.exec(source);
+  if (!heading) return '';
+  const section = source.slice(heading.index + heading[0].length);
+  const end = section.search(/^## |^<details>/m);
+  return (end < 0 ? section : section.slice(0, end)).trim().slice(0, 4000);
+}
+
 function candidate(releases, { platform, arch, builtAt, sourceRevision, channel = 'all' }) {
   const name = ASSETS[`${platform}-${arch}`];
   if (!name || !Number.isFinite(Date.parse(builtAt))) return null;
-  return releases.filter(r => !r.draft && (channel === 'all' || (channel === 'stable' ? !r.prerelease : r.prerelease)))
+  const compatible = releases.filter(r => !r.draft && (channel === 'all' || (channel === 'stable' ? !r.prerelease : r.prerelease)))
     .map(r => {
       const asset = r.assets?.find(a => a.name === name);
       const digest = checksum(r.body, name);
@@ -68,8 +77,14 @@ function candidate(releases, { platform, arch, builtAt, sourceRevision, channel 
       const url = asset.browser_download_url;
       try { if (!allowed(new URL(url))) return null; } catch { return null; }
       return { tag: String(r.tag_name || '').slice(0, 100), name, url, sha256: digest,
-        publishedAt: r.published_at, prerelease: Boolean(r.prerelease), size: asset.size };
-    }).filter(Boolean).sort((a, b) => Date.parse(b.publishedAt) - Date.parse(a.publishedAt))[0] || null;
+        publishedAt: r.published_at, prerelease: Boolean(r.prerelease), size: asset.size,
+        sourceRevision: releaseSource, highlights: highlights(r.body) };
+    }).filter(Boolean).sort((a, b) => Date.parse(b.publishedAt) - Date.parse(a.publishedAt));
+  if (!compatible.length) return null;
+  const chosen = compatible[0];
+  const notes = compatible.filter(r => r.highlights).slice(0, 8)
+    .map(r => `${r.tag}\n${r.highlights}`).join('\n\n').slice(0, 12000);
+  return { ...chosen, notes };
 }
 
 async function download(update, onProgress = () => {}) {
@@ -131,4 +146,4 @@ async function launchInstaller(file, executable, spawnInstaller = spawn) {
   child.unref();
 }
 
-module.exports = { API, ASSETS, candidate, releaseList, download, prepareMac, launchInstaller, checksum };
+module.exports = { API, ASSETS, candidate, releaseList, download, prepareMac, launchInstaller, checksum, highlights };

@@ -6,6 +6,7 @@ contextBridge.exposeInMainWorld('verseviewDesktop', Object.freeze({
   updateState:()=>ipcRenderer.invoke('preview:update-state'),
   checkUpdate:()=>ipcRenderer.invoke('preview:check-update'),
   applyUpdate:()=>ipcRenderer.invoke('preview:apply-update'),
+  openUpdateChangelog:()=>ipcRenderer.invoke('preview:update-changelog'),
   onUpdateChanged:callback=>{
     const listener=(_event,value)=>callback(value);ipcRenderer.on('preview:update-changed',listener);
     return ()=>ipcRenderer.removeListener('preview:update-changed',listener);
