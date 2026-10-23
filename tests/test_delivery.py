@@ -852,6 +852,29 @@ class DeliveryTests(unittest.TestCase):
         self.assertEqual(self.events('SUPPRESSED')[-1]['stage'], 'parser_guard')
         self.assertFalse(self.events('COMMAND_ACCEPTED'))
 
+    def test_malayalam_explicit_book_without_colon_reaches_delivery(self):
+        phrase = 'എന്തുണ്ട് വിശേഷം? എന്തുണ്ട് വിശേഷം? യോഹന്നാൻ 1 3.'
+        self.assertEqual(engine.parse_ml(phrase), ['John 1:3'])
+        self.assertTrue(engine.detect_verse_hybrid(phrase, self.ctrl, parser=engine.parse_ml))
+        self.assertEqual(self.events('COMMAND_ACCEPTED')[-1]['reference'], 'John 1:3')
+        self.assertFalse(self.events('SUPPRESSED'))
+
+    def test_malayalam_anchor_requires_whole_matching_book_not_casual_numbers(self):
+        self.assertTrue(engine._has_malayalam_book_anchor('യോഹന്നാൻ 1 3', 'John'))
+        self.assertTrue(engine._has_malayalam_book_anchor('യോഹന്നാന് 1 3', 'John'))
+        self.assertFalse(engine._is_book_as_person('John', 'യോഹന്നാൻ 1 3'))
+        self.assertTrue(engine._is_book_as_person('John', 'യോഹന്നാൻ സംസാരിച്ചു 1 3'))
+        for phrase, ref in [('എന്തുണ്ട് വിശേഷം 1 3', 'John 1:3'),
+                            ('യോഹന്നാൻ 1 3', 'Romans 1:3'),
+                            ('അയോഹന്നാൻ 1 3', 'John 1:3'),
+                            ('യോഹന്നാൻകഥ 1 3', 'John 1:3')]:
+            with self.subTest(phrase=phrase, ref=ref):
+                self.assertFalse(engine._has_malayalam_book_anchor(phrase, ref.rsplit(" ", 1)[0]))
+        with patch.object(engine, 'PRIMARY_PARSER', return_value=['John 1:3']):
+            self.assertFalse(engine.detect_verse_hybrid('എന്തുണ്ട് വിശേഷം 1 3', self.ctrl))
+        self.assertEqual(self.events('SUPPRESSED')[-1]['reason'], 'No book, chapter or verse anchor')
+        self.ctrl.driver.execute_script.assert_not_called()
+
     def test_gui_diagnostics_refresh_is_bounded_and_read_only(self):
         # Execute the actual GUI methods with fake widgets; no Tk window or
         # import of the application (which could start its bridge) is needed.

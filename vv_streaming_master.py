@@ -47,7 +47,8 @@ except ImportError:
 
 from parse_reference_eng import parse_references as parse_eng, normalize_numbers_only as norm_eng, resolve_book as resolve_book_eng, set_spoken_numeral_mode
 from parse_reference_hindi import parse_references as parse_hindi, normalize_numbers_only as norm_hindi
-from parse_reference_ml import parse_references as parse_ml, normalize_numbers_only as norm_ml
+from parse_reference_ml import (parse_references as parse_ml, normalize_numbers_only as norm_ml,
+                                BOOKS_ML, normalize_chillu)
 from bible_fetcher import fetch_verse as multi_fetch, fetch_chapter as _fetch_chapter_raw
 
 from stt_providers.deepgram_provider import DeepgramProvider
@@ -3653,6 +3654,28 @@ BOOK_KEYWORDS = (
     "philemon,hebrews,james,peter,jude,revelation"
 ).split(",")
 
+# Reuse the parser's reviewed aliases, but require a complete Malayalam book
+# token matching this candidate. Arbitrary Malayalam speech/numbers are not anchors.
+_ML_BOOK_ANCHORS = tuple(
+    (book, re.compile(r"(?<![\w\u0d00-\u0d7f])" +
+                      r"\s+".join(re.escape(part) for part in normalize_chillu(alias).split()) +
+                      r"(?![\w\u0d00-\u0d7f])"))
+    for alias, book in BOOKS_ML.items()
+    if any("\u0d00" <= char <= "\u0d7f" for char in alias)
+)
+
+
+def _has_malayalam_book_anchor(text, book, *, require_number=False):
+    normalized = normalize_chillu(norm_ml(text) if require_number else text)
+    for name, pattern in _ML_BOOK_ANCHORS:
+        if name != book:
+            continue
+        for match in pattern.finditer(normalized):
+            if not require_number or re.match(r"\s+\d", normalized[match.end():]):
+                return True
+    return False
+
+
 NUMBER_WORDS = (
     "one,two,three,four,five,six,seven,eight,"
     "nine,ten,eleven,twelve,thirteen,fourteen,fifteen,"
@@ -5800,7 +5823,8 @@ def _is_book_as_person(book_name: str, text: str) -> bool:
         return False  # unambiguous book name (e.g. Philippians, Revelation) — allow
 
     # Rule 1: digit immediately following the name → book reference
-    if re.search(rf'\b{re.escape(book_name)}\s+\d', text, re.IGNORECASE):
+    if (re.search(rf'\b{re.escape(book_name)}\s+\d', text, re.IGNORECASE)
+            or _has_malayalam_book_anchor(text, book_name, require_number=True)):
         return False
 
     # Rule 2: chapter/verse keyword or reading command present → book reference
@@ -6185,6 +6209,7 @@ def detect_verse_hybrid(text, controller, confidence=1.0, parser=None) -> bool:
                 re.search(r'\b(?:chapter|chap|ch|verse|verses)\b', text, re.IGNORECASE)
                 or ':' in text
                 or any(kw in text.lower() for kw in BOOK_KEYWORDS)
+                or _has_malayalam_book_anchor(text, verse.rsplit(" ", 1)[0])
             )
             
             if not has_ref_anchor:

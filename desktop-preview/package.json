@@ -1,7 +1,7 @@
 {
   "name": "verseview-desktop-preview",
   "productName": "VerseView Detector",
-  "version": "0.15.7",
+  "version": "0.15.8",
   "private": true,
   "description": "Desktop dashboard with opt-in local detector controls and a separate sample demo",
   "author": "VerseView Detector contributors",

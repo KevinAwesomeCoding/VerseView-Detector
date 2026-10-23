@@ -30,6 +30,18 @@ test('normal History consolidates candidate stages and distinguishes duplicate, 
  assert.equal((html.match(/vv-history-row/g)||[]).length,4);
  assert.match(text,/Already sent recently/);assert.match(text,/Waiting for the verse reading/);assert.match(text,/Needs approval/);assert.doesNotMatch(text,/INTERNAL|FAST-PATH|COMMAND_ACCEPTED/);
 });
+test('Live explicitly labels suppressed references and explains why without claiming a send',()=>{
+ const h=observerHarness(),base=h.s.session.delivery_events[0];
+ h.s.session.delivery_events=[{...base,outcome:'DETECTED'},{...base,outcome:'SUPPRESSED',reason:'No book, chapter or verse anchor'}];
+ const html=h.view.session(h.s,'vv-studio'),text=visible(html);
+ assert.match(text,/Reference suppressed/);assert.match(text,/Suppressed · not sent/);
+ assert.match(text,/Not sent\. No book, chapter or verse anchor/);
+ assert.doesNotMatch(text,/Reference detected|Command sent|Last sent:/);
+ h.s.session.delivery_events[1].reason='<script>unsafe</script>';
+ assert.doesNotMatch(h.view.session(h.s,'vv-studio'),/<script>unsafe/);
+ h.s.session.delivery_events[1].reason='Duplicate cooldown';
+ assert.match(visible(h.view.session(h.s,'vv-studio')),/Already sent recently/);
+});
 test('normal settings and diagnostics are separate; stale feed never says listening',()=>{
  const h=observerHarness();assert.doesNotMatch(h.view.settings(h.s),/PID|VERSEVIEW_|Session aaaa|Local detector connection/);
  h.s.connection='stale';assert.match(h.view.compactControls(h.s),/Connection unavailable/);assert.doesNotMatch(h.view.compactControls(h.s),/>Listening</);

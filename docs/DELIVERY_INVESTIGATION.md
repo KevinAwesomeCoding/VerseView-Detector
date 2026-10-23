@@ -1702,3 +1702,31 @@ cause for the original incident. Exact provenance and limits are in
 [FINAL_PARITY_ACCEPTANCE.md](FINAL_PARITY_ACCEPTANCE.md). Installed app, real
 settings and security settings remain unchanged. Progress stays 30/32 verified,
 two deferred; the repeating task is paused under the explicit scope change.
+
+
+## Malayalam book anchor suppression and consumer status — October 22
+
+The active installed backend recorded candidate `62008f791818` for John 1:3 at
+23:34:01 Chicago, then suppressed it at parser_guard with “No book, chapter or
+verse anchor.” Raw Malayalam contained “യോഹന്നാൻ 1 3”; VerseVIEW had connected,
+and no delivery request followed. A second candidate repeated the same result.
+This establishes the last confirmed stage and first blocked stage for this new
+incident; it does not explain the original intermittent incident.
+
+Version 0.15.8 adds whole-token Malayalam anchors from the existing parser alias
+table, restricted to the candidate's canonical book. It also lets a Malayalam
+book immediately followed by a number satisfy the existing person-name guard,
+matching the existing English rule. Bare numbers, unrelated Malayalam, another
+book and book-name substrings remain rejected. STT and all downstream delivery,
+manual approval, range, duplicate and queue safeguards are unchanged.
+
+Normal Live now labels SUPPRESSED outcomes “Reference suppressed,” with
+“Suppressed · not sent” for non-duplicate cases and the escaped reason in the
+main output. Duplicate suppression retains “Already sent recently.”
+
+Verification: the exact raw phrase reaches a fake browser through the real hybrid
+detection pipeline; unmatched/casual text remains blocked with no browser calls.
+259 Python tests, 100 desktop Node tests, syntax/offline page and whitespace
+checks pass. These are isolated tests, not fresh microphone/visible-output
+acceptance. Separate Mac package verification is pending; installed application
+and real settings remain untouched by this fix.
