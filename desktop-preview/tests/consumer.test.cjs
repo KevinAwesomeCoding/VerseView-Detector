@@ -59,6 +59,21 @@ test('normal settings and diagnostics are separate; stale feed never says listen
  h.s.connection='connected';h.s.session.streams.primary.state='error';assert.match(h.view.consumerNotice(h.s),/speech recognition needs attention/);
  h.developer(true);assert.match(h.view.runtime(h.s),/PID 123/);
 });
+test('top controls keep urgent actions visible and group occasional actions in More actions',()=>{
+ const h=observerHarness(),c=h.s.session.control;
+ c.actions.push('set_ask_before_sending');c.ask_before_sending=false;
+ h.window.operatorTools={safety:()=>'<button data-operator="emergency">Emergency Stop & Save</button>',header:()=>'<button data-operator="worship">Worship</button><button data-operator="pin">Always on top</button><button data-operator="save">Save session</button>',render:()=>'',recoveryNotice:()=>''};
+ const html=h.view.compactControls(h.s);
+ assert.match(html,/<button[^>]*data-live-stop/);
+ assert.match(html,/<button[^>]*data-ask-before-send[^>]*aria-pressed="false"/);
+ assert.match(html,/<button[^>]*data-operator="emergency"/);
+ assert.match(html,/<details[^>]*data-control-menu><summary[^>]*>More actions<\/summary>/);
+ assert.ok(html.indexOf('data-control-menu')<html.indexOf('data-new-session'));
+ assert.ok(html.indexOf('data-control-menu')<html.indexOf('data-engine-action="panic"'));
+ assert.ok(html.indexOf('data-control-menu')<html.indexOf('data-operator="save"'));
+ c.ask_before_sending=true;
+ assert.match(h.view.compactControls(h.s),/data-ask-before-send aria-pressed="true"[^>]*>Ask before sending <strong>On<\/strong>/);
+});
 function flowHarness(){
  const root=events(),s=snapshot();s.session.control.state='stopped';s.session.control.pending=[];s.session.control.actions=['start'];
  const calls=[];let backend={status:'idle',owned:false};

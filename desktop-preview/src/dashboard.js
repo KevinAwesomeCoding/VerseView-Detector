@@ -171,8 +171,9 @@
     if(!developer()&&!views().some(([view])=>view===state.view))state.view='session';
     designRender();
     const scrollTop=root.querySelector('[data-layout]')?.scrollTop||0;
-    const focused=root.contains(document.activeElement)?{layout:document.activeElement.closest('[data-layout]')?.dataset.layout,action:document.activeElement.dataset.action,operator:document.activeElement.dataset.operator,verse:document.activeElement.dataset.verse,verseField:document.activeElement.dataset.verseField,caret:document.activeElement.selectionStart,finish:document.activeElement.selectionEnd,view:document.activeElement.dataset.view,setting:document.activeElement.dataset.setting,stream:document.activeElement.dataset.stream,themeChoice:document.activeElement.dataset.themeChoice,developer:document.activeElement.hasAttribute('data-developer-mode')}:null;
+    const focused=root.contains(document.activeElement)?{layout:document.activeElement.closest('[data-layout]')?.dataset.layout,action:document.activeElement.dataset.action,operator:document.activeElement.dataset.operator,verse:document.activeElement.dataset.verse,verseField:document.activeElement.dataset.verseField,caret:document.activeElement.selectionStart,finish:document.activeElement.selectionEnd,view:document.activeElement.dataset.view,setting:document.activeElement.dataset.setting,stream:document.activeElement.dataset.stream,themeChoice:document.activeElement.dataset.themeChoice,developer:document.activeElement.hasAttribute('data-developer-mode'),controlMenu:document.activeElement.matches('[data-control-menu] > summary')}:null;
     for(const app of root.querySelectorAll('[data-layout]')){
+      const controlMenuOpen=app.querySelector?.('[data-control-menu]')?.open===true;
       const prefix=`vv-${app.dataset.layout}`;
       const titles={session:developer()?'Live session':'Live',activity:developer()?'Delivery activity':'History',notes:'Sermon notes',outline:'Sermon outline',testing:'Test area',settings:'Settings',runtime:'Runtime',diagnostics:'Diagnostics',cloud:'Cloud tuning',build:'Build information'};
       const subtitles=observing()?{session:developer()?'Speech streams, candidate decisions, and delivery status':'Your speech and references, live',activity:developer()?'Structured events from the detector':'Recent reference outcomes',notes:'Captured summaries, full transcripts and session memory',outline:'Editable notes and an optional separate display',testing:'Samples stay separate from live observations',settings:'Appearance, speech, and VerseVIEW connection'}:{session:'Sample audio · English and Malayalam',activity:'Detection, approval, and delivery details',testing:'Sample speech · no microphone required',settings:'Audio, recognition, and delivery'};
@@ -180,6 +181,7 @@
         <main class="vv-main"><div class="vv-narrow-nav">${brand()}${nav()}</div><header class="vv-topline"><div><h1>${titles[state.view]||titles.session}</h1><p class="vv-subtitle">${subtitles[state.view]||subtitles.session}</p></div><div class="vv-live-controls">${liveHeader()}</div></header>
         <div class="${state.view==='session'?'vv-live-announcement':'vv-feedback'}" role="status" aria-live="polite">${state.view==='session'?'':icon('info')}<span data-connection-notice>${esc(observing()?connectionNotice():state.feedback)}</span></div>
         <div class="vv-content">${pageContent(prefix)}</div>${developer()?`<footer class="vv-foot"><span>${observing()?'Desktop preview · live observer':'Desktop preview · sample data only'}</span><span>${observing()?'Delivery guards remain in the engine':'No microphone or VerseVIEW connection'}</span></footer>`:''}</main></div>`;
+      if(controlMenuOpen)app.querySelector?.('[data-control-menu]')?.setAttribute('open','');
       app.scrollTop=scrollTop;
     }
     window.verseTools?.syncControls();
@@ -193,7 +195,8 @@
       let el;
       const visibleMatch=selector=>[...app.querySelectorAll(selector)].find(candidate=>candidate.getClientRects().length>0);
       const sourceSelector=focused.stream?`[data-stream="${focused.stream}"]`:'';
-      if(focused.operator)el=visibleMatch(`[data-operator="${focused.operator}"]`);
+      if(focused.controlMenu)el=visibleMatch('[data-control-menu] > summary');
+      else if(focused.operator)el=visibleMatch(`[data-operator="${focused.operator}"]`);
       else if(focused.verseField)el=visibleMatch(`[data-verse-field="${focused.verseField}"]`);
       else if(focused.verse)el=visibleMatch(`[data-verse="${focused.verse}"]`);
       else if(focused.developer)el=visibleMatch('[data-developer-mode]');
@@ -204,6 +207,7 @@
   }
   function designRender(){root.dataset.theme=validTheme(state.theme)?state.theme:'sage';root.style.setProperty('--vv-radius',`${design.radius}px`);root.style.setProperty('--vv-gap',design.density==='Compact'?'12px':'20px');root.style.removeProperty('--vv-accent');window.previewShell.setTheme(state.theme)}
   root.addEventListener('click',e=>{
+    for(const menu of root.querySelectorAll('[data-control-menu][open]'))if(!menu.contains(e.target))menu.open=false;
     if(e.target.closest('[data-open-releases]')){window.verseviewDesktop?.openReleases().catch(()=>{});return;}
     const trigger=e.target.closest('[data-show-transcript]');
     if(trigger){window.transcriptView?.openAt(trigger.dataset.showTranscript,trigger.dataset.triggerStream);state.view='session';render();window.transcriptView?.afterPatch([]);root.querySelector('[data-layout]').scrollTop=0;return;}
@@ -231,6 +235,11 @@
     }
     render();
     if(previousView!==state.view)root.querySelector('[data-layout]').scrollTop=0;
+  });
+  root.addEventListener('keydown',e=>{
+    if(e.key!=='Escape')return;
+    const menu=e.target.closest?.('[data-control-menu][open]');
+    if(menu){menu.open=false;menu.querySelector('summary')?.focus();e.preventDefault();}
   });
   root.addEventListener('change',e=>{
     if(e.target.matches('[data-developer-mode]')){window.previewShell.setDeveloper(e.target.checked);return;}

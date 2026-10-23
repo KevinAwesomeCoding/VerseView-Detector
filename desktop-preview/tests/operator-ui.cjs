@@ -16,7 +16,11 @@ fs.writeFileSync(path.join(source,'settings.json'),JSON.stringify({language:'Eng
   await page.waitForFunction(()=>window.previewShell.getObserver().session?.control?.operator,{timeout:30000});
   pid=await page.evaluate(()=>window.previewShell.getBackend().pid);
   const state=await page.evaluate(()=>window.previewShell.getBackend());assert.equal(state.frozen,true);assert.equal(state.guiImported,false);assert.equal(state.verification,true);
-  const tools=()=>page.locator('[data-operator]');const click=action=>page.locator(`[data-operator="${action}"]`).filter({visible:true}).click();
+  const tools=()=>page.locator('[data-operator]');const click=async action=>{
+    const button=page.locator(`[data-operator="${action}"]`).filter({visible:true});
+    if(['pin','worship','save'].includes(action)&&!await button.isVisible())await page.locator('[data-control-menu] summary').click();
+    await button.click();
+  };
   await click('pin');assert.equal(await application.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].isAlwaysOnTop()),true);
   await click('pin');assert.equal(await application.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].isAlwaysOnTop()),false);
   checks.push('Native Always on top readback toggles both ways; Detector window only.');
