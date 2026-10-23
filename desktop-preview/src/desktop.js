@@ -21,9 +21,16 @@
   const updateTools = document.getElementById('preview-update-tools');
   const updateButton = document.getElementById('preview-update');
   const updateStatus = document.getElementById('preview-update-status');
+  const updatePrompt = document.getElementById('preview-update-prompt');
+  const updatePromptMessage = document.getElementById('preview-update-prompt-message');
+  const updatePromptLater = document.getElementById('preview-update-prompt-later');
+  const updatePromptApply = document.getElementById('preview-update-prompt-apply');
+  let dismissedUpdateTag;
+  let currentUpdateTag;
   function showUpdate(value) {
     if (!updateTools || !updateButton || !updateStatus) return;
     const phase = value?.phase;
+    currentUpdateTag = phase === 'available' ? value.tag : undefined;
     updateTools.hidden = !['available', 'downloading', 'verified', 'installing', 'error'].includes(phase);
     updateButton.disabled = phase !== 'available';
     updateButton.textContent = phase === 'available' ? 'Update' : phase === 'downloading' ? `Downloading ${value.percent || 0}%…`
@@ -32,12 +39,24 @@
       : phase === 'error' ? value.message || 'Update failed' : '';
     updateStatus.title = updateStatus.textContent;
     if (phase === 'error') updateButton.disabled = false;
+    if (updatePrompt && updatePromptMessage) {
+      const showPrompt = phase === 'available' && Boolean(value.tag) && value.tag !== dismissedUpdateTag;
+      updatePrompt.hidden = !showPrompt;
+      if (showPrompt) updatePromptMessage.textContent = `A new VerseView Detector ${value.prerelease ? 'beta' : 'release'} is ready. Update now?`;
+    }
   }
-  updateButton?.addEventListener('click', async () => {
+  async function startUpdate() {
     if (!window.verseviewDesktop) return;
     updateButton.disabled = true;
+    if (updatePrompt) updatePrompt.hidden = true;
     if (updateButton.textContent === 'Check again') await window.verseviewDesktop.checkUpdate();
     else await window.verseviewDesktop.applyUpdate();
+  }
+  updateButton?.addEventListener('click', startUpdate);
+  updatePromptApply?.addEventListener('click', startUpdate);
+  updatePromptLater?.addEventListener('click', () => {
+    dismissedUpdateTag = currentUpdateTag;
+    if (updatePrompt) updatePrompt.hidden = true;
   });
   let observer = { connection: 'waiting', message: 'Waiting for an observer-enabled detector', sources: [], session: null };
   let environment = { platform: 'browser', version: '0.1.0', packaged: false, appearance: { mode: 'solid', reason: 'Browser preview' } };

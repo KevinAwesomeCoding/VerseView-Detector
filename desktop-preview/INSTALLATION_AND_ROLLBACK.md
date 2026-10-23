@@ -102,7 +102,10 @@ presentation should start only in the isolated test session approved by the user
 ## Manual update and backup
 
 Packaged builds check GitHub releases for a newer compatible stable or beta
-package. When one is available, **Update** appears in the title bar. Clicking
+package on launch and every five minutes while open. When one is available,
+the app shows an in-app prompt and **Update** appears in the title bar. **Later**
+dismisses the prompt for that release until the app closes; a newer release
+prompts again. Clicking **Update now** or the title-bar **Update** button
 it downloads the whole native package and verifies its published SHA-256 before
 the app quits. On Mac, a helper extracts and verifies the complete app bundle,
 then swaps it into the existing location and keeps the prior bundle as a hidden
