@@ -37,6 +37,22 @@ test('start writes one bounded request with exact session/control identity, neve
   assert.equal(request.created_at, f.now / 1000);
   assert.equal(f.reader.commandTransition.id, result.id);
 });
+test('ask before sending uses a typed toggle and bounds review context', async t => {
+  const f=setup(t);
+  f.session.control.actions=['set_ask_before_sending'];
+  const submitted=await f.client.submit(f.sessionId,'set_ask_before_sending',undefined,undefined,undefined,undefined,undefined,{enabled:true});
+  const request=JSON.parse(fs.readFileSync(path.join(f.inbox,`command-${submitted.id}.json`)));
+  assert.equal(request.enabled,true);
+  await assert.rejects(f.client.submit(f.sessionId,'set_ask_before_sending',undefined,undefined,undefined,undefined,undefined,{enabled:'true'}));
+  const fixture={...f.session,schema:1,revision:1,origin:'engine',started_at:new Date(f.now).toISOString(),
+    config:{streams:{primary:{enabled:true},secondary:{enabled:false}}},transcripts:[],delivery_events:[]};
+  fixture.control.ask_before_sending=true;
+  fixture.control.pending=[{candidate_id:'c'.repeat(32),reference:'John 3:18',confidence:1,stream:'primary',source:'FAST-PATH',context:{before:'a'.repeat(500),detected:'John 3:18',after:'Later words'}}];
+  const control=decodeSnapshot(fixture).control;
+  assert.equal(control.ask_before_sending,true);
+  assert.equal(control.pending[0].context.before.length,200);
+  assert.equal(control.pending[0].context.detected,'John 3:18');
+});
 test('new session requires a stopped detector and writes no extra fields', async t => {
   const f = setup(t);
   f.session.control.actions = ['new_session'];

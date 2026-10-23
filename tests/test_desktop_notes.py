@@ -22,6 +22,7 @@ class NotesTests(unittest.TestCase):
                   'current_book':'John','current_chapter':'3','current_verse':'17','stream_languages':{'primary':'en','secondary':'ml'}}
         engine=SimpleNamespace(_local_llm_active_for=lambda role:False,_free_cloud_router=None,
             mistral_client=object(),generate_sermon_summary=Mock(return_value='Sermon notes — മലയാളം'),
+            send_sermon_notes_to_discord=Mock(),
             set_delivery_mode=Mock(),reset_desktop_memory=Mock())
         publisher=ObserverPublisher(True,self.profile/'Observer');publisher.begin({'streams':{'primary':{'enabled':True,'language':'en'},'secondary':{'enabled':True,'language':'ml'}}});self.addCleanup(publisher.close)
         self.runtime=SimpleNamespace(profile=self.profile,engine=engine,publisher=publisher,verification=False,has_started=True,
@@ -39,7 +40,7 @@ class NotesTests(unittest.TestCase):
         self.notes.generate(self.notes.revision);self.notes.worker.join(3)
         self.assertEqual(self.notes.status,'ready')
 
-    def test_generation_uses_fixed_full_original_bilingual_snapshot_and_never_notifies_discord(self):
+    def test_generation_uses_fixed_full_original_bilingual_snapshot_and_posts_notes(self):
         self.generate()
         payload=self.runtime.engine.generate_sermon_summary.call_args.args[0]
         self.assertTrue(payload['transcript'].startswith('ORIGINAL BEGINNING'))
@@ -47,6 +48,7 @@ class NotesTests(unittest.TestCase):
         self.assertIn('മലയാളം ആരംഭം',payload['transcript_secondary'])
         self.assertEqual(payload['verses_cited'],['John 3:16','John 3:17'])
         self.assertEqual(self.runtime.engine.generate_sermon_summary.call_args.kwargs,dict(notify=False,strict=True))
+        self.runtime.engine.send_sermon_notes_to_discord.assert_called_once_with('Sermon notes — മലയാളം')
         self.assertEqual(len(list((self.profile/'SessionLibrary').glob('*.json'))),1)
         restored=SessionNotes(self.runtime);self.assertEqual(restored.result['text'],'Sermon notes — മലയാളം')
 
@@ -99,6 +101,7 @@ class NotesTests(unittest.TestCase):
         self.assertEqual(self.notes.auto['status'],'saved')
         self.assertEqual(Path(self.notes.auto['notes_path']).read_text(encoding='utf-8'),'Sermon notes — മലയാളം')
         self.assertEqual(self.runtime.engine.generate_sermon_summary.call_count,calls)
+        self.runtime.engine.send_sermon_notes_to_discord.assert_called_once()
 
     def test_auto_save_failure_retains_transcript_and_no_retry_is_scheduled(self):
         self.runtime.engine.generate_sermon_summary.side_effect=ValueError('SECRET')

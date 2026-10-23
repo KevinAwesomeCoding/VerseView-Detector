@@ -67,6 +67,33 @@ class DesktopControlTests(unittest.TestCase):
         self.assertEqual(self.result()['outcome'], 'requested')
         self.assertEqual(self.publisher.snapshot()['control']['state'], 'stopped')
 
+    def test_ask_before_sending_switch_persists_and_cancels_pending(self):
+        engine = Mock(ASK_BEFORE_SENDING=False)
+        preference = Path(self.temporary.name) / 'approval-preferences.json'
+        self.broker.close()
+        self.broker = DesktopControl(self.publisher, lambda: self.state, self.start, self.stop,
+                                     enabled=True, clock=lambda: 1000, engine=engine, preference_path=preference)
+        self.broker.execute(self.request('set_ask_before_sending', enabled=True))
+        self.assertEqual(self.result()['outcome'], 'saved')
+        self.assertTrue(engine.ASK_BEFORE_SENDING)
+        self.assertTrue(json.loads(preference.read_text())['ask_before_sending'])
+        thread, answer = self.hold()
+        self.broker.execute(self.request('set_ask_before_sending', enabled=False))
+        thread.join(1)
+        self.assertEqual(answer, [False])
+        self.assertFalse(engine.ASK_BEFORE_SENDING)
+
+    def test_pending_review_contains_bounded_spoken_context(self):
+        self.publisher.emit('transcript', stream='secondary', text='Earlier sentence.', is_final=True)
+        self.publisher.emit('transcript', stream='secondary', text='Please read John 3:18 now.', is_final=True)
+        self.publisher.flush()
+        thread, _ = self.hold()
+        context = self.publisher.snapshot()['control']['pending'][0]['context']
+        self.assertEqual(context['before'], 'Earlier sentence.')
+        self.assertEqual(context['detected'], 'Please read John 3:18 now.')
+        self.broker.execute(self.request('reject', candidate_id='candidate-1'))
+        thread.join(1)
+
     def test_rejects_wrong_session_control_expired_future_and_unknown_action(self):
         for key, value in [('session_id', 'a'*32), ('control_id', 'b'*32),
                            ('created_at', 989), ('created_at', 1001), ('action', 'goto')]:

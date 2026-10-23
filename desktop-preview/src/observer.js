@@ -48,7 +48,7 @@
     const label=flow.busy?'Preparing…':!connected&&backend.owned?'Connection unavailable':s?.remote_connection?.status==='failed'&&c?.state==='stopped'?'Connection failed':c?.operator?.emergency?c.operator.busy?'Stopping & saving…':'Stopped':error?'Needs attention':running?c.state==='running'?'Listening':c.state==='stopping'?'Stopping…':'Starting…':connected?'Ready':'Stopped';
     const disabled=flow.busy||newSessionBusy||command?.outcome==='submitted';
     const canNew=connected&&window.verseviewDesktop&&(c?.state==='running'?c.actions.includes('stop'):c?.state==='stopped'&&c.actions.includes('new_session'));
-    return `<div class="vv-consumer-status" aria-label="Listening controls"><span class="vv-badge ${running&&!error?'vv-ok':''}"><span class="vv-dot"></span>${label}</span><div class="vv-control-actions">${running?`<button class="vv-btn vv-btn-primary" type="button" data-live-stop ${!connected||!c.actions.includes('stop')||newSessionBusy?'disabled':''}>Stop listening</button>`:`<button class="vv-btn vv-btn-primary" type="button" data-consumer-prepare="start" ${disabled||!window.verseviewDesktop?'disabled':''}>${s?.remote_connection?.status==='failed'&&c?.state==='stopped'?'Retry connection':'Start listening'}</button>`}<button class="vv-btn" type="button" data-new-session ${disabled||!canNew?'disabled':''}>${newSessionBusy?'Preparing new session…':'New session'}</button>${flow.busy?'<button class="vv-btn" type="button" data-consumer-cancel>Cancel preparation</button>':''}${c?.actions.includes('panic')?`<button class="vv-btn" type="button" data-engine-action="panic" data-engine-session="${s.session_id}" ${!connected?'disabled':''}>Clear output</button>`:''}${window.operatorTools?.safety(snapshot,false)||''}${window.operatorTools?.header(snapshot)||''}</div></div>${window.operatorTools?.recoveryNotice(snapshot)||''}${window.operatorTools?.render(snapshot)||''}${remoteStatus(snapshot)}${window.sessionSetup?.banner(snapshot)||''}`;
+    return `<div class="vv-consumer-status" aria-label="Listening controls"><span class="vv-badge ${running&&!error?'vv-ok':''}"><span class="vv-dot"></span>${label}</span><div class="vv-control-actions">${running?`<button class="vv-btn vv-btn-primary" type="button" data-live-stop ${!connected||!c.actions.includes('stop')||newSessionBusy?'disabled':''}>Stop listening</button>`:`<button class="vv-btn vv-btn-primary" type="button" data-consumer-prepare="start" ${disabled||!window.verseviewDesktop?'disabled':''}>${s?.remote_connection?.status==='failed'&&c?.state==='stopped'?'Retry connection':'Start listening'}</button>`}<button class="vv-btn" type="button" data-new-session ${disabled||!canNew?'disabled':''}>${newSessionBusy?'Preparing new session…':'New session'}</button>${flow.busy?'<button class="vv-btn" type="button" data-consumer-cancel>Cancel preparation</button>':''}${c?.actions.includes('panic')?`<button class="vv-btn" type="button" data-engine-action="panic" data-engine-session="${s.session_id}" ${!connected?'disabled':''}>Clear output</button>`:''}${c?.actions.includes('set_ask_before_sending')?`<button class="vv-btn" type="button" data-ask-before-send aria-pressed="${c.ask_before_sending===true}" ${!connected?'disabled':''}>Ask before sending ${c.ask_before_sending?'on':'off'}</button>`:''}${window.operatorTools?.safety(snapshot,false)||''}${window.operatorTools?.header(snapshot)||''}</div></div>${window.operatorTools?.recoveryNotice(snapshot)||''}${window.operatorTools?.render(snapshot)||''}${remoteStatus(snapshot)}${window.sessionSetup?.banner(snapshot)||''}`;
   }
   function consumerNotice(snapshot){
     const c=snapshot.session?.control,flow=window.consumerFlow?.state();
@@ -87,7 +87,7 @@
   }
   function history(snapshot){
     const rows=new Map();for(const e of snapshot.session?.delivery_events||[])if(e.reference)rows.set(e.candidate_id,e);
-    return `<section class="vv-panel" aria-label="Reference history"><div class="vv-panel-head"><h2>Recent references</h2></div>${rows.size?[...rows.values()].reverse().map(e=>`<div class="vv-history-row"><div><strong>${escape(e.reference)}</strong><p class="vv-caption">${escape(friendly(e))} · ${escape(streamName(snapshot.session,e.stream))}</p></div>${time(e.timestamp)}</div>`).join(''):'<p class="vv-observer-empty">References will appear here as you listen.</p>'}</section>`;
+    return `<section class="vv-panel" aria-label="Reference history"><div class="vv-panel-head"><h2>Recent references</h2></div>${rows.size?[...rows.values()].reverse().map(e=>`<div class="vv-history-row"><div><strong>${escape(e.reference)}</strong><p class="vv-caption">${escape(friendly(e))} · ${escape(streamName(snapshot.session,e.stream))}</p>${e.outcome==='COMMAND_ACCEPTED'&&e.trigger_text?`<button type="button" class="vv-trigger-link" data-show-transcript="${escape(e.transcript_id)}" data-trigger-stream="${escape(e.stream)}" title="Show this speech in the full transcript">“${escape(e.trigger_text)}” <span aria-hidden="true">↗</span></button>`:e.outcome==='COMMAND_ACCEPTED'?'<p class="vv-caption">Triggering speech was not captured for this reference.</p>':''}</div>${time(e.timestamp)}</div>`).join(''):'<p class="vv-observer-empty">References will appear here as you listen.</p>'}</section>`;
   }
 
   function reconcileCommand(snapshot){
@@ -175,13 +175,14 @@
     const lines = full ? window.transcriptView.rows(session, role) : session?.transcripts.filter(row => row.stream === role && row.is_final).slice(-4) || [];
     const partial = session?.transcripts.filter(row => row.stream === role && !row.is_final).at(-1);
     const lastEvent = session?.delivery_events.filter(row => row.stream === role && row.reference).at(-1);
+    const active = [...(session?.delivery_events||[])].reverse().find(row => row.outcome === 'COMMAND_ACCEPTED');
     const streamState = session?.streams[role]?.state;
     const streamStatus = config?.enabled === false ? 'Disabled in detector' : ({ configured: 'Configured',
       starting: 'Starting in detector', transcript_received: 'Transcript received', stopped: 'Stream stopped', error: 'Speech stream ended — check microphone or provider'
     })[streamState] || 'Waiting for status';
     return `<section class="vv-panel vv-stream vv-observed-stream" data-speech-stream="${role}" aria-label="${escape(name)} observed speech">
       <div class="vv-stream-header"><div><h2 lang="${escape(language || 'und')}">${escape(label)}</h2><p class="vv-stream-provider">${role === 'primary' ? 'Primary' : 'Secondary'} · ${escape(config?.provider || 'Provider not reported')}</p></div><span class="vv-badge">${escape(streamStatus)}</span></div>
-      <div class="vv-stream-results ${full ? 'vv-full-transcript' : ''}" ${full ? `data-full-transcript="${role}" tabindex="0" aria-label="${escape(name)} full transcript"` : ''}>${lines.length ? lines.map(row => `<div class="vv-transcript-line"><span class="vv-transcript-time">${time(row.timestamp)}</span><p lang="${escape(window.sessionPolicy?.transcript(row,session?.control?.settings?.values?.desktop_transcript_display||'original').language||row.language||'und')}">${escape(window.sessionPolicy?.transcript(row,session?.control?.settings?.values?.desktop_transcript_display||'original').text||row.text)}</p><span class="vv-caption">${escape(window.sessionPolicy?.transcript(row,session?.control?.settings?.values?.desktop_transcript_display||'original').label||'Provider transcription')}</span>${session?.control?.settings?.values?.desktop_transcript_display==='translation'&&row.translation?`<details class="vv-caption"><summary>Provider text${row.text_kind==='transliteration'?' (transliteration)':''}</summary><p>${escape(row.text)}</p></details>`:''}${row.translation && row.translation !== row.text && session?.control?.settings?.values?.desktop_transcript_display!=='translation' ? `<details class="vv-caption"><summary>English translation</summary><p lang="en">${escape(row.translation)}</p></details>` : ''}</div>`).join('') : '<p class="vv-observer-empty">No final transcript received.</p>'}</div>
+      <div class="vv-stream-results ${full ? 'vv-full-transcript' : ''}" ${full ? `data-full-transcript="${role}" tabindex="0" aria-label="${escape(name)} full transcript"` : ''}>${lines.length ? lines.map(row => `<div class="vv-transcript-line ${row.id===active?.transcript_id?'vv-transcript-trigger':''}" data-transcript-id="${escape(row.id)}"><span class="vv-transcript-time">${time(row.timestamp)}</span><p lang="${escape(window.sessionPolicy?.transcript(row,session?.control?.settings?.values?.desktop_transcript_display||'original').language||row.language||'und')}">${row.id===active?.transcript_id?`<mark>${escape(window.sessionPolicy?.transcript(row,session?.control?.settings?.values?.desktop_transcript_display||'original').text||row.text)}</mark>`:escape(window.sessionPolicy?.transcript(row,session?.control?.settings?.values?.desktop_transcript_display||'original').text||row.text)}</p><span class="vv-caption">${escape(window.sessionPolicy?.transcript(row,session?.control?.settings?.values?.desktop_transcript_display||'original').label||'Provider transcription')}${row.id===active?.transcript_id?` · Triggered ${escape(active.reference)}`:''}</span>${session?.control?.settings?.values?.desktop_transcript_display==='translation'&&row.translation?`<details class="vv-caption"><summary>Provider text${row.text_kind==='transliteration'?' (transliteration)':''}</summary><p>${escape(row.text)}</p></details>`:''}${row.translation && row.translation !== row.text && session?.control?.settings?.values?.desktop_transcript_display!=='translation' ? `<details class="vv-caption"><summary>English translation</summary><p lang="en">${escape(row.translation)}</p></details>` : ''}</div>`).join('') : '<p class="vv-observer-empty">No final transcript received.</p>'}</div>
       ${partial ? `<div class="vv-partial"><span class="vv-caption">${partial.text_kind==='transliteration'?'Interim provider transliteration':'Interim provider transcription'}</span><p lang="${escape(partial.language || 'und')}">${escape(partial.text)}</p></div>` : ''}
       ${!lastEvent&&!developer()?'':`<div class="vv-ref-notice">${lastEvent ? `<span><span class="vv-ref-notice-label">${developer()?'Latest reported candidate outcome':lastEvent.outcome==='SUPPRESSED'?'Reference suppressed':'Reference detected'}</span><span class="vv-ref-notice-ref">${escape(lastEvent.reference)}</span></span><span class="vv-badge">${escape(developer()?outcome(lastEvent.outcome):friendly(lastEvent))}</span>` : '<span class="vv-caption">No reference outcome reported for this stream.</span>'}</div>`}
     </section>`;
@@ -283,6 +284,40 @@
     start: snapshot=>submitAction({disabled:false,dataset:{engineAction:'start',engineSession:snapshot.session.session_id}}),
     session: sessionView, activity, settings, outline, testGate, controls: controlPanel, updateRecoveryAvailability, connectionNotice });
   const root = document.getElementById('verseview-prototype');
+  let approvalDialog, shownCandidate, approvalBusy=false;
+  function reviewContext(item){
+    const context=item.context||{},spoken=String(context.detected||'').trim();
+    if(!spoken)return '<p class="vv-caption">Recent speech context is unavailable for this reference.</p>';
+    const index=spoken.toLowerCase().indexOf(item.reference.toLowerCase());
+    const detected=index<0?`<mark>${escape(spoken)}</mark>`:
+      `${escape(spoken.slice(0,index))}<mark>${escape(spoken.slice(index,index+item.reference.length))}</mark>${escape(spoken.slice(index+item.reference.length))}`;
+    return `<div class="vv-approval-context">${context.before?`<p>${escape(context.before)}</p>`:''}<p>${detected}</p>${context.after?`<p>${escape(context.after)}</p>`:''}</div><p class="vv-caption">Highlighted speech led to ${escape(item.reference)}. Automatic transcription may be imperfect.</p>`;
+  }
+  function syncApproval(){
+    const snapshot=window.previewShell.getObserver(),control=snapshot.session?.control;
+    const item=control?.ask_before_sending&&control.pending?.[0];
+    if(!item||snapshot.connection!=='connected'){
+      if(approvalDialog?.open)approvalDialog.close();
+      shownCandidate=null;return;
+    }
+    if(shownCandidate===item.candidate_id)return;
+    shownCandidate=item.candidate_id;
+    if(!approvalDialog){
+      approvalDialog=document.createElement('dialog');approvalDialog.className='vv-memory-dialog vv-approval-dialog';
+      document.body.append(approvalDialog);
+      approvalDialog.addEventListener('click',async event=>{
+        const decision=event.target.closest('[data-approval-decision]');
+        if(!decision||approvalBusy)return;
+        approvalBusy=true;
+        try{await window.verseviewDesktop.resolveCandidate(window.previewShell.getObserver().session.session_id,decision.dataset.candidate,decision.dataset.approvalDecision==='approve');approvalDialog.close();}
+        catch{approvalDialog.querySelector('[role="status"]').textContent='Could not send the decision. Check the connection and try again.';}
+        finally{approvalBusy=false;}
+      });
+    }
+    approvalDialog.innerHTML=`<h2>Display ${escape(item.reference)}?</h2><p class="vv-caption">Review what was heard before sending this verse to VerseVIEW.</p>${reviewContext(item)}<p role="status" class="vv-caption"></p><div class="vv-control-actions"><button class="vv-btn vv-btn-primary" data-approval-decision="approve" data-candidate="${escape(item.candidate_id)}">Approve and display</button><button class="vv-btn" data-approval-decision="reject" data-candidate="${escape(item.candidate_id)}">Deny</button></div>`;
+    if(!approvalDialog.open)approvalDialog.showModal();
+  }
+  root.addEventListener('preview:observer',syncApproval);
   root.addEventListener('toggle', event => {
     if(event.target.matches('[data-suggestion-panel]')){
       const key=event.target.dataset.suggestionSession;
@@ -401,5 +436,13 @@
   root.addEventListener('change', async event => {
     if (!event.target.matches('[data-observer-source]') || !window.verseviewDesktop) return;
     try { await window.verseviewDesktop.selectObserver(event.target.value || null); } catch { /* Reader will retain its previous source. */ }
+  });
+  root.addEventListener('click',async event=>{
+    const button=event.target.closest('[data-ask-before-send]');if(!button)return;
+    const snapshot=window.previewShell.getObserver(),control=snapshot.session?.control;
+    if(!control?.actions.includes('set_ask_before_sending'))return;
+    button.disabled=true;
+    try{await window.verseviewDesktop.operator(snapshot.session.session_id,'set_ask_before_sending',{enabled:!control.ask_before_sending});}
+    catch{button.disabled=false;}
   });
 })();

@@ -45,11 +45,13 @@ class ObserverPublisher:
         self._thread = None
         self._data = None
         self._history_pending = []
+        self._candidate_evidence = {}
 
     def begin(self, config, origin="engine"):
         if not self.enabled:
             return
         with self._lock:
+            self._candidate_evidence.clear()
             streams = {}
             for role in ("primary", "secondary"):
                 value = config.get("streams", {}).get(role, {})
@@ -117,6 +119,22 @@ class ObserverPublisher:
                 row = {key: _text(event.get(key), limit) for key, limit in limits.items()}
                 if row["stream"] not in ("primary", "secondary"):
                     row["stream"] = "unknown"
+                candidate_id = row['candidate_id']
+                transcript_id = _text(event.get('transcript_id'), 64)
+                evidence = self._candidate_evidence.get(candidate_id)
+                if transcript_id and not evidence:
+                    transcript = next((item for item in data['transcripts']
+                                       if item['id'] == transcript_id and item['is_final']
+                                       and item['stream'] == row['stream']), None)
+                    if transcript:
+                        evidence = {'transcript_id': transcript_id,
+                                    'trigger_text': transcript['text'],
+                                    'trigger_translation': transcript['translation']}
+                        self._candidate_evidence[candidate_id] = evidence
+                        if len(self._candidate_evidence) > 300:
+                            self._candidate_evidence.pop(next(iter(self._candidate_evidence)))
+                if evidence:
+                    row.update(evidence)
                 data["delivery_events"].append(row)
                 data["delivery_events"] = data["delivery_events"][-192:]
             elif kind == 'remote_connection':

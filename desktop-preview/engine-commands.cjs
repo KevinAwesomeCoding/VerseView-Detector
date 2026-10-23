@@ -8,7 +8,7 @@ const { randomUUID } = require('node:crypto');
 class EngineCommands {
   constructor(reader, { clock = Date.now } = {}) { this.reader = reader; this.clock = clock; }
   async submit(sessionId, action, candidateId, settingsChange, recoveryRevision, suggestionId, outlineChange, operatorChange) {
-    if (!['start', 'stop', 'approve', 'reject', 'save_settings', 'panic', 'restore_session', 'discard_session', 'send_suggestion', 'edit_outline', 'start_bot', 'stop_bot', 'pull_settings', 'list_sessions', 'preview_session', 'resume_saved', 'save_session', 'set_worship', 'emergency_save', 'set_context', 'verse_preview', 'chapter_browse', 'send_reference', 'preview_suggestion', 'dismiss_suggestion', 'clear_suggestions', 'clear_history', 'grid_preview', 'connection_action', 'generate_notes', 'cancel_notes', 'prepare_export', 'prepare_memory_clear', 'clear_memory', 'new_session'].includes(action) || !/^[a-f0-9]{32}$/.test(sessionId || '')) {
+    if (!['set_ask_before_sending', 'start', 'stop', 'approve', 'reject', 'save_settings', 'panic', 'restore_session', 'discard_session', 'send_suggestion', 'edit_outline', 'start_bot', 'stop_bot', 'pull_settings', 'list_sessions', 'preview_session', 'resume_saved', 'save_session', 'set_worship', 'emergency_save', 'set_context', 'verse_preview', 'chapter_browse', 'send_reference', 'preview_suggestion', 'dismiss_suggestion', 'clear_suggestions', 'clear_history', 'grid_preview', 'connection_action', 'generate_notes', 'cancel_notes', 'prepare_export', 'prepare_memory_clear', 'clear_memory', 'new_session'].includes(action) || !/^[a-f0-9]{32}$/.test(sessionId || '')) {
       throw new Error('Invalid detector command');
     }
     if (['approve', 'reject'].includes(action) && (typeof candidateId !== 'string' || !candidateId || candidateId.length > 128)) {
@@ -24,15 +24,15 @@ class EngineCommands {
       if (!/^[a-f0-9]{32}$/.test(settingsChange?.revision || '')) throw new Error('Invalid settings revision');
       changes = settingsPolicy.validatePatch(settingsChange.changes);
     }
-    const operatorActions=['list_sessions','preview_session','resume_saved','save_session','set_worship','emergency_save','new_session'];
+    const operatorActions=['list_sessions','preview_session','resume_saved','save_session','set_worship','set_ask_before_sending','emergency_save','new_session'];
     let operatorPayload={};
     if(operatorActions.includes(action)){
       const value=operatorChange||{};
-      const allowed=action==='list_sessions'?['page']:action==='preview_session'?['record_id','page']:action==='resume_saved'?['record_id','record_revision']:action==='set_worship'?['enabled']:[];
+      const allowed=action==='list_sessions'?['page']:action==='preview_session'?['record_id','page']:action==='resume_saved'?['record_id','record_revision']:['set_worship','set_ask_before_sending'].includes(action)?['enabled']:[];
       if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).some(k=>!allowed.includes(k)))throw new Error('Invalid operator request');
       if(['preview_session','resume_saved'].includes(action)&&!/^[a-f0-9]{32}$/.test(value.record_id||''))throw new Error('Invalid saved-session identity');
       if(action==='resume_saved'&&!/^[a-f0-9]{32}$/.test(value.record_revision||''))throw new Error('Preview this session before resuming');
-      if(action==='set_worship'&&typeof value.enabled!=='boolean')throw new Error('Invalid Worship choice');
+      if(['set_worship','set_ask_before_sending'].includes(action)&&typeof value.enabled!=='boolean')throw new Error('Invalid toggle choice');
       if(['list_sessions','preview_session'].includes(action)&&(!Number.isInteger(value.page)||value.page<0||value.page>(action==='list_sessions'?499:8388608)))throw new Error('Invalid session page');
       operatorPayload=value;
     }
@@ -79,7 +79,7 @@ class EngineCommands {
       || this.clock() - Date.parse(session.updated_at) > 6000 || control.state === 'closed') {
       throw new Error('Detector session unavailable; refresh before acting');
     }
-    if (['start', 'stop', 'save_settings', 'panic', 'restore_session', 'discard_session', 'send_suggestion', 'edit_outline', 'start_bot', 'stop_bot', 'pull_settings', 'list_sessions', 'preview_session', 'resume_saved', 'save_session', 'set_worship', 'emergency_save', 'set_context', 'verse_preview', 'chapter_browse', 'send_reference', 'preview_suggestion', 'dismiss_suggestion', 'clear_suggestions', 'clear_history', 'grid_preview', 'connection_action', 'generate_notes', 'cancel_notes', 'prepare_export', 'prepare_memory_clear', 'clear_memory', 'new_session'].includes(action) ? !control.actions.includes(action)
+    if (['set_ask_before_sending', 'start', 'stop', 'save_settings', 'panic', 'restore_session', 'discard_session', 'send_suggestion', 'edit_outline', 'start_bot', 'stop_bot', 'pull_settings', 'list_sessions', 'preview_session', 'resume_saved', 'save_session', 'set_worship', 'emergency_save', 'set_context', 'verse_preview', 'chapter_browse', 'send_reference', 'preview_suggestion', 'dismiss_suggestion', 'clear_suggestions', 'clear_history', 'grid_preview', 'connection_action', 'generate_notes', 'cancel_notes', 'prepare_export', 'prepare_memory_clear', 'clear_memory', 'new_session'].includes(action) ? !control.actions.includes(action)
       : control.state !== 'running' || !control.pending.some(item => item.candidate_id === candidateId)) {
       throw new Error('Action is no longer available');
     }

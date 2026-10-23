@@ -33,6 +33,7 @@ class DeliveryTests(unittest.TestCase):
         engine.REQUIRE_MANUAL_CONFIRM = True
         engine.CONFIRM_CALLBACK = None
         engine.CONFIRM_REQUEST_CALLBACK = None
+        engine.ASK_BEFORE_SENDING = False
         engine.CONFIDENCE_THRESHOLD = .75
         engine.WORSHIP_MODE = False
         engine.DELIVERY_HOLD = False
@@ -109,6 +110,37 @@ class DeliveryTests(unittest.TestCase):
             threading.Event().wait(.005)
         self.ctrl.driver.execute_script.assert_not_called()
         self.assertTrue(any(e['outcome'] == 'CANCELLED' for e in engine.get_delivery_events()))
+
+    def test_ask_before_sending_holds_eligible_verse_until_approval(self):
+        waiting, release = threading.Event(), threading.Event()
+        def confirm(*args):
+            waiting.set(); release.wait(2); return True
+        engine.ASK_BEFORE_SENDING = True
+        engine.CONFIRM_REQUEST_CALLBACK = confirm
+        self.assertFalse(self.ctrl.send_verse('John 3:18', confidence=1, source='FAST-PATH'))
+        self.assertTrue(waiting.wait(1))
+        self.ctrl.driver.execute_script.assert_not_called()
+        release.set()
+        deadline = __import__('time').monotonic() + 2
+        while not self.events('COMMAND_ACCEPTED') and __import__('time').monotonic() < deadline:
+            threading.Event().wait(.005)
+        self.assertEqual(len(self.events('COMMAND_ACCEPTED')), 1)
+        self.assertFalse(self.ctrl.send_verse('John 3:18', confidence=1, source='FAST-PATH'))
+        self.assertEqual(len(self.events('MANUAL_CONFIRM_REQUIRED')), 1)
+
+    def test_ask_before_sending_denial_never_presents(self):
+        answered = threading.Event()
+        def deny(*args):
+            answered.set(); return False
+        engine.ASK_BEFORE_SENDING = True
+        engine.CONFIRM_REQUEST_CALLBACK = deny
+        self.assertFalse(self.ctrl.send_verse('John 3:18', confidence=1, source='PARSER'))
+        self.assertTrue(answered.wait(1))
+        deadline = __import__('time').monotonic() + 2
+        while self.ctrl._confirm_pending and __import__('time').monotonic() < deadline:
+            threading.Event().wait(.005)
+        self.ctrl.driver.execute_script.assert_not_called()
+        self.assertTrue(self.events('CANCELLED'))
 
     def test_emergency_hold_or_mode_change_before_click_cannot_present(self):
         engine.set_delivery_mode(worship=False, hold=True)

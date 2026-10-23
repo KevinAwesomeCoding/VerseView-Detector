@@ -873,6 +873,7 @@ _delivery_events_lock = threading.Lock()
 
 
 def _delivery_event(candidate_id, ref, source, stream, stage, outcome, reason, **context):
+    transcript_id = ACTIVE_TRANSCRIPT_ID.get() if 'ACTIVE_TRANSCRIPT_ID' in globals() else None
     event = {
         "candidate_id": candidate_id, "reference": ref,
         "source": source, "stream": stream or "unknown",
@@ -881,6 +882,8 @@ def _delivery_event(candidate_id, ref, source, stream, stage, outcome, reason, *
         "timestamp": _dt.datetime.now(_dt.timezone.utc).isoformat(),
         "stage": stage, "outcome": outcome, "reason": reason, **context,
     }
+    if isinstance(transcript_id, str) and transcript_id:
+        event['transcript_id'] = transcript_id
     with _delivery_events_lock:
         _delivery_events.append(event)
     _observer_emit("delivery", event=event)
@@ -1286,6 +1289,7 @@ CONFIDENCE_THRESHOLD   = 0.75
 REQUIRE_MANUAL_CONFIRM = True
 CONFIRM_CALLBACK       = None
 CONFIRM_REQUEST_CALLBACK = None
+ASK_BEFORE_SENDING = False
 REQUIRE_VERIFY         = True
 _vtc_pending_ref     = None
 _vtc_trigger_words   = []
@@ -5061,7 +5065,7 @@ class VerseController:
         except Exception as e:
             logger.debug(f"Could not click close button (maybe already closed): {e}")
 
-    def send_verse(self, ref, bypass_cooldown=False, confidence=1.0, source="UNKNOWN", stream=None, candidate_id=None, expected_epoch=None):
+    def send_verse(self, ref, bypass_cooldown=False, confidence=1.0, source="UNKNOWN", stream=None, candidate_id=None, expected_epoch=None, approval_granted=False):
         with self._send_lock:
             global current_book, current_chapter, current_verse, verses_cited
             global _session_verse_high_water
@@ -5117,7 +5121,7 @@ class VerseController:
 
             # ── MANUAL CONFIRMATION ──
             if confidence < CONFIDENCE_THRESHOLD and not bypass_cooldown:
-                if REQUIRE_MANUAL_CONFIRM and (CONFIRM_REQUEST_CALLBACK or CONFIRM_CALLBACK):
+                if (REQUIRE_MANUAL_CONFIRM or ASK_BEFORE_SENDING) and (CONFIRM_REQUEST_CALLBACK or CONFIRM_CALLBACK):
                     if ref in self._confirm_pending:
                         event("manual_confirm", "SUPPRESSED", "Confirmation already pending",
                               guard="REQUIRE_MANUAL_CONFIRM")
@@ -5143,7 +5147,8 @@ class VerseController:
                                     event("manual_confirm", "CANCELLED", "Engine stopped or delivery mode changed before approval")
                                 else:
                                     self.send_verse(ref, bypass_cooldown=True, confidence=1.0,
-                                                    source=source, stream=stream, candidate_id=candidate_id, expected_epoch=delivery_epoch)
+                                                    source=source, stream=stream, candidate_id=candidate_id, expected_epoch=delivery_epoch,
+                                                    approval_granted=True)
                             else:
                                 event("manual_confirm", "CANCELLED", "Operator rejected candidate")
                         except Exception as exc:
@@ -5221,6 +5226,34 @@ class VerseController:
                 logger.debug(f"Cooldown active: {ref}")
                 event("cooldown", "SUPPRESSED", "Global delivery cooldown active",
                       guard="COOLDOWN", cooldown_remaining_s=COOLDOWN - (now - self.last_time))
+                return False
+
+            # Hold eligible automatic detections after the ordinary suppression
+            # checks. Explicit operator sends remain direct.
+            if ASK_BEFORE_SENDING and not approval_granted and source not in {'MANUAL', 'DESKTOP-MANUAL', 'DISCORD-MANUAL', 'WATCHER-MANUAL', 'WATCHER-SUGGESTION'}:
+                if not CONFIRM_REQUEST_CALLBACK:
+                    event('approval', 'SUPPRESSED', 'Approval is enabled but no reviewer is available')
+                    return False
+                if ref in self._confirm_pending:
+                    event('approval', 'SUPPRESSED', 'Approval already pending')
+                    return False
+                self._confirm_pending.add(ref)
+                event('approval', 'MANUAL_CONFIRM_REQUIRED', 'Waiting for approval before presentation')
+                def ask_before_send():
+                    try:
+                        approved = CONFIRM_REQUEST_CALLBACK(ref, confidence, candidate_id, source, stream)
+                        if approved and not _shutdown_flag.is_set() and delivery_epoch == _delivery_epoch:
+                            self.send_verse(ref, bypass_cooldown=bypass_cooldown, confidence=confidence,
+                                            source=source, stream=stream, candidate_id=candidate_id,
+                                            expected_epoch=delivery_epoch, approval_granted=True)
+                        else:
+                            event('approval', 'CANCELLED', 'Operator declined or session changed')
+                    except Exception:
+                        event('approval', 'ERROR', 'Approval request failed')
+                    finally:
+                        with self._send_lock:
+                            self._confirm_pending.discard(ref)
+                threading.Thread(target=ask_before_send, daemon=True).start()
                 return False
 
             # ── SEND ──
@@ -6804,9 +6837,11 @@ def detect_verse_hybrid(text, controller, confidence=1.0, parser=None) -> bool:
         # stream (a worker thread's fresh context would otherwise read None).
         _llm_stream = _safe_stream_role()
         _llm_epoch = _delivery_epoch
+        _llm_transcript_id = ACTIVE_TRANSCRIPT_ID.get()
 
         def llm_task():
             global _llm_in_flight, _last_explicit_ref_time
+            transcript_token = ACTIVE_TRANSCRIPT_ID.set(_llm_transcript_id)
             try:
                 verse = extract_verse_with_llm(text)
                 if verse:
@@ -6892,6 +6927,7 @@ def detect_verse_hybrid(text, controller, confidence=1.0, parser=None) -> bool:
                                 "llm_worker", "ERROR", "LLM detection worker failed",
                                 error_type=type(exc).__name__)
             finally:
+                ACTIVE_TRANSCRIPT_ID.reset(transcript_token)
                 _llm_in_flight = False
 
         threading.Thread(target=llm_task, daemon=True).start()
@@ -7289,6 +7325,7 @@ async def _silence_watchdog():
 STT_STREAM_ROLE: "contextvars.ContextVar[str | None]" = contextvars.ContextVar(
     "stt_stream_role", default=None
 )
+ACTIVE_TRANSCRIPT_ID = contextvars.ContextVar("active_transcript_id", default=None)
 
 # Pass this as `extra=` on a logging call to mark the record as actual
 # transcript text (the spoken words), as opposed to status/startup/reconnect
@@ -7317,6 +7354,7 @@ def _with_transcript_context(callback, is_secondary):
 
     def wrapped(*args, **kwargs):
         token = STT_STREAM_ROLE.set(role)
+        transcript_token = ACTIVE_TRANSCRIPT_ID.set(None)
         try:
             return callback(*args, **kwargs)
         except Exception as exc:
@@ -7325,6 +7363,7 @@ def _with_transcript_context(callback, is_secondary):
                             error_type=type(exc).__name__)
             raise
         finally:
+            ACTIVE_TRANSCRIPT_ID.reset(transcript_token)
             STT_STREAM_ROLE.reset(token)
     return wrapped
 
@@ -7347,8 +7386,10 @@ def create_transcript_handler(controller, is_secondary: bool, tag: str, parser):
         if not sentence or not sentence.strip():
             return
 
-        _observer_emit("transcript", stream="secondary" if is_secondary else "primary",
-                       text=sentence, is_final=is_final)
+        transcript_id = _observer_emit("transcript", stream="secondary" if is_secondary else "primary",
+                                       text=sentence, is_final=is_final)
+        if is_final and transcript_id:
+            ACTIVE_TRANSCRIPT_ID.set(transcript_id)
         # Partial transcripts: feed verse-queue hints only.
         check_verse_queue(sentence, controller)
 
@@ -7409,6 +7450,8 @@ def create_sarvam_transcript_handler(controller, is_secondary: bool, tag: str, p
         _observer_transcript_id = _observer_emit(
             "transcript", stream="secondary" if is_secondary else "primary",
             text=sentence, is_final=is_final, text_kind='transliteration' if transliteration else 'transcription')
+        if is_final and _observer_transcript_id:
+            ACTIVE_TRANSCRIPT_ID.set(_observer_transcript_id)
 
         # Translate raw Malayalam/Manglish → English for verse detection.
         english_text = translate_to_english(sentence)

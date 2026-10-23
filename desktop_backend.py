@@ -357,7 +357,8 @@ class BackendHost:
         self.publisher.begin({'streams': {}}, origin='callback-replay' if runtime.verification else 'engine')
         self.control = DesktopControl(publisher, self.state, self.start, runtime.stop, enabled=True, settings=self.settings,
                                       panic=runtime.panic, recovery=getattr(runtime, 'recovery', None),
-                                      suggestions=getattr(runtime, 'suggestions', None), outline=getattr(runtime, 'outline', None),bot=self.bot,sync=self.sync,operator=getattr(runtime,'operator',None),verses=getattr(runtime,'verses',None), notes=getattr(runtime,'notes',None), connections=runtime.connections)
+                                      suggestions=getattr(runtime, 'suggestions', None), outline=getattr(runtime, 'outline', None),bot=self.bot,sync=self.sync,operator=getattr(runtime,'operator',None),verses=getattr(runtime,'verses',None), notes=getattr(runtime,'notes',None), connections=runtime.connections,
+                                      engine=runtime.engine, preference_path=runtime.profile/'approval-preferences.json')
 
     def prepare_notes_provider(self):
         # Saved-session summaries can initialize clients without opening audio or Chrome.

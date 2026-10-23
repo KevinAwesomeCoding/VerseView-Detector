@@ -1,7 +1,7 @@
 (() => {
   'use strict';
   const root=document.getElementById('verseview-prototype');
-  let full=false, history=null;
+  let full=false, history=null, pendingReveal=null;
   const jumps=new Map();
   const reduceMotion=()=>Boolean(window.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
   function cancelJump(stream){
@@ -79,6 +79,25 @@
     }
   });
   function beforePatch(){return [...root.querySelectorAll('[data-full-transcript]')].map(e=>({stream:e.dataset.fullTranscript,top:e.scrollTop,follow:e.scrollHeight-e.scrollTop-e.clientHeight<45}));}
-  function afterPatch(saved){for(const e of root.querySelectorAll('[data-full-transcript]')){const old=saved.find(v=>v.stream===e.dataset.fullTranscript);e.scrollTop=jumps.has(e.dataset.fullTranscript)&&old?old.top:!old||old.follow?e.scrollHeight:old.top;}}
-  window.transcriptView=Object.freeze({isFull:()=>full,rows,controls,beforePatch,afterPatch});
+  function reveal(){
+    if(!pendingReveal)return;
+    const {id,stream}=pendingReveal;
+    const box=[...root.querySelectorAll('[data-full-transcript]')].find(e=>e.dataset.fullTranscript===stream);
+    const row=box&&[...box.querySelectorAll('[data-transcript-id]')].find(e=>e.dataset.transcriptId===id);
+    if(!row)return;
+    pendingReveal=null;
+    row.classList.add('vv-transcript-located');
+    const top=row.offsetTop-box.offsetTop-(box.clientHeight-row.clientHeight)/2;
+    box.scrollTo({top:Math.max(0,top),behavior:reduceMotion()?'instant':'smooth'});
+    row.setAttribute('tabindex','-1');row.focus({preventScroll:true});
+  }
+  function afterPatch(saved){for(const e of root.querySelectorAll('[data-full-transcript]')){const old=saved.find(v=>v.stream===e.dataset.fullTranscript);e.scrollTop=jumps.has(e.dataset.fullTranscript)&&old?old.top:!old||old.follow?e.scrollHeight:old.top;}reveal();}
+  function openAt(id,stream){
+    if(!id||!['primary','secondary'].includes(stream))return;
+    for(const role of jumps.keys())cancelJump(role);
+    full=true;pendingReveal={id,stream};
+    try{localStorage.setItem('verseview.live-transcript-view','full');}catch{}
+    sync(window.previewShell.getObserver().session);
+  }
+  window.transcriptView=Object.freeze({isFull:()=>full,rows,controls,beforePatch,afterPatch,openAt});
 })();

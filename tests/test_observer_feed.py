@@ -74,6 +74,22 @@ class ObserverTests(unittest.TestCase):
         self.assertNotIn("sensitive", json.dumps(data))
         self.assertNotIn("must-not-export", json.dumps(data))
 
+    def test_accepted_verse_keeps_its_exact_final_speech_when_newer_speech_arrives(self):
+        speech_id = self.publisher.emit('transcript', stream='primary',
+                                        text='Please turn to John chapter three verse sixteen.', is_final=True)
+        self.publisher.emit('delivery', event={'candidate_id': 'candidate-1', 'reference': 'John 3:16',
+                            'stream': 'primary', 'outcome': 'DETECTED', 'transcript_id': speech_id})
+        self.publisher.emit('transcript', stream='primary', text='A different sentence.', is_final=True)
+        self.publisher.emit('delivery', event={'candidate_id': 'candidate-1', 'reference': 'John 3:16',
+                            'stream': 'primary', 'outcome': 'COMMAND_ACCEPTED'})
+        accepted = self.snapshot()['delivery_events'][-1]
+        self.assertEqual(accepted['transcript_id'], speech_id)
+        self.assertEqual(accepted['trigger_text'], 'Please turn to John chapter three verse sixteen.')
+        self.publisher.begin(CONFIG)
+        self.publisher.emit('delivery', event={'candidate_id': 'candidate-1', 'reference': 'John 3:16',
+                            'stream': 'primary', 'outcome': 'COMMAND_ACCEPTED'})
+        self.assertNotIn('trigger_text', self.snapshot()['delivery_events'][-1])
+
     def test_new_session_resets_old_transcripts_and_events(self):
         old = self.snapshot()["session_id"]
         self.publisher.emit("transcript", stream="primary", text="old", is_final=True)

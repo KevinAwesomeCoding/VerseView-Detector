@@ -1,6 +1,6 @@
 'use strict';
 
-const { app, BrowserWindow, ipcMain, Menu, nativeTheme, nativeImage, session, shell, screen, dialog, systemPreferences } = require('electron');
+const { app, BrowserWindow, Notification, ipcMain, Menu, nativeTheme, nativeImage, session, shell, screen, dialog, systemPreferences } = require('electron');
 const path = require('node:path');
 const os = require('node:os');
 const { pathToFileURL } = require('node:url');
@@ -36,11 +36,35 @@ if (app.isPackaged) {
   try { build = require('./build-info.json'); } catch { /* Show unknown provenance if metadata is missing. */ }
 }
 const pageURL = pathToFileURL(path.join(__dirname, 'src', 'index.html')).href;
+const notifiedCandidates = new Set();
+const activeApprovalNotifications = new Map();
+function reviewNotifications(snapshot) {
+  const sessionId=snapshot.session?.session_id, control=snapshot.session?.control;
+  const pending=control?.ask_before_sending&&control.state==='running'?control.pending||[]:[];
+  const active=new Set(pending.map(item=>item.candidate_id));
+  for(const [id,notice] of activeApprovalNotifications)if(!active.has(id)){notice.close();activeApprovalNotifications.delete(id);}
+  if(!window||window.isDestroyed()||window.isFocused())return;
+  if(!Notification.isSupported()){if(pending.length)window.flashFrame(true);return;}
+  for(const item of pending){
+    if(notifiedCandidates.has(item.candidate_id))continue;
+    notifiedCandidates.add(item.candidate_id);
+    if(notifiedCandidates.size>256)notifiedCandidates.delete(notifiedCandidates.values().next().value);
+    const actions=['darwin','win32'].includes(process.platform)?[{type:'button',text:'Approve'},{type:'button',text:'Deny'}]:[];
+    const notice=new Notification({title:`${item.reference} was said`,body:'Display this verse? Click to review the spoken context.',actions});
+    const decide=approved=>commands.submit(sessionId,approved?'approve':'reject',item.candidate_id).catch(()=>{});
+    notice.on('action',(_event,details)=>decide(details.actionIndex===0));
+    notice.on('click',()=>{window.show();window.focus();});
+    notice.on('failed',()=>activeApprovalNotifications.delete(item.candidate_id));
+    activeApprovalNotifications.set(item.candidate_id,notice);
+    notice.show();
+  }
+}
 const observerDirectory = process.env.VV_PREVIEW_TEST_PROFILE === '1' && process.env.VV_OBSERVER_TEST_DIRECTORY
   ? process.env.VV_OBSERVER_TEST_DIRECTORY
   : feedDirectory({ platform: process.platform, appData: app.getPath('appData'), home: app.getPath('home') });
 const observer = new EngineFeedReader({ directory: observerDirectory, onChange: snapshot => {
   if (window && !window.isDestroyed()) window.webContents.send('preview:observer-changed', snapshot);
+  reviewNotifications(snapshot);
   outlineOutput?.update(snapshot);
 } });
 
@@ -326,6 +350,7 @@ function createWindow() {
   window.webContents.on('will-attach-webview', event => event.preventDefault());
   window.webContents.on('did-finish-load', updateBackdrop);
   window.once('ready-to-show', () => { updateBackdrop(); window.show(); });
+  window.on('focus',()=>window.flashFrame(false));
   window.on('closed', () => { window = null; outlineOutput?.close(); });
   updateIcon();
   updateBackdrop();

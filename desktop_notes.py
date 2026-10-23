@@ -162,6 +162,10 @@ class SessionNotes:
                         self.result = previous
                         raise
                     if auto_target: self._save_auto_notes(auto_target, text)
+                if not self.runtime.verification:
+                    try: self.runtime.engine.send_sermon_notes_to_discord(text)
+                    except Exception:
+                        logging.getLogger(__name__).exception('Sermon notes Discord delivery failed')
             except Exception:
                 logging.getLogger(__name__).exception('Sermon notes generation failed')
                 with self.lock:

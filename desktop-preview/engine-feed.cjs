@@ -17,8 +17,8 @@ function feedDirectory({ platform, appData, home }) {
 
 function decodeControl(value) {
   if (!value || !/^[a-f0-9]{32}$/.test(value.id) || !['stopped', 'starting', 'running', 'stopping', 'closed'].includes(value.state)) return null;
-  return { id: value.id, state: value.state,
-    actions: Array.isArray(value.actions) ? value.actions.filter(action => ['start', 'stop', 'save_settings', 'panic', 'restore_session', 'discard_session', 'send_suggestion', 'edit_outline', 'start_bot', 'stop_bot', 'pull_settings', 'list_sessions', 'preview_session', 'resume_saved', 'save_session', 'set_worship', 'emergency_save', 'set_context', 'verse_preview', 'chapter_browse', 'send_reference', 'preview_suggestion', 'dismiss_suggestion', 'clear_suggestions', 'clear_history', 'grid_preview', 'connection_action', 'generate_notes', 'cancel_notes', 'prepare_export', 'prepare_memory_clear', 'clear_memory', 'new_session'].includes(action)) : [],
+  return { id: value.id, state: value.state, ask_before_sending:value.ask_before_sending===true,
+    actions: Array.isArray(value.actions) ? value.actions.filter(action => ['set_ask_before_sending', 'start', 'stop', 'save_settings', 'panic', 'restore_session', 'discard_session', 'send_suggestion', 'edit_outline', 'start_bot', 'stop_bot', 'pull_settings', 'list_sessions', 'preview_session', 'resume_saved', 'save_session', 'set_worship', 'emergency_save', 'set_context', 'verse_preview', 'chapter_browse', 'send_reference', 'preview_suggestion', 'dismiss_suggestion', 'clear_suggestions', 'clear_history', 'grid_preview', 'connection_action', 'generate_notes', 'cancel_notes', 'prepare_export', 'prepare_memory_clear', 'clear_memory', 'new_session'].includes(action)) : [],
     recovery: decodeRecovery(value.recovery),
     operator: decodeOperator(value.operator),
     verses: decodeVerses(value.verses),
@@ -34,7 +34,7 @@ function decodeControl(value) {
       .filter(item => item && text(item.candidate_id, 128) && text(item.reference, 128))
       .map(item => ({ candidate_id: text(item.candidate_id, 128), reference: text(item.reference, 128),
         confidence: Number.isFinite(item.confidence) ? Math.max(0, Math.min(1, item.confidence)) : 0,
-        source: text(item.source, 64), stream: role(item.stream) })),
+        source: text(item.source, 64), stream: role(item.stream), context:{before:text(item.context?.before,200),detected:text(item.context?.detected,300),after:text(item.context?.after,200)} })),
     results: (Array.isArray(value.results) ? value.results : []).slice(-32)
       .filter(item => item && /^[a-f0-9]{32}$/.test(item.id))
       .map(item => ({ id: item.id, action: text(item.action, 16), outcome: text(item.outcome, 24), reason: text(item.reason, 200) })) };
@@ -176,7 +176,9 @@ function decodeSnapshot(value, now = Date.now()) {
   const delivery_events = value.delivery_events.slice(-192).filter(item => item && text(item.candidate_id) && timestamp(item.timestamp))
     .map(item => ({ candidate_id: text(item.candidate_id, 128), reference: text(item.reference, 128),
       stream: role(item.stream), language: text(item.language, 24), source: text(item.source, 64),
-      timestamp: item.timestamp, stage: text(item.stage, 64), outcome: text(item.outcome, 64), reason: text(item.reason, 400) }));
+      timestamp: item.timestamp, stage: text(item.stage, 64), outcome: text(item.outcome, 64), reason: text(item.reason, 400),
+      transcript_id: text(item.transcript_id, 64), trigger_text: text(item.trigger_text, 2000),
+      trigger_translation: text(item.trigger_translation, 2000) }));
   return { schema: 1, session_id: value.session_id, pid: value.pid, origin: value.origin,
     started_at: value.started_at, updated_at: value.updated_at, revision: value.revision,
     host: value.host?.managed === true ? { managed: true, verification: value.host.verification === true,

@@ -29,7 +29,7 @@ def now_seconds():
 
 
 class DesktopControl:
-    def __init__(self, publisher, state, start, stop, *, enabled=False, clock=now_seconds, settings=None, panic=None, recovery=None, suggestions=None, outline=None, bot=None, sync=None, operator=None, verses=None, notes=None, connections=None):
+    def __init__(self, publisher, state, start, stop, *, enabled=False, clock=now_seconds, settings=None, panic=None, recovery=None, suggestions=None, outline=None, bot=None, sync=None, operator=None, verses=None, notes=None, connections=None, engine=None, preference_path=None):
         self.publisher, self.state = publisher, state
         self.start, self.stop, self.enabled, self.clock = start, stop, enabled, clock
         self.settings, self.panic = settings, panic
@@ -42,6 +42,10 @@ class DesktopControl:
         self.verses = verses
         self.notes = notes
         self.connections = connections
+        self.engine, self.preference_path = engine, preference_path
+        try: self.ask_before_sending = json.loads(preference_path.read_text()).get('ask_before_sending') is True if preference_path else False
+        except (OSError, ValueError, TypeError): self.ask_before_sending = False
+        if engine is not None: engine.ASK_BEFORE_SENDING = self.ask_before_sending
         self.control_id = uuid.uuid4().hex
         self.directory = publisher.directory / f"control-{os.getpid()}-{self.control_id}"
         self.session_id = None
@@ -74,6 +78,8 @@ class DesktopControl:
                 if recovery['status'] == 'available': actions.append('restore_session')
             if state == 'running' and self.panic:
                 actions.append('panic')
+            if state in ('stopped', 'running') and self.engine is not None:
+                actions.append('set_ask_before_sending')
             suggestions = self.suggestions.snapshot() if self.suggestions else None
             if state == 'running' and suggestions and suggestions['active'] and not suggestions['busy']:
                 actions.extend(['send_suggestion', 'dismiss_suggestion', 'clear_suggestions'])
@@ -132,7 +138,8 @@ class DesktopControl:
                 'connections': connections, 'notes': notes, 'session_setup': getattr(self, 'session_setup', None), 'outline': self.outline.snapshot() if self.outline else None,
                 'bot': bot, 'operator': operator, 'verses': verses,
                 'sync': sync,
-                'pending': [{key: item[key] for key in ('candidate_id', 'reference', 'confidence', 'stream', 'source')}
+                'ask_before_sending': self.ask_before_sending,
+                'pending': [{key: item[key] for key in ('candidate_id', 'reference', 'confidence', 'stream', 'source', 'context')}
                             for item in self.pending.values()], 'results': self.results[-32:]})
 
     def _cancel_pending(self):
@@ -147,7 +154,7 @@ class DesktopControl:
             if not self.enabled or self.closed or self.state() != 'running' or len(self.pending) >= 16 or candidate_id in self.pending:
                 return False
             item = dict(candidate_id=candidate_id, reference=ref, confidence=confidence,
-                        source=source, stream=stream, event=threading.Event(), answer=False)
+                        source=source, stream=stream, context=self._candidate_context(candidate_id, stream), event=threading.Event(), answer=False)
             self.pending[candidate_id] = item
             self.refresh()
         try:
@@ -160,6 +167,19 @@ class DesktopControl:
                 if self.pending.get(candidate_id) is item:
                     self.pending.pop(candidate_id)
                 self.refresh()
+
+    def _candidate_context(self, candidate_id, stream):
+        snapshot = self.publisher.snapshot() or {}
+        rows = snapshot.get('transcripts', [])
+        rows = [row for row in rows if row.get('stream') == stream and row.get('text')]
+        events = snapshot.get('delivery_events', [])
+        transcript_id = next((event.get('transcript_id') for event in reversed(events)
+                              if event.get('candidate_id') == candidate_id and event.get('transcript_id')), None)
+        index = next((n for n, row in enumerate(rows) if row.get('id') == transcript_id), len(rows) - 1)
+        if index < 0: return {'before': '', 'detected': '', 'after': ''}
+        return {'before': str(rows[index-1]['text'])[-200:] if index else '',
+                'detected': str(rows[index]['text'])[:300],
+                'after': str(rows[index+1]['text'])[:200] if index+1 < len(rows) else ''}
 
     def execute(self, request):
         """Validate at execution time, on the GUI thread. Return a scheduling result."""
@@ -182,6 +202,7 @@ class DesktopControl:
                 'connection_action': {'settings_revision','operation','role','review_id','isolated','attachment_id','include_credentials'},
                 'generate_notes': {'revision'}, 'prepare_export': {'revision', 'kind'}, 'clear_memory': {'revision'},
                 'approve': {'candidate_id'}, 'reject': {'candidate_id'},
+                'set_ask_before_sending': {'enabled'},
                 'save_settings': {'settings_revision', 'changes'},
                 'restore_session': {'recovery_revision'}, 'discard_session': {'recovery_revision'},
                 'grid_preview': {'reference', 'context_revision'}, 'preview_suggestion': {'suggestion_id'}, 'dismiss_suggestion': {'suggestion_id'}, 'clear_suggestions': {'revision'}, 'clear_history': {'history_revision'},
@@ -199,7 +220,17 @@ class DesktopControl:
             if valid:
                 try:
                     state = self.state()
-                    if action=='connection_action' and self.connections and action in self.publisher.snapshot()['control']['actions']:
+                    if action == 'set_ask_before_sending' and self.engine is not None and state in ('stopped', 'running') and isinstance(request.get('enabled'), bool):
+                        enabled = request['enabled']
+                        if self.preference_path:
+                            self.preference_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+                            temporary = self.preference_path.with_suffix('.tmp')
+                            temporary.write_text(json.dumps({'ask_before_sending': enabled}))
+                            os.replace(temporary, self.preference_path)
+                        self.ask_before_sending = self.engine.ASK_BEFORE_SENDING = enabled
+                        if not enabled: self._cancel_pending()
+                        outcome, reason = 'saved', 'Ask before sending updated.'
+                    elif action=='connection_action' and self.connections and action in self.publisher.snapshot()['control']['actions']:
                         op=request.get('operation');revision=request.get('settings_revision')
                         if op=='cancel':self.connections.cancel()
                         elif op=='prepare_atem':self.connections.prepare_atem(revision)
@@ -303,7 +334,7 @@ class DesktopControl:
                     outcome, reason = 'rejected', str(exc)
                 except Exception:
                     outcome, reason = 'failed', 'Detector control failed; inspect the detector log'
-            self.results.append(dict(id=command_id, action=action if action in ('start', 'stop', 'approve', 'reject', 'save_settings', 'panic', 'restore_session', 'discard_session', 'send_suggestion', 'edit_outline', 'start_bot', 'stop_bot', 'pull_settings', 'list_sessions', 'preview_session', 'resume_saved', 'save_session', 'set_worship', 'emergency_save', 'set_context', 'verse_preview', 'chapter_browse', 'send_reference', 'preview_suggestion', 'dismiss_suggestion', 'clear_suggestions', 'clear_history', 'grid_preview', 'connection_action', 'generate_notes', 'cancel_notes', 'prepare_export', 'prepare_memory_clear', 'clear_memory', 'new_session') else 'unknown',
+            self.results.append(dict(id=command_id, action=action if action in ('set_ask_before_sending', 'start', 'stop', 'approve', 'reject', 'save_settings', 'panic', 'restore_session', 'discard_session', 'send_suggestion', 'edit_outline', 'start_bot', 'stop_bot', 'pull_settings', 'list_sessions', 'preview_session', 'resume_saved', 'save_session', 'set_worship', 'emergency_save', 'set_context', 'verse_preview', 'chapter_browse', 'send_reference', 'preview_suggestion', 'dismiss_suggestion', 'clear_suggestions', 'clear_history', 'grid_preview', 'connection_action', 'generate_notes', 'cancel_notes', 'prepare_export', 'prepare_memory_clear', 'clear_memory', 'new_session') else 'unknown',
                                      outcome=outcome, reason=reason))
             self.results = self.results[-32:]
             self.refresh()

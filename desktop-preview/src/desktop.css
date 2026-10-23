@@ -96,6 +96,8 @@ html,body{margin:0;min-height:100%;background:transparent}
 #verseview-prototype .vv-transcript-toolbar [role=group]{display:flex;gap:6px}
 #verseview-prototype .vv-full-transcript{max-height:55vh;overflow-y:auto;overflow-anchor:none;scrollbar-gutter:stable}
 #verseview-prototype .vv-full-transcript .vv-transcript-line p{font-size:14px;line-height:1.7}
+#verseview-prototype .vv-transcript-trigger mark{background:var(--vv-tint);color:var(--vv-ink);box-shadow:0 0 0 1px var(--vv-border);border-radius:4px;padding:2px 3px;box-decoration-break:clone}
+#verseview-prototype .vv-transcript-located{outline:2px solid var(--vv-ink);outline-offset:-2px;border-radius:8px}
 /* Normal workspace: keep technical tools in Developer Mode, not the operator's path. */
 #verseview-prototype:not([data-developer="true"]) .preview-window-tools{display:none}
 #verseview-prototype .vv-consumer-status{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
@@ -109,6 +111,10 @@ html,body{margin:0;min-height:100%;background:transparent}
 #verseview-prototype .vv-developer-label{padding:20px 12px 6px;font-size:10px;color:var(--vv-muted)}
 #verseview-prototype .vv-history-row{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:18px 22px;border-top:1px solid var(--vv-border)}
 #verseview-prototype .vv-history-row time{font-size:11px;color:var(--vv-muted);white-space:nowrap}
+#verseview-prototype .vv-history-row>div{min-width:0}
+#verseview-prototype .vv-trigger-link{display:block;max-width:58ch;margin:8px 0 0;padding:6px 9px;border:1px solid var(--vv-border);border-radius:7px;background:var(--vv-tint);color:var(--vv-ink);font:inherit;font-size:13px;line-height:1.5;text-align:left;cursor:pointer;overflow-wrap:anywhere}
+#verseview-prototype .vv-trigger-link:hover{text-decoration:underline}
+@media(forced-colors:active){#verseview-prototype .vv-transcript-trigger mark{background:Highlight;color:HighlightText;box-shadow:none}#verseview-prototype .vv-transcript-located{outline-color:Highlight}#verseview-prototype .vv-trigger-link{border-color:ButtonBorder;background:Canvas;color:ButtonText;text-decoration:underline}}
 #verseview-prototype .vv-layout-setting{display:flex;gap:14px;align-items:center;font-size:13px;margin:18px 17px}
 #verseview-prototype:not([data-developer="true"]) .vv-live-announcement:has([data-connection-notice]:empty){display:none}
 #verseview-prototype:not([data-developer="true"]) .vv-engine-control:empty{display:none}
@@ -176,6 +182,11 @@ html,body{margin:0;min-height:100%;background:transparent}
 .vv-memory-tools { margin-top: 1rem; }
 .vv-memory-dialog { width: min(38rem,90vw); max-height: 85vh; overflow: auto; padding: 1.5rem; border-radius: 1rem; color: var(--vv-ink); background: var(--vv-panel); border: 1px solid var(--vv-border); }
 .vv-memory-dialog::backdrop { background: rgba(0,0,0,.45); }
+.vv-approval-dialog { width: min(40rem, 90vw); text-align: center; }
+.vv-approval-dialog h2 { margin-top: 0; }
+.vv-approval-context { max-height: 13rem; overflow: auto; padding: 1rem; line-height: 1.7; text-align: left; border: 1px solid var(--vv-border); border-radius: .7rem; }
+.vv-approval-context mark, .vv-approval-dialog mark { background: #f5d66e; color: #292317; border-radius: .2rem; padding: 0 .12rem; }
+.vv-approval-dialog .vv-control-actions { justify-content: center; }
 .vv-memory-dialog p { line-height: 1.6; margin-block: 1rem; }
 
 #verseview-prototype .vv-notes { padding: 17px; }

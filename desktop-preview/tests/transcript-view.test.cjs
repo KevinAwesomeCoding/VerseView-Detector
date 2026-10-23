@@ -22,6 +22,17 @@ test('transcript scroll preserves reading position, follows the bottom, and Jump
  assert.equal(boxes[0].scrollTop,120);assert.equal(boxes[1].scrollTop,1200);
  listeners.click({target:{closest:s=>s==='[data-transcript-jump]'?{}:null}});assert.equal(boxes[0].scrollTop,1200);assert.equal(boxes[0].dataset.follow,'true');
 });
+test('History opens the full transcript and scrolls to its speech row',()=>{
+ const listeners={},store={},row={dataset:{transcriptId:'speech'},offsetTop:460,clientHeight:40,classList:{add:value=>{row.located=value;}},setAttribute:()=>{},focus:()=>{row.focused=true;}};
+ const box={dataset:{fullTranscript:'primary'},scrollTop:0,scrollHeight:900,clientHeight:200,offsetTop:100,querySelectorAll:()=>[row],scrollTo:options=>{box.scroll=options;}};
+ const root={querySelectorAll:selector=>selector==='[data-full-transcript]'?[box]:[],addEventListener:(name,fn)=>listeners[name]=fn};
+ const window={previewShell:{getObserver:()=>({session:null})},matchMedia:()=>({matches:true})};
+ vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../src/transcript-view.js'),'utf8'),{window,document:{getElementById:()=>root},localStorage:{getItem:()=>null,setItem:(k,v)=>store[k]=v}});
+ window.transcriptView.openAt('speech','primary');window.transcriptView.afterPatch([]);
+ assert.equal(window.transcriptView.isFull(),true);assert.equal(store['verseview.live-transcript-view'],'full');
+ assert.equal(box.scroll.top,280);assert.equal(box.scroll.behavior,'instant');
+ assert.equal(row.located,'vv-transcript-located');assert.equal(row.focused,true);
+});
 function animatedView(reduced=false){
  const listeners={},frames=new Map();let next=0;
  const state={boxes:[{dataset:{fullTranscript:'primary'},scrollTop:100,scrollHeight:1000,clientHeight:200}]};

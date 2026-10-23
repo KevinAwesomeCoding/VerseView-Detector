@@ -205,6 +205,8 @@
   function designRender(){root.dataset.theme=validTheme(state.theme)?state.theme:'sage';root.style.setProperty('--vv-radius',`${design.radius}px`);root.style.setProperty('--vv-gap',design.density==='Compact'?'12px':'20px');root.style.removeProperty('--vv-accent');window.previewShell.setTheme(state.theme)}
   root.addEventListener('click',e=>{
     if(e.target.closest('[data-open-releases]')){window.verseviewDesktop?.openReleases().catch(()=>{});return;}
+    const trigger=e.target.closest('[data-show-transcript]');
+    if(trigger){window.transcriptView?.openAt(trigger.dataset.showTranscript,trigger.dataset.triggerStream);state.view='session';render();window.transcriptView?.afterPatch([]);root.querySelector('[data-layout]').scrollTop=0;return;}
     const b=e.target.closest('button[data-action]');if(!b||b.disabled)return;
     const previousView=state.view;
     const a=b.dataset.action;

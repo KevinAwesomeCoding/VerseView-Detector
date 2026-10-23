@@ -32,13 +32,16 @@ test('decoder drops extra fields and preserves stream/language/candidate identit
   value.api_key = 'secret';
   value.transcripts = [{ id: 't1', text: '<script>speech</script>', stream: 'secondary', language: 'ml', timestamp: value.updated_at, is_final: true }];
   value.delivery_events = [{ candidate_id: 'candidate-1', reference: 'John 3:16', stream: 'secondary',
-    timestamp: value.updated_at, language: 'ml', outcome: 'COMMAND_ACCEPTED', api_key: 'secret' }];
+    timestamp: value.updated_at, language: 'ml', outcome: 'COMMAND_ACCEPTED', transcript_id: 't1',
+    trigger_text: 'യോഹന്നാൻ 3:16', api_key: 'secret' }];
   const decoded = decodeSnapshot(value, now);
   assert.equal(decoded.delivery_events[0].candidate_id, 'candidate-1');
   assert.equal(decoded.transcripts[0].stream, 'secondary');
   assert.equal(decoded.transcripts[0].language, 'ml');
   assert.equal(JSON.stringify(decoded).includes('secret'), false);
   assert.equal(decoded.delivery_events[0].outcome, 'COMMAND_ACCEPTED');
+  assert.equal(decoded.delivery_events[0].transcript_id, 't1');
+  assert.equal(decoded.delivery_events[0].trigger_text, 'യോഹന്നാൻ 3:16');
 });
 test('unknown attribution remains unknown and malformed/future snapshots are rejected', () => {
   const value = fixture();

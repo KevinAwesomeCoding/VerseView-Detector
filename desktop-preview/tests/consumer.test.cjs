@@ -30,6 +30,17 @@ test('normal History consolidates candidate stages and distinguishes duplicate, 
  assert.equal((html.match(/vv-history-row/g)||[]).length,4);
  assert.match(text,/Already sent recently/);assert.match(text,/Waiting for the verse reading/);assert.match(text,/Needs approval/);assert.doesNotMatch(text,/INTERNAL|FAST-PATH|COMMAND_ACCEPTED/);
 });
+test('accepted verse highlights its source speech and History links to that transcript row',()=>{
+ const h=observerHarness(),event=h.s.session.delivery_events[0];
+ Object.assign(event,{transcript_id:'speech',trigger_text:'John 3:16'});
+ const live=h.view.session(h.s,'vv-studio'),history=h.view.history(h.s);
+ assert.match(live,/data-transcript-id="speech"/);
+ assert.match(live,/<mark>John 3:16<\/mark>/);
+ assert.match(history,/data-show-transcript="speech"/);
+ assert.match(history,/“John 3:16”/);
+ event.trigger_text='<unsafe>';
+ assert.doesNotMatch(h.view.history(h.s),/<unsafe>/);
+});
 test('Live explicitly labels suppressed references and explains why without claiming a send',()=>{
  const h=observerHarness(),base=h.s.session.delivery_events[0];
  h.s.session.delivery_events=[{...base,outcome:'DETECTED'},{...base,outcome:'SUPPRESSED',reason:'No book, chapter or verse anchor'}];
