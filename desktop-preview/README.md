@@ -373,7 +373,10 @@ This is automated installation coverage; physical Windows acceptance is deferred
 
 See the [installation and rollback guide](INSTALLATION_AND_ROLLBACK.md) for
 profile locations, one-time settings/managed-credential import, private backups,
-manual updates and uninstall/reinstall. The preview has no automatic updater.
+manual updates and uninstall/reinstall. Packaged builds now check GitHub releases
+for a newer verified package and show **Update** in the title bar when one is
+available. The app downloads and checks the package before replacing it at the
+same location after shutdown. Settings and credentials remain in the profile.
 The [installation verification report](INSTALLATION_VERIFICATION.md) records
 actual packaged Mac upgrade/rollback results and unverified Windows/security gates.
 

@@ -122,6 +122,34 @@ class NotesTests(unittest.TestCase):
         self.assertEqual(self.runtime.publisher.snapshot()['transcripts'],[])
         self.notes.restore(value['notes'],value);self.assertEqual(self.notes.result['text'],value['notes'])
 
+    def test_new_session_saves_current_work_then_clears_context(self):
+        self.generate()
+        previous_session = self.runtime.publisher.snapshot()['session_id']
+        self.notes.new_session()
+        backup = next(row for row in self.runtime.operator.library.snapshot()['rows'] if row['reason'] == 'before new session')
+        restored = self.runtime.operator.library.restore_content(backup['id'], backup['revision'])
+        self.assertEqual(restored['notes'], 'Sermon notes — മലയാളം')
+        self.assertIn('ORIGINAL BEGINNING', restored['speech']['primary'])
+        self.runtime.engine.reset_desktop_memory.assert_called_once()
+        self.assertFalse(self.runtime.has_started)
+        self.assertIsNone(self.notes.result)
+        self.assertEqual(self.runtime.recovery.snapshot()['status'], 'none')
+        self.assertNotEqual(self.runtime.publisher.snapshot()['session_id'], previous_session)
+
+    def test_new_session_keeps_working_memory_if_backup_fails(self):
+        with patch.object(self.runtime.operator.library, 'save', side_effect=OSError('Disk unavailable')):
+            with self.assertRaises(OSError): self.notes.new_session()
+        self.runtime.engine.reset_desktop_memory.assert_not_called()
+        self.assertTrue(self.runtime.has_started)
+
+    def test_new_session_can_reset_an_empty_session_without_creating_an_empty_save(self):
+        self.runtime.has_started = False
+        self.runtime.publisher.begin({'streams': {}})
+        self.runtime.operator.capture = Mock(return_value={'data': {}, 'speech': {'primary': '', 'secondary': ''}, 'outline': '', 'notes': ''})
+        self.notes.new_session()
+        self.assertFalse(any(row['reason'] == 'before new session' for row in self.runtime.operator.library.snapshot()['rows']))
+        self.runtime.engine.reset_desktop_memory.assert_called_once()
+
     def test_stale_review_and_save_failure_do_not_reset_working_memory(self):
         self.notes.prepare_clear();revision=self.notes.review['revision']
         self.raw['current_verse']='18'

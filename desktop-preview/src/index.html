@@ -31,6 +31,10 @@
   <div id="verseview-prototype" data-theme="glass" data-backdrop="solid">
     <header id="preview-titlebar">
       <span class="preview-app-name">VerseView <span>Detector</span></span>
+      <div class="preview-update-tools" id="preview-update-tools" hidden>
+        <button type="button" id="preview-update" aria-live="polite">Update</button>
+        <span id="preview-update-status" role="status"></span>
+      </div>
       <div class="preview-window-tools">
         <label for="preview-mode">Source</label>
         <select id="preview-mode"><option value="observer">Live observer</option><option value="samples">Sample demo</option></select>

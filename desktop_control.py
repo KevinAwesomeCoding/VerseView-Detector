@@ -113,19 +113,20 @@ class DesktopControl:
             connections = self.connections.snapshot() if self.connections else None
             if connections and state in ('stopped','running'):
                 actions.append('connection_action')
-                if connections['busy']: actions=[a for a in actions if a not in ('start','resume_saved','restore_session','discard_session','save_settings','pull_settings','generate_notes','prepare_memory_clear','clear_memory')]
+                if connections['busy']: actions=[a for a in actions if a not in ('start','resume_saved','restore_session','discard_session','save_settings','pull_settings','generate_notes','prepare_memory_clear','clear_memory','new_session')]
             notes = self.notes.snapshot() if self.notes else None
             if notes and state in ('stopped', 'running'):
                 actions.append('prepare_export')
                 if notes['busy'] or notes['pending_auto']:
                     actions.append('cancel_notes')
-                    actions = [a for a in actions if a not in ('start','resume_saved','restore_session','discard_session','save_settings','pull_settings')]
+                    actions = [a for a in actions if a not in ('start','resume_saved','restore_session','discard_session','save_settings','pull_settings','new_session')]
                 else:
                     actions.append('generate_notes')
                     if state == 'stopped' and not (operator and operator['busy']):
                         actions.extend(['prepare_memory_clear', 'clear_memory'])
+                        if not recovery or recovery['status'] != 'invalid': actions.append('new_session')
             if connections and connections['busy']:
-                actions=[a for a in actions if a not in ('start','resume_saved','restore_session','discard_session','save_settings','pull_settings','generate_notes','prepare_memory_clear','clear_memory')]
+                actions=[a for a in actions if a not in ('start','resume_saved','restore_session','discard_session','save_settings','pull_settings','generate_notes','prepare_memory_clear','clear_memory','new_session')]
             self.publisher.emit('control', value={
                 'id': self.control_id, 'state': state, 'actions': actions, 'settings': settings, 'recovery': recovery, 'suggestions': suggestions,
                 'connections': connections, 'notes': notes, 'session_setup': getattr(self, 'session_setup', None), 'outline': self.outline.snapshot() if self.outline else None,
@@ -206,11 +207,14 @@ class DesktopControl:
                         elif op=='import':self.connections.import_file(revision,request.get('attachment_id'),request.get('include_credentials'))
                         else:self.connections.run(op,revision,request.get('role','verse'),request.get('review_id'),request.get('isolated',False))
                         outcome,reason='requested','Connection action acknowledged. Observe its result.'
-                    elif action in ('generate_notes', 'cancel_notes', 'prepare_export', 'prepare_memory_clear', 'clear_memory') and self.notes and action in self.publisher.snapshot()['control']['actions']:
+                    elif action in ('generate_notes', 'cancel_notes', 'prepare_export', 'prepare_memory_clear', 'clear_memory', 'new_session') and self.notes and action in self.publisher.snapshot()['control']['actions']:
                         if action == 'generate_notes': self.notes.generate(request.get('revision'))
                         elif action == 'cancel_notes': self.notes.cancel()
                         elif action == 'prepare_export': self.notes.prepare_export(request.get('revision'), request.get('kind'))
                         elif action == 'prepare_memory_clear': self.notes.prepare_clear()
+                        elif action == 'new_session':
+                            self._cancel_pending()
+                            self.notes.new_session()
                         else:
                             self._cancel_pending()
                             self.notes.clear_memory(request.get('revision'))
@@ -299,7 +303,7 @@ class DesktopControl:
                     outcome, reason = 'rejected', str(exc)
                 except Exception:
                     outcome, reason = 'failed', 'Detector control failed; inspect the detector log'
-            self.results.append(dict(id=command_id, action=action if action in ('start', 'stop', 'approve', 'reject', 'save_settings', 'panic', 'restore_session', 'discard_session', 'send_suggestion', 'edit_outline', 'start_bot', 'stop_bot', 'pull_settings', 'list_sessions', 'preview_session', 'resume_saved', 'save_session', 'set_worship', 'emergency_save', 'set_context', 'verse_preview', 'chapter_browse', 'send_reference', 'preview_suggestion', 'dismiss_suggestion', 'clear_suggestions', 'clear_history', 'grid_preview', 'connection_action', 'generate_notes', 'cancel_notes', 'prepare_export', 'prepare_memory_clear', 'clear_memory') else 'unknown',
+            self.results.append(dict(id=command_id, action=action if action in ('start', 'stop', 'approve', 'reject', 'save_settings', 'panic', 'restore_session', 'discard_session', 'send_suggestion', 'edit_outline', 'start_bot', 'stop_bot', 'pull_settings', 'list_sessions', 'preview_session', 'resume_saved', 'save_session', 'set_worship', 'emergency_save', 'set_context', 'verse_preview', 'chapter_browse', 'send_reference', 'preview_suggestion', 'dismiss_suggestion', 'clear_suggestions', 'clear_history', 'grid_preview', 'connection_action', 'generate_notes', 'cancel_notes', 'prepare_export', 'prepare_memory_clear', 'clear_memory', 'new_session') else 'unknown',
                                      outcome=outcome, reason=reason))
             self.results = self.results[-32:]
             self.refresh()

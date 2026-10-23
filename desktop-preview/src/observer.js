@@ -6,6 +6,10 @@
   let command = null;
   let recoveryOpen = null;
   let suggestionsOpen = null;
+  let newSessionBusy = false;
+  let newSessionNotice = '';
+  let suppressedSession = null;
+  let dismissedSuppressed = new Set();
   const languageNames = { en: 'English', ml: 'Malayalam', hi: 'Hindi', multi: 'Multilingual' };
   const outcomeNames = { COMMAND_ACCEPTED: 'Command accepted', SUPPRESSED: 'Suppressed',
     MANUAL_CONFIRM_REQUIRED: 'Awaiting operator approval', QUEUED: 'Queued', CANCELLED: 'Cancelled',
@@ -38,14 +42,17 @@
   function compactControls(snapshot){
     reconcileCommand(snapshot);
     const s=snapshot.session,c=s?.control,backend=window.previewShell.getBackend();
+    if(!newSessionBusy&&c?.state==='running')newSessionNotice='';
     const flow=window.consumerFlow?.state()||{},connected=snapshot.connection==='connected';
     const running=['running','starting','stopping'].includes(c?.state),error=Object.values(s?.streams||{}).some(v=>v.state==='error');
     const label=flow.busy?'Preparing…':!connected&&backend.owned?'Connection unavailable':s?.remote_connection?.status==='failed'&&c?.state==='stopped'?'Connection failed':c?.operator?.emergency?c.operator.busy?'Stopping & saving…':'Stopped':error?'Needs attention':running?c.state==='running'?'Listening':c.state==='stopping'?'Stopping…':'Starting…':connected?'Ready':'Stopped';
-    const disabled=flow.busy||command?.outcome==='submitted';
-    return `<div class="vv-consumer-status" aria-label="Listening controls"><span class="vv-badge ${running&&!error?'vv-ok':''}"><span class="vv-dot"></span>${label}</span><div class="vv-control-actions">${running?`<button class="vv-btn vv-btn-primary" type="button" data-live-stop ${!connected||!c.actions.includes('stop')?'disabled':''}>Stop listening</button>`:`<button class="vv-btn vv-btn-primary" type="button" data-consumer-prepare="start" ${disabled||!window.verseviewDesktop?'disabled':''}>${s?.remote_connection?.status==='failed'&&c?.state==='stopped'?'Retry connection':'Start listening'}</button>`}${flow.busy?'<button class="vv-btn" type="button" data-consumer-cancel>Cancel preparation</button>':''}${c?.actions.includes('panic')?`<button class="vv-btn" type="button" data-engine-action="panic" data-engine-session="${s.session_id}" ${!connected?'disabled':''}>Clear output</button>`:''}${window.operatorTools?.safety(snapshot,false)||''}${window.operatorTools?.header(snapshot)||''}</div></div>${window.operatorTools?.recoveryNotice(snapshot)||''}${window.operatorTools?.render(snapshot)||''}${remoteStatus(snapshot)}${window.sessionSetup?.banner(snapshot)||''}`;
+    const disabled=flow.busy||newSessionBusy||command?.outcome==='submitted';
+    const canNew=connected&&window.verseviewDesktop&&(c?.state==='running'?c.actions.includes('stop'):c?.state==='stopped'&&c.actions.includes('new_session'));
+    return `<div class="vv-consumer-status" aria-label="Listening controls"><span class="vv-badge ${running&&!error?'vv-ok':''}"><span class="vv-dot"></span>${label}</span><div class="vv-control-actions">${running?`<button class="vv-btn vv-btn-primary" type="button" data-live-stop ${!connected||!c.actions.includes('stop')||newSessionBusy?'disabled':''}>Stop listening</button>`:`<button class="vv-btn vv-btn-primary" type="button" data-consumer-prepare="start" ${disabled||!window.verseviewDesktop?'disabled':''}>${s?.remote_connection?.status==='failed'&&c?.state==='stopped'?'Retry connection':'Start listening'}</button>`}<button class="vv-btn" type="button" data-new-session ${disabled||!canNew?'disabled':''}>${newSessionBusy?'Preparing new session…':'New session'}</button>${flow.busy?'<button class="vv-btn" type="button" data-consumer-cancel>Cancel preparation</button>':''}${c?.actions.includes('panic')?`<button class="vv-btn" type="button" data-engine-action="panic" data-engine-session="${s.session_id}" ${!connected?'disabled':''}>Clear output</button>`:''}${window.operatorTools?.safety(snapshot,false)||''}${window.operatorTools?.header(snapshot)||''}</div></div>${window.operatorTools?.recoveryNotice(snapshot)||''}${window.operatorTools?.render(snapshot)||''}${remoteStatus(snapshot)}${window.sessionSetup?.banner(snapshot)||''}`;
   }
   function consumerNotice(snapshot){
     const c=snapshot.session?.control,flow=window.consumerFlow?.state();
+    if(newSessionNotice)return newSessionNotice;
     if(flow?.busy)return flow.notice;
     if(snapshot.connection!=='connected'&&window.previewShell.getBackend().owned)return 'Connection lost. Listening status is unknown; reconnect before sending commands.';
     if(c?.operator?.emergency||c?.operator?.status==='failed')return c.operator.message;
@@ -65,6 +72,18 @@
     const latest=session?.delivery_events.filter(e=>e.reference).at(-1);
     const sent=session?.delivery_events.filter(e=>e.outcome==='COMMAND_ACCEPTED').at(-1);
     return `<section class="vv-panel vv-output" aria-label="Reference result"><div class="vv-output-top"><span class="vv-eyebrow">${latest?latest.outcome==='SUPPRESSED'?'Reference suppressed':'Reference detected':'Ready when you are'}</span>${latest?`<span class="vv-badge">${escape(friendly(latest))}</span>`:''}</div><div class="vv-output-ref">${escape(latest?.reference||'No reference yet')}</div><p class="vv-caption vv-observer-output-note">${latest?.outcome==='SUPPRESSED'?escape('Not sent. '+(latest.reason||'The reference did not pass the delivery checks.')):latest?.outcome==='COMMAND_ACCEPTED'?'VerseVIEW accepted the command. Check its presentation screen for the displayed verse.':latest?'Follow the reference status here as speech continues.':'Spoken references and their delivery status will appear here.'}</p>${sent?`<div class="vv-output-foot"><span>Last sent: ${escape(sent.reference)}</span>${time(sent.timestamp)}</div>`:''}</section>`;
+  }
+  function suppressedReview(snapshot){
+    const session=snapshot.session;
+    if(!session)return '';
+    if(suppressedSession!==session.session_id){suppressedSession=session.session_id;dismissedSuppressed=new Set();}
+    const events=session.delivery_events||[];
+    const latest=[...events].reverse().find(e=>e.outcome==='SUPPRESSED'&&e.reference&&!dismissedSuppressed.has(e.reference));
+    if(!latest)return '';
+    const later=events.slice(events.lastIndexOf(latest)+1);
+    if(later.some(e=>e.outcome==='COMMAND_ACCEPTED'&&e.reference===latest.reference))return '';
+    const available=snapshot.connection==='connected'&&session.control?.actions.includes('verse_preview');
+    return `<section class="vv-panel vv-suppressed-review" aria-label="Detected reference awaiting review"><div><strong>Detected ${escape(latest.reference)}</strong><p class="vv-caption">It was not displayed. ${escape(latest.reason||'It did not pass the delivery checks.')} Review the verse if this is what you meant.</p></div><div class="vv-control-actions"><button type="button" class="vv-btn vv-btn-primary" data-suppressed-review="${escape(latest.reference)}" ${available?'':'disabled'}>Review verse</button><button type="button" class="vv-btn" data-suppressed-dismiss="${escape(latest.reference)}">Dismiss</button></div></section>`;
   }
   function history(snapshot){
     const rows=new Map();for(const e of snapshot.session?.delivery_events||[])if(e.reference)rows.set(e.candidate_id,e);
@@ -158,7 +177,7 @@
     const lastEvent = session?.delivery_events.filter(row => row.stream === role && row.reference).at(-1);
     const streamState = session?.streams[role]?.state;
     const streamStatus = config?.enabled === false ? 'Disabled in detector' : ({ configured: 'Configured',
-      starting: 'Starting in detector', transcript_received: 'Transcript received', stopped: 'Stream stopped', error: 'Stream error'
+      starting: 'Starting in detector', transcript_received: 'Transcript received', stopped: 'Stream stopped', error: 'Speech stream ended — check microphone or provider'
     })[streamState] || 'Waiting for status';
     return `<section class="vv-panel vv-stream vv-observed-stream" data-speech-stream="${role}" aria-label="${escape(name)} observed speech">
       <div class="vv-stream-header"><div><h2 lang="${escape(language || 'und')}">${escape(label)}</h2><p class="vv-stream-provider">${role === 'primary' ? 'Primary' : 'Secondary'} · ${escape(config?.provider || 'Provider not reported')}</p></div><span class="vv-badge">${escape(streamStatus)}</span></div>
@@ -181,7 +200,7 @@
     const roles=!developer()&&session?.config.streams.secondary.enabled===false?['primary']:['primary','secondary'];
     const transcripts = `<section class="vv-stream-section" aria-label="Observed speech streams"><div class="vv-dual-grid ${roles.length===1?'vv-single-stream':''}">${roles.map(role=>streamPanel(session,role)).join('')}</div></section>`;
     const unknown = session?.transcripts.filter(row => row.stream === 'unknown').slice(-3) || [];
-    if(!developer())return (window.transcriptView?.isFull()?'':consumerOutput(session))+(window.transcriptView?.controls(session)||'')+transcripts+(window.verseTools?.live(snapshot)||'')+controlPanel(snapshot)+window.detectorSettings.render(snapshot,'speech')+(window.connectionTools?.live(snapshot)||'');
+    if(!developer())return (window.transcriptView?.isFull()?'':consumerOutput(session)+suppressedReview(snapshot))+(window.transcriptView?.controls(session)||'')+transcripts+(window.verseTools?.live(snapshot)||'')+controlPanel(snapshot)+window.detectorSettings.render(snapshot,'speech')+(window.connectionTools?.live(snapshot)||'');
     return (window.transcriptView?.isFull()?'':output(session))+(window.transcriptView?.controls(session)||'')+transcripts+(window.verseTools?.live(snapshot)||'')+controlPanel(snapshot)+window.detectorSettings.render(snapshot,'speech')+(window.connectionTools?.live(snapshot)||'')+status(snapshot)
       + (unknown.length ? `<section class="vv-panel vv-observer-unknown"><h2>Unattributed speech</h2>${unknown.map(row => `<p>${escape(row.text)}</p>`).join('')}</section>` : '')
       + `<p class="vv-caption vv-observer-note">${session?.host?.managed ? 'The bundled detector owns recognition and delivery. Advanced queue and presentation options are in its private backend settings file.' : 'The detector owns recognition and delivery. Queue and presentation settings remain in its existing window.'}</p>`;
@@ -306,7 +325,51 @@
     }
     root.dispatchEvent(new Event('preview:observer'));
   }
+  function waitForSession(check, timeout=60000){
+    return new Promise((resolve,reject)=>{
+      const deadline=Date.now()+timeout;
+      const poll=()=>{
+        const snapshot=window.previewShell.getObserver();
+        if(snapshot.connection!=='connected')return reject(new Error('Detector connection was lost. Check the saved session before trying again.'));
+        try{const value=check(snapshot);if(value)return resolve(value);}catch(error){return reject(error);}
+        if(Date.now()>=deadline)return reject(new Error('The new session could not be confirmed. Check Saved sessions before trying again.'));
+        setTimeout(poll,250);
+      };
+      poll();
+    });
+  }
+  async function startNewSession(){
+    if(newSessionBusy)return;
+    const initial=window.previewShell.getObserver(),sessionId=initial.session?.session_id,control=initial.session?.control;
+    if(initial.connection!=='connected'||!sessionId||!['running','stopped'].includes(control?.state))return;
+    newSessionBusy=true;newSessionNotice=control.state==='running'?'Stopping and saving the current session…':'Saving the current session…';
+    root.dispatchEvent(new Event('preview:observer'));
+    try{
+      if(control.state==='running'){
+        const stopped=await window.verseviewDesktop.stopEngine(sessionId);
+        await waitForSession(s=>{
+          if(s.session?.session_id!==sessionId)throw new Error('The detector session changed. Check Saved sessions before trying again.');
+          const result=s.session.control?.results.find(row=>row.id===stopped.id);
+          if(result&&result.outcome!=='requested')throw new Error(result.reason);
+          return result&&s.session.control.state==='stopped'&&s.session.control.actions.includes('new_session');
+        });
+      }
+      const ready=window.previewShell.getObserver();
+      if(ready.session?.session_id!==sessionId||!ready.session?.control?.actions.includes('new_session'))throw new Error('Wait for session saving to finish, then try New session again.');
+      newSessionNotice='Preparing a blank session…';root.dispatchEvent(new Event('preview:observer'));
+      const submitted=await window.verseviewDesktop.operator(sessionId,'new_session',{});
+      await waitForSession(s=>{
+        if(s.session?.session_id!==sessionId)return true;
+        const result=s.session?.control?.results.find(row=>row.id===submitted.id);
+        if(result&&result.outcome!=='requested')throw new Error(result.reason);
+        return result&&s.session.control.recovery?.status==='none';
+      });
+      newSessionNotice='New session ready. Press Start listening.';
+    }catch(error){newSessionNotice=error.message;}
+    finally{newSessionBusy=false;root.dispatchEvent(new Event('preview:observer'));}
+  }
   root.addEventListener('click',async event=>{
+    if(event.target.closest('[data-new-session]')){await startNewSession();return;}
     if(event.target.closest('[data-live-stop]')){
       const s=window.previewShell.getObserver();
       if(s.connection==='connected'&&s.session?.control?.actions.includes('stop'))await submitAction({dataset:{engineAction:'stop',engineSession:s.session.session_id}});
@@ -326,6 +389,15 @@
     button.disabled = false;
   });
   root.addEventListener('click',event=>{const button=event.target.closest('[data-suggestion-preview]');if(button&&!button.disabled)window.verseTools.previewSuggestion(button,button.dataset.suggestionPreview);});
+  root.addEventListener('click',event=>{
+    const button=event.target.closest('[data-suppressed-review],[data-suppressed-dismiss]');
+    if(!button||button.disabled)return;
+    const reference=button.dataset.suppressedReview||button.dataset.suppressedDismiss;
+    const snapshot=window.previewShell.getObserver();
+    if(!snapshot.session?.delivery_events.some(e=>e.outcome==='SUPPRESSED'&&e.reference===reference))return;
+    if(button.dataset.suppressedDismiss){dismissedSuppressed.add(reference);root.dispatchEvent(new Event('preview:observer'));}
+    else window.verseTools.previewDetected(button,reference);
+  });
   root.addEventListener('change', async event => {
     if (!event.target.matches('[data-observer-source]') || !window.verseviewDesktop) return;
     try { await window.verseviewDesktop.selectObserver(event.target.value || null); } catch { /* Reader will retain its previous source. */ }

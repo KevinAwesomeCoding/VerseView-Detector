@@ -11,6 +11,7 @@ const { BackendManager } = require('./backend-manager.cjs');
 const { OutlineOutput } = require('./outline-output.cjs');
 const { iconPath, applyThemeIcon } = require('./theme-icons.cjs');
 const fs = require('node:fs');
+const updates = require('./update-service.cjs');
 
 app.setName('VerseView Detector');
 // Keep the existing desktop profile so upgrades retain settings, sessions and keys.
@@ -72,6 +73,26 @@ function useObserverDirectory(directory) {
   observer.signature = ''; observer.start();
 }
 let quitting = false;
+let availableUpdate = null;
+let updateBusy = false;
+let updateState = { phase: 'idle' };
+const updateChannel = 'all'; // Newest verified compatible stable or prerelease.
+function publishUpdate(value) {
+  updateState = value;
+  if (window && !window.isDestroyed()) window.webContents.send('preview:update-changed', value);
+}
+async function checkUpdates() {
+  if (updateBusy) return updateState;
+  if (!app.isPackaged || !build.builtAt || !['darwin', 'win32'].includes(process.platform)) return publishUpdate({ phase: 'unavailable' });
+  try {
+    const releases = await updates.releaseList();
+    availableUpdate = updates.candidate(releases, { platform: process.platform, arch: process.arch,
+      builtAt: build.builtAt, sourceRevision: build.sourceRevision, channel: updateChannel });
+    publishUpdate(availableUpdate ? { phase: 'available', tag: availableUpdate.tag, prerelease: availableUpdate.prerelease }
+      : { phase: 'current' });
+  } catch (error) { publishUpdate({ phase: 'check-failed', message: error.message }); }
+  return updateState;
+}
 
 function updateBackdrop() {
   if (!window || window.isDestroyed()) return;
@@ -109,6 +130,37 @@ ipcMain.handle('preview:environment', event => {
 ipcMain.handle('preview:releases',event=>{
   if(!trusted(event))throw new Error('Untrusted release-page request');
   return shell.openExternal('https://github.com/KevinAwesomeCoding/VerseView-Detector/releases');
+});
+ipcMain.handle('preview:update-state', event => {
+  if (!trusted(event)) throw new Error('Untrusted update request');
+  return updateState;
+});
+ipcMain.handle('preview:check-update', event => {
+  if (!trusted(event)) throw new Error('Untrusted update request');
+  return checkUpdates();
+});
+ipcMain.handle('preview:apply-update', async event => {
+  if (!trusted(event) || !availableUpdate || updateBusy || !app.isPackaged) throw new Error('No verified update is ready');
+  updateBusy = true;
+  let download;
+  try {
+    download = await updates.download(availableUpdate, publishUpdate);
+    if (process.platform === 'darwin') {
+      const prepared = updates.prepareMac(download.file, process.execPath);
+      const { spawn } = require('node:child_process');
+      const child = spawn('/bin/sh', [prepared.script], { detached: true, stdio: 'ignore' });
+      await new Promise((resolve, reject) => { child.once('spawn', resolve); child.once('error', reject); });
+      child.unref();
+    } else if (process.platform === 'win32') await updates.launchInstaller(download.file, process.execPath);
+    else throw new Error('Automatic updates are unavailable on this platform');
+    publishUpdate({ phase: 'installing' });
+    setImmediate(() => app.quit());
+    return updateState;
+  } catch (error) {
+    if (download) fs.rmSync(download.directory, { recursive: true, force: true });
+    publishUpdate({ phase: 'error', message: error.message });
+    return updateState;
+  } finally { updateBusy = false; }
 });
 ipcMain.handle('preview:set-theme', (event, value, themedIcon = true) => {
   if (!trusted(event) || !validTheme(value) || typeof themedIcon !== 'boolean') throw new Error('Invalid appearance request');
@@ -154,7 +206,7 @@ ipcMain.handle('preview:profile-transfer',async(event,sessionId,revision,kind,in
   return require('./profile-transfer.cjs').importProfile({reader:observer,manager,commands,sessionId,revision,kind,includeCredentials,chooseFile:o=>dialog.showOpenDialog(window,o)});
 });
 ipcMain.handle('preview:operator', (event, sessionId, action, value) => {
-  if(!trusted(event)||!['list_sessions','preview_session','resume_saved','save_session','set_worship','emergency_save','set_context','verse_preview','chapter_browse','send_reference','preview_suggestion','dismiss_suggestion','clear_suggestions','clear_history','grid_preview', 'connection_action', 'generate_notes', 'cancel_notes', 'prepare_export', 'prepare_memory_clear', 'clear_memory'].includes(action))throw new Error('Invalid operator request');
+  if(!trusted(event)||!['list_sessions','preview_session','resume_saved','save_session','set_worship','emergency_save','set_context','verse_preview','chapter_browse','send_reference','preview_suggestion','dismiss_suggestion','clear_suggestions','clear_history','grid_preview', 'connection_action', 'generate_notes', 'cancel_notes', 'prepare_export', 'prepare_memory_clear', 'clear_memory', 'new_session'].includes(action))throw new Error('Invalid operator request');
   return commands.submit(sessionId,action,undefined,undefined,undefined,undefined,undefined,value);
 });
 ipcMain.handle('preview:window-pin', (event, enabled) => {
@@ -286,6 +338,8 @@ app.whenReady().then(() => {
     { role: 'windowMenu' }
   ]));
   createWindow();
+  setTimeout(checkUpdates, 3000).unref();
+  setInterval(checkUpdates, 6 * 60 * 60 * 1000).unref();
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });
 nativeTheme.on('updated', updateBackdrop);

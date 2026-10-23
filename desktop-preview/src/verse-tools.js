@@ -116,5 +116,5 @@
       case 'send':if(v?.selected)send('send_reference',{selection_id:v.selected.id});break;
     }
   });
-  window.verseTools=Object.freeze({live,syncControls,previewSuggestion:(button,id)=>{open(button);send('preview_suggestion',{suggestion_id:id});}});
+  window.verseTools=Object.freeze({live,syncControls,previewSuggestion:(button,id)=>{open(button);send('preview_suggestion',{suggestion_id:id});},previewDetected:(button,reference)=>{draft.reference=reference;open(button);send('verse_preview',{reference});}});
 })();

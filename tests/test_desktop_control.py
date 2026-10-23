@@ -89,6 +89,20 @@ class DesktopControlTests(unittest.TestCase):
         self.assertEqual(self.result()['outcome'], 'failed')
         self.assertEqual(self.publisher.snapshot()['control']['state'], 'stopped')
 
+    def test_new_session_is_available_only_stopped_and_delegates_to_notes(self):
+        notes = Mock()
+        notes.snapshot.return_value = {'busy': False, 'pending_auto': False}
+        self.broker.notes = notes
+        self.broker.refresh()
+        self.assertIn('new_session', self.publisher.snapshot()['control']['actions'])
+        self.broker.execute(self.request('new_session'))
+        notes.new_session.assert_called_once()
+        self.assertEqual(self.result()['action'], 'new_session')
+        self.state = 'running'
+        self.broker.execute(self.request('new_session'))
+        notes.new_session.assert_called_once()
+        self.assertEqual(self.result()['outcome'], 'rejected')
+
     def test_approval_targets_exact_candidate_and_cannot_repeat(self):
         thread, answer = self.hold()
         self.broker.execute(self.request('approve', candidate_id='different'))

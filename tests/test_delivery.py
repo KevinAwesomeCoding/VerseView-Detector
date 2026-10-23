@@ -768,6 +768,49 @@ class DeliveryTests(unittest.TestCase):
         self.assertEqual(self.events('ERROR')[-1]['stage'], 'transcript_callback')
         self.ctrl.driver.execute_script.assert_not_called()
 
+    def test_secondary_malayalam_uses_its_parser_and_translation(self):
+        engine.PRIMARY_PARSER = engine.parse_eng
+        engine.USE_SARVAM = False
+        handler = engine.create_sarvam_transcript_handler(
+            self.ctrl, True, '[SEC-ML]', engine.parse_ml)
+        with patch.object(engine, 'translate_to_english',
+                          return_value='The Gospel of John, Chapter 3, Verse 16.'):
+            handler('യോഹന്നാൻ 3:16', True)
+        self.assertEqual(self.events('COMMAND_ACCEPTED')[-1]['reference'], 'John 3:16')
+        self.assertEqual(self.events('COMMAND_ACCEPTED')[-1]['source'], 'FAST-PATH')
+
+        engine._delivery_events.clear()
+        engine.current_book = engine.current_chapter = engine.current_verse = None
+        with patch.object(engine, 'translate_to_english',
+                          return_value='The Gospel of John, Chapter 1, Verse 3.'):
+            handler('യോഹന്നാന്റെ സുവിശേഷം ഒന്നാമത്തേയായ മൂന്ന്', True)
+        self.assertEqual(self.events('COMMAND_ACCEPTED')[-1]['reference'], 'John 1:3')
+        self.assertEqual(self.events('COMMAND_ACCEPTED')[-1]['source'], 'TRANSLATION-PATH')
+
+    def test_malayalam_reference_phrasings_and_noisy_speech(self):
+        examples = {
+            'യോഹന്നാൻ 1:3': 'John 1:3',
+            'യോഹന്നാൻ 1 3': 'John 1:3',
+            'യോഹന്നാൻ ൧:൩': 'John 1:3',
+            'യോഹന്നാന്റെ സുവിശേഷം ഒന്നാം അധ്യായം മൂന്നാം വാക്യം': 'John 1:3',
+            'യോഹന്നാന്റെ സുവിശേഷത്തിൽ ഒന്നാമത്തെ അധ്യായം മൂന്നാമത്തെ വാക്യം': 'John 1:3',
+            'യോഹന്നാൻ അദ്ധ്യായം ഒന്ന് വാക്യം മൂന്ന്': 'John 1:3',
+            'മത്തായിയുടെ സുവിശേഷം ഒന്നാം അധ്യായം മൂന്നാം വാക്യം': 'Matthew 1:3',
+            'മത്തായി ഒന്നാം അധ്യായം മൂന്നാം വാക്യം': 'Matthew 1:3',
+            'John chapter one verse three': 'John 1:3',
+            'Matthew chapter one verse three': 'Matthew 1:3',
+            'Yohanna ande suvishesham onnamadi ayyam moonu': 'John 1:3',
+            'Yohannante suvishesham onnam adhyayam moonam vakyam': 'John 1:3',
+            'Mathayiyude suvishesham onnam adhyayam moonnam vakyam': 'Matthew 1:3',
+        }
+        for speech, expected in examples.items():
+            with self.subTest(speech=speech):
+                self.assertIn(expected, engine.parse_ml(speech))
+        noisy = 'യോഹന്നാന്റെ സുവിശേഷം ഒന്നാമത്തേയായ മൂന്ന്'
+        self.assertNotIn('Matthew 3', engine.parse_ml(noisy))
+        repeated = noisy + ' യോഹന്നാന്റെ സുവിശേഷം ഒന്നാം അധ്യായം മൂന്ന്'
+        self.assertNotIn('3 John 1:3', engine.parse_ml(repeated))
+
     def test_false_positive_and_translation_guards_remain_explainable(self):
         engine.PRIMARY_PARSER = engine.parse_eng
         with patch.object(engine, '_is_book_as_person', return_value=True):
@@ -857,6 +900,14 @@ class DeliveryTests(unittest.TestCase):
         self.assertEqual(engine.parse_ml(phrase), ['John 1:3'])
         self.assertTrue(engine.detect_verse_hybrid(phrase, self.ctrl, parser=engine.parse_ml))
         self.assertEqual(self.events('COMMAND_ACCEPTED')[-1]['reference'], 'John 1:3')
+        self.assertFalse(self.events('SUPPRESSED'))
+
+    def test_observed_malayalam_john_spelling_reaches_delivery(self):
+        phrase = 'ജോഹന്നോൻ 3 5.'
+        self.assertEqual(engine.parse_ml(phrase), ['John 3:5'])
+        self.assertTrue(engine._has_malayalam_book_anchor(phrase, 'John'))
+        self.assertTrue(engine.detect_verse_hybrid(phrase, self.ctrl, parser=engine.parse_ml))
+        self.assertEqual(self.events('COMMAND_ACCEPTED')[-1]['reference'], 'John 3:5')
         self.assertFalse(self.events('SUPPRESSED'))
 
     def test_malayalam_anchor_requires_whole_matching_book_not_casual_numbers(self):

@@ -9,7 +9,7 @@ from pathlib import Path
 import tempfile
 import threading
 import uuid
-from desktop_recovery import MAX_BYTES, RecoveryError
+from desktop_recovery import MAX_BYTES, RecoveryError, meaningful
 from desktop_sessions import atomic_write, read_private, content
 
 MAX_NOTES = 100_000
@@ -278,34 +278,47 @@ class SessionNotes:
             captured, _ = self.capture()
             if not self.review or revision != self.review['revision'] or self._memory_fingerprint(captured) != self.review['fingerprint']:
                 raise NotesError('Session changed. Review Clear Memory again before confirming.')
-            saved = self.runtime.operator.library.save(captured, 'before memory clear')
-            # Any checkpoint filesystem failure occurs before working memory changes.
-            atomic_write(Path(self.runtime.profile) / 'Diagnostics' / ('before-clear-' + saved['id'] + '.json'), self.runtime.publisher.snapshot() or {})
-            self.runtime.recovery.reset_empty()
-            self.runtime.engine.reset_desktop_memory()
-            self.runtime.suggestions.prepare(False)
-            self.runtime.outline.cancel()
-            outline = self.runtime.outline.snapshot()
-            self.runtime.outline.edit(outline['revision'], '')
-            self.runtime.verses.reset_context()
-            self.runtime.verses.selected = self.runtime.verses.chapter = self.runtime.verses.last_send = None
-            self.runtime.operator.speech_before = dict(primary='', secondary='')
-            self.runtime.operator.speech_transliterated_before = dict(primary=False, secondary=False)
-            self.runtime.operator.pending_restore = None
-            self.result = self.job = self.review = self.export = None
-            self.generation += 1
-            self.status, self.message = 'idle', 'Working memory cleared. Recoverable backup is in Saved sessions.'
-            self.revision = uuid.uuid4().hex
-            try: self._persist()
-            except Exception:
-                self.message = 'Working memory cleared; notes status could not be saved. Restore the backup from Saved sessions if needed.'
-                logging.getLogger(__name__).exception('Cleared notes status could not be persisted')
-            self.runtime.has_started = False
-            self.runtime.publisher.flush()
-            feed = self.runtime.publisher.snapshot() or {}
-            self.runtime.publisher.begin(feed.get('config', {'streams': {}}), origin='callback-replay' if self.runtime.verification else 'engine')
-            self.runtime.operator.saved = saved
-            self.runtime.operator.status, self.runtime.operator.message = 'saved', self.message
+            self._clear_working_memory(captured, 'before memory clear')
+
+    def new_session(self):
+        """Save the current working session, then prepare a blank listening session."""
+        with self.lock:
+            self._can_clear()
+            if self.runtime.recovery.snapshot()['status'] == 'invalid':
+                raise NotesError('The saved recovery file is unreadable. Choose Start new in Saved sessions first.')
+            captured, _ = self.capture()
+            self._clear_working_memory(captured, 'before new session')
+
+    def _clear_working_memory(self, captured, reason):
+        has_content = meaningful(captured['data']) or captured['outline'].strip() or any(captured['speech'].values()) or captured['notes'].strip()
+        saved = self.runtime.operator.library.save(captured, reason) if has_content or reason != 'before new session' else None
+        # Any checkpoint filesystem failure occurs before working memory changes.
+        if saved: atomic_write(Path(self.runtime.profile) / 'Diagnostics' / ('before-clear-' + saved['id'] + '.json'), self.runtime.publisher.snapshot() or {})
+        self.runtime.recovery.reset_empty()
+        self.runtime.engine.reset_desktop_memory()
+        self.runtime.suggestions.prepare(False)
+        self.runtime.outline.cancel()
+        outline = self.runtime.outline.snapshot()
+        self.runtime.outline.edit(outline['revision'], '')
+        self.runtime.verses.reset_context()
+        self.runtime.verses.selected = self.runtime.verses.chapter = self.runtime.verses.last_send = None
+        self.runtime.operator.speech_before = dict(primary='', secondary='')
+        self.runtime.operator.speech_transliterated_before = dict(primary=False, secondary=False)
+        self.runtime.operator.pending_restore = None
+        self.result = self.job = self.review = self.export = None
+        self.generation += 1
+        self.status, self.message = 'idle', ('New session ready. Press Start listening. Previous session is in Saved sessions.' if reason == 'before new session' and saved else 'New session ready. Press Start listening.' if reason == 'before new session' else 'Working memory cleared. Recoverable backup is in Saved sessions.')
+        self.revision = uuid.uuid4().hex
+        try: self._persist()
+        except Exception:
+            self.message = 'Working memory cleared; notes status could not be saved. Restore the backup from Saved sessions if needed.'
+            logging.getLogger(__name__).exception('Cleared notes status could not be persisted')
+        self.runtime.has_started = False
+        self.runtime.publisher.flush()
+        feed = self.runtime.publisher.snapshot() or {}
+        self.runtime.publisher.begin(feed.get('config', {'streams': {}}), origin='callback-replay' if self.runtime.verification else 'engine')
+        self.runtime.operator.saved = saved
+        self.runtime.operator.status, self.runtime.operator.message = 'saved', self.message
 
     def restore(self, text, captured):
         with self.lock:

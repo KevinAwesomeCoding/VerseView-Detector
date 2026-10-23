@@ -1,6 +1,7 @@
 """Build the native companion through the repository's existing PyInstaller spec."""
 import datetime as dt
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -13,6 +14,9 @@ platform_name = sys.platform
 arch = {'aarch64': 'arm64', 'arm64': 'arm64', 'x86_64': 'x64', 'AMD64': 'x64'}.get(platform.machine())
 if platform_name not in ('darwin', 'win32') or not arch:
     raise SystemExit('Build the companion on a supported native Mac or Windows host.')
+for required in ('pyaudio', 'selenium', 'webdriver_manager'):
+    if importlib.util.find_spec(required) is None:
+        raise SystemExit(f'{required} is required for a live backend package. Install requirements.txt in the build environment first.')
 stamp = dt.datetime.now(dt.timezone.utc).strftime('%Y%m%dT%H%M%SZ')
 output = root / 'desktop-preview' / 'backend-build' / f'{stamp}-{platform_name}-{arch}'
 env = {**os.environ, 'VERSEVIEW_BUILD_HEADLESS': '1'}

@@ -101,7 +101,17 @@ presentation should start only in the isolated test session approved by the user
 
 ## Manual update and backup
 
-There is no automatic preview updater. Use a complete new native package.
+Packaged builds check GitHub releases for a newer compatible stable or beta
+package. When one is available, **Update** appears in the title bar. Clicking
+it downloads the whole native package and verifies its published SHA-256 before
+the app quits. On Mac, a helper extracts and verifies the complete app bundle,
+then swaps it into the existing location and keeps the prior bundle as a hidden
+rollback copy. The location must be writable by the current user. On Windows,
+the verified per-user installer runs for the existing install directory. Keep
+the profile backup and previous installer for important upgrades. If the
+download or verification fails, the installed app remains in place.
+
+To update manually, use a complete new native package.
 
 1. Stop recognition and the Discord bot, then close the backend and quit the
    preview. If the app says shutdown is still pending, wait for cleanup before

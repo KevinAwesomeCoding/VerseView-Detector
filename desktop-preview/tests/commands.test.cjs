@@ -37,6 +37,17 @@ test('start writes one bounded request with exact session/control identity, neve
   assert.equal(request.created_at, f.now / 1000);
   assert.equal(f.reader.commandTransition.id, result.id);
 });
+test('new session requires a stopped detector and writes no extra fields', async t => {
+  const f = setup(t);
+  f.session.control.actions = ['new_session'];
+  const result = await f.client.submit(f.sessionId, 'new_session', undefined, undefined, undefined, undefined, undefined, {});
+  const request = JSON.parse(fs.readFileSync(path.join(f.inbox, `command-${result.id}.json`)));
+  assert.equal(request.action, 'new_session');
+  assert.equal(Object.hasOwn(request, 'recovery_revision'), false);
+  await assert.rejects(f.client.submit(f.sessionId, 'new_session', undefined, undefined, undefined, undefined, undefined, { record_id: 'a'.repeat(32) }));
+  f.session.control.state = 'running'; f.session.control.actions = [];
+  await assert.rejects(f.client.submit(f.sessionId, 'new_session'));
+});
 test('stale, ambiguous, wrong-session and read-only sources cannot receive commands', async t => {
   const f = setup(t);
   for (const state of ['stale', 'ambiguous', 'unavailable']) {

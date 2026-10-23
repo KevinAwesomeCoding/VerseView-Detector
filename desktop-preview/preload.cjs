@@ -3,6 +3,13 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 // Narrow appearance, observation and opt-in controls. No arbitrary filesystem or IPC.
 contextBridge.exposeInMainWorld('verseviewDesktop', Object.freeze({
+  updateState:()=>ipcRenderer.invoke('preview:update-state'),
+  checkUpdate:()=>ipcRenderer.invoke('preview:check-update'),
+  applyUpdate:()=>ipcRenderer.invoke('preview:apply-update'),
+  onUpdateChanged:callback=>{
+    const listener=(_event,value)=>callback(value);ipcRenderer.on('preview:update-changed',listener);
+    return ()=>ipcRenderer.removeListener('preview:update-changed',listener);
+  },
   openReleases:()=>ipcRenderer.invoke('preview:releases'),
   profileTransfer:(sessionId,revision,kind,includeCredentials)=>ipcRenderer.invoke('preview:profile-transfer',sessionId,revision,kind,includeCredentials),
   startup:(action,enabled)=>ipcRenderer.invoke('preview:startup',action,enabled),

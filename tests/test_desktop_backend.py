@@ -165,6 +165,20 @@ class BackendTests(unittest.TestCase):
         self.assertTrue(host.close())
         runtime.stop.assert_called_once()
 
+    def test_start_rejects_saved_output_device_after_audio_devices_change(self):
+        values, _ = self.store.load()
+        values['mic_index'] = 4  # A stale index can now identify a speaker.
+        self.path.write_text(json.dumps(values))
+        publisher = ObserverPublisher(True, self.temporary.name)
+        runtime = SimpleNamespace(verification=True, state=Mock(return_value='stopped'), start=Mock(),
+                                  stop=Mock(), panic=Mock(), thread=None, error='', stop_requested=threading.Event(),
+                                  profile=Path(self.temporary.name))
+        host = BackendHost(settings, publisher, runtime, [{'id': 2, 'label': 'MacBook Air Microphone'}])
+        self.addCleanup(host.close)
+        self.assertFalse(host.start())
+        runtime.start.assert_not_called()
+        self.assertIn('Choose a microphone in Settings', host.notice)
+
     def test_unexpected_start_error_never_exports_raw_exception(self):
         publisher = ObserverPublisher(True, self.temporary.name)
         runtime = SimpleNamespace(verification=True, state=Mock(return_value='stopped'), start=Mock(side_effect=ValueError('private-key')),

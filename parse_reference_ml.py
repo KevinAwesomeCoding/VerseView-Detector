@@ -363,7 +363,7 @@ BOOKS_ML = {
     "മലാഖി": "Malachi", "മലാഖ്യ": "Malachi",
 
     # Matthew
-    "മത്തായി": "Matthew", "മത്": "Matthew",
+    "മത്തായി": "Matthew", "മത്തായിയുടെ": "Matthew", "മത്": "Matthew",
 
     # Mark
     "മർക്കോസ്": "Mark", "മർക്ക്": "Mark", "മർ": "Mark",
@@ -373,7 +373,8 @@ BOOKS_ML = {
     "ലൂക്ക": "Luke", "ലൂക്കൊ": "Luke",
 
     # John
-    "യോഹന്നാൻ": "John", "യോഹ": "John",
+    "യോഹന്നാൻ": "John", "യോഹന്നാന്റെ": "John", "യോഹന്നാന്റേ": "John", "യോഹ": "John",
+    "ജോഹന്നോൻ": "John",
 
     # Acts
     "അപ്പൊസ്തലപ്രവൃത്തികൾ": "Acts", "അപ്പോസ്തോല പ്രവർത്തി": "Acts",
@@ -719,6 +720,31 @@ def norm_for_match(s: str) -> str:
 def normalize_digits_ml(s: str) -> str:
     return s.translate(ML_DIGITS)
 
+def normalize_romanized_ml(s: str) -> str:
+    """Recognize common Manglish Gospel references supplied by Sarvam translit."""
+    replacements = (
+        (r'\byohann(?:a|an)(?:nte|te)?\b(?:\s+ande)?', 'john'),
+        (r'\bmath(?:a|aa)yi(?:yude|ude)?\b', 'matthew'),
+        (r'\bmarkos(?:inte)?\b', 'mark'),
+        (r'\blook(?:a|os)(?:yude)?\b', 'luke'),
+        (r'\b(?:onnaam|onnam|onnamathe|onnu|onamadi\s+ayyam|onnamadi\s+ayyam)\b', '1'),
+        (r'\b(?:randaam|randam|randamathe|randu|rendu)\b', '2'),
+        (r'\b(?:moonnaam|moonnam|moonam|moonnamathe|moonamathe|moonnu|moonu)\b', '3'),
+        (r'\b(?:naalaam|nalam|nalaam|naalu|nalu)\b', '4'),
+        (r'\b(?:anchaam|ancham|anjam|anchu|anju)\b', '5'),
+        (r'\b(?:aaraam|aram|aaru|aru)\b', '6'),
+        (r'\b(?:ezhaam|ezham|ezhu)\b', '7'),
+        (r'\b(?:ettaam|ettam|ettu)\b', '8'),
+        (r'\b(?:onpathaam|onpatham|onpathu|ombathu)\b', '9'),
+        (r'\b(?:pathaam|patham|pathu)\b', '10'),
+        (r'\b(?:adhyaayam|adhyayam|adhyayathile|adhyaya|adiyayam)\b', 'chapter'),
+        (r'\b(?:vaakyam|vakyam|vachanam)\b', 'verse'),
+        (r'\b(?:suvishesham|suvisesham|suvisheshathil)\b', 'gospel'),
+    )
+    for pattern, replacement in replacements:
+        s = re.sub(pattern, replacement, s, flags=re.IGNORECASE)
+    return s
+
 def convert_number_words_ml(s: str) -> str:
     for k in sorted(ORDINAL_MAP_ML.keys(), key=len, reverse=True):
         s = s.replace(k, ORDINAL_MAP_ML[k])
@@ -773,7 +799,12 @@ def resolve_book_ml(book_raw: str):
     for k in BOOKS_ML.keys():
         k_norm = norm_for_match(normalize_digits_ml(k))
         for hay in hay_variants:
-            if k_norm and k_norm in normalize_digits_ml(hay):
+            # A short alias such as "മത്" must be a complete word. Substring
+            # matching mistakes "ഒന്നാമത്തേയായ" (an ASR rendering of "first")
+            # for Matthew and can then turn John 1:3 into Matthew 3:3.
+            if k_norm and re.search(r'(?<![\w\u0d00-\u0d7f])' + re.escape(k_norm) +
+                                    r'(?![\w\u0d00-\u0d7f])',
+                                    normalize_digits_ml(hay)):
                 if len(k_norm) > best_len:
                     best_key = k
                     best_len = len(k_norm)
@@ -788,6 +819,10 @@ def resolve_book_ml(book_raw: str):
 
     eng = BOOKS_ML[best_key]
     if prefix_num:
+        # A numeral from the preceding clause must not turn the next Gospel
+        # mention into a numbered epistle ("... മൂന്ന് യോഹന്നാന്റെ സുവിശേഷം").
+        if "സുവിശേഷ" in s_wo_num:
+            return None
         if eng.startswith(("1 ", "2 ", "3 ")):
             return eng
         return f"{prefix_num} {eng}"
@@ -819,7 +854,7 @@ def parse_references(text: str):
 
     results = []
 
-    t = text.lower()
+    t = normalize_romanized_ml(text.lower())
     for word, num in ORDINAL_WORDS_ENG.items():
         t = re.sub(rf"\b{word}\b", num, t)
     t = convert_word_numbers_eng(t)
@@ -872,32 +907,45 @@ def parse_references(text: str):
     if results:
         return results
 
-    # 3. Malayalam Parser Pipeline (Brute Force)
-    for ml_book in sorted(BOOKS_ML.keys(), key=len, reverse=True):
-        if ml_book in t:
-            eng_book = BOOKS_ML[ml_book]
-            idx = t.index(ml_book)
-            after = t[idx + len(ml_book):]
+    # 3. Malayalam Parser Pipeline (Brute Force). Keep each book's numbers
+    # within its own span; otherwise a verse before a repeated book name can
+    # be combined with the next mention's chapter/verse.
+    book_hits = []
+    for ml_book in BOOKS_ML:
+        pattern = (r'(?<![\w\u0d00-\u0d7f])' + re.escape(ml_book) +
+                   r'(?![\w\u0d00-\u0d7f])')
+        for match in re.finditer(pattern, t):
+            book_hits.append((match.start(), match.end(), ml_book))
+    book_hits.sort(key=lambda hit: (hit[0], -(hit[1] - hit[0])))
+    distinct_hits = []
+    for hit in book_hits:
+        if not distinct_hits or hit[0] >= distinct_hits[-1][1]:
+            distinct_hits.append(hit)
 
-            for filler in NOISE_ML:
-                after = after.replace(filler, " ")
-            after = re.sub(NOISE_ENG_RE, " ", after)
-            after = " ".join(after.split())
+    for index, (_, end, ml_book) in enumerate(distinct_hits):
+        eng_book = BOOKS_ML[ml_book]
+        next_start = distinct_hits[index + 1][0] if index + 1 < len(distinct_hits) else len(t)
+        after = t[end:next_start]
 
-            m = re.search(r'(\d{1,3})\s*[:\-।]\s*(\d{1,3})', after)
-            if m:
-                results.append(f"{eng_book} {m.group(1)}:{m.group(2)}")
-                continue
+        for filler in NOISE_ML:
+            after = after.replace(filler, " ")
+        after = re.sub(NOISE_ENG_RE, " ", after)
+        after = " ".join(after.split())
 
-            m2 = re.search(r'(\d{1,3})\D+(\d{1,3})', after)
-            if m2:
-                results.append(f"{eng_book} {m2.group(1)}:{m2.group(2)}")
-                continue
+        m = re.search(r'(\d{1,3})\s*[:\-।]\s*(\d{1,3})', after)
+        if m:
+            results.append(f"{eng_book} {m.group(1)}:{m.group(2)}")
+            continue
 
-            m3 = re.search(r'(\d{1,3})', after)
-            if m3:
-                results.append(f"{eng_book} {m3.group(1)}")
-                continue
+        m2 = re.search(r'(\d{1,3})\D+(\d{1,3})', after)
+        if m2:
+            results.append(f"{eng_book} {m2.group(1)}:{m2.group(2)}")
+            continue
+
+        m3 = re.search(r'(\d{1,3})', after)
+        if m3:
+            results.append(f"{eng_book} {m3.group(1)}")
+            continue
 
     return results
 

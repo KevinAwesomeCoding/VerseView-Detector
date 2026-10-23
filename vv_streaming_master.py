@@ -6941,13 +6941,13 @@ def _is_explicit_full_ref(text: str) -> bool:
     return False
 
 
-def _detect_explicit_reference(sentence: str, controller) -> bool:
+def _detect_explicit_reference(sentence: str, controller, parser=None) -> bool:
     """Bug 7: Fast-path for fully explicit references (book + chapter + verse).
     Runs the parser directly on the raw sentence and delivers immediately,
     bypassing the LLM window queue. Only fires when chapter AND verse are present."""
     # Bug Fix 2B: strip ordinal-occasion phrases before parsing
     clean = _strip_ordinal_occasions(sentence)
-    refs = PRIMARY_PARSER(clean)
+    refs = (parser or PRIMARY_PARSER)(clean)
     if not refs:
         return False
     for ref in refs:
@@ -7066,7 +7066,7 @@ def trigger_onwards_if_needed_standalone(ref_string: str, original_text: str):
             _start_onwards(bk, ch, vs)
 
 
-def _detect_from_translation(english_text: str, controller) -> bool:
+def _detect_from_translation(english_text: str, controller, *, sarvam_stream=False) -> bool:
     """Bug 1 Fix: When Sarvam auto-translates Malayalam → English it may produce
     colon-notation references (e.g. "John 12:27", "Matthew 3:5") that are not
     present in the raw Malayalam blob.  This helper runs parse_eng on the
@@ -7076,7 +7076,7 @@ def _detect_from_translation(english_text: str, controller) -> bool:
     """
     if not english_text or not english_text.strip():
         return False
-    if not USE_SARVAM:
+    if not (USE_SARVAM or sarvam_stream):
         return False
     try:
         refs = parse_eng(english_text)
@@ -7156,7 +7156,7 @@ def _process_transcript_blob(sentence: str, partial_context_ref: list, controlle
     partial_context = partial_context_ref[0]
 
     # Bug 7: Explicit full reference fast-path — fires before partial context even accumulates
-    if _detect_explicit_reference(sentence, controller):
+    if _detect_explicit_reference(sentence, controller, parser=parser):
         partial_context_ref[0] = ""  # clear context after an explicit hit
         return
 
@@ -7449,7 +7449,7 @@ def create_sarvam_transcript_handler(controller, is_secondary: bool, tag: str, p
         _process_transcript_blob(sentence, partial_context, controller, parser=parser)
 
         # Also run colon-notation detection on the English translation.
-        _detect_from_translation(english_text, controller)
+        _detect_from_translation(english_text, controller, sarvam_stream=True)
 
     return _with_transcript_context(handle_transcript, is_secondary)
 
@@ -7495,7 +7495,13 @@ def launch_stt_task(controller, is_secondary: bool = False):
             _observer_emit("stream", stream=role, state="error")
             raise
         else:
-            _observer_emit("stream", stream=role, state="stopped")
+            # Providers may return after a microphone or service failure without
+            # raising. Keep that distinct from the operator pressing Stop.
+            if stop_event.is_set():
+                _observer_emit("stream", stream=role, state="stopped")
+            else:
+                logger.error("Speech stream ended unexpectedly (%s). Check microphone and provider settings.", role)
+                _observer_emit("stream", stream=role, state="error")
 
     return asyncio.create_task(_run_stream())
 

@@ -138,6 +138,26 @@ installed runtime/frozen startup checks, and uninstall verification. No new loca
 build dependency was installed. Publication requires all three native reports and
 matching checksums, plus app-only Mac and Windows lifecycle verification.
 
+## In-app updater validation (2026-10-23)
+
+The isolated updater validation branch at commit `c84345f0c3c1fb364274ff9478e590faf431c066`
+passed [native GitHub Actions run 39944670059](https://github.com/KevinAwesomeCoding/VerseView-Detector/actions/runs/39944670059)
+on Windows x64, Intel Mac x64, and Apple Silicon. The native Windows package
+test installs Setup into a temporary directory, changes `resources/app.asar`,
+then runs Setup again with that exact directory and verifies the original bytes,
+runtime, and uninstall. The native Mac package tests extract the ZIP, run the
+updater's swap helper at the same app path, verify its rollback copy, and recheck
+the packaged runtime and frozen backend. Relaunch is suppressed for this isolated
+test.
+
+An additional Intel x64 build on Apple Silicon under Rosetta passed frozen
+backend startup, package inventory, strict code signature, extracted ZIP, and
+same-path update checks. Its local ZIP is
+`out/deliverables/2026-10-23T11-12-52-240Z-ef2a811a-darwin-x64.zip`
+with SHA-256 `2a39656ea2bdf30b79fcf23e4a4a33c98d0cb916a503a134195adf7e72c54834`.
+These checks did not click Update in a physical Windows or Intel Mac desktop
+session, and they did not replace an operational installation.
+
 ## Limits
 
 Mac Finder and Windows pinned shortcut icons are static original icons. Theme
