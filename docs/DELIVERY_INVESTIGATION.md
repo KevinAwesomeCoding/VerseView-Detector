@@ -1728,5 +1728,22 @@ Verification: the exact raw phrase reaches a fake browser through the real hybri
 detection pipeline; unmatched/casual text remains blocked with no browser calls.
 259 Python tests, 100 desktop Node tests, syntax/offline page and whitespace
 checks pass. These are isolated tests, not fresh microphone/visible-output
-acceptance. Separate Mac package verification is pending; installed application
-and real settings remain untouched by this fix.
+acceptance. Separate Apple Silicon 0.15.8 app verification passed: 62 packaged files,
+production engine present, strict ad-hoc signature and extracted frozen startup.
+Build ID `2026-10-23T04-42-44-622Z-b48cfc08-darwin-arm64`, runtime source
+`b48cfc0`, branch `codex/malayalam-reference-guard`. Existing build commands were
+used with `/tmp/verseview-group5-build-20261022`: build-backend.py,
+package-native.cjs, verify-latest.cjs and archive-latest.py. ZIP:
+`desktop-preview/out/deliverables/2026-10-23T04-42-44-622Z-b48cfc08-darwin-arm64.zip`,
+SHA-256 `9f7924654c04eb5eb48dda22b2ec6771094f9ba1f714b4b8d2645cd26c52469e`.
+
+The actual packaged app (`app.isPackaged=true`, version 0.15.8) passed the focused
+suppression UI check using an external synthetic observer. Its screenshot and
+exact executable/output evidence are in `desktop-preview/test-results/malayalam-suppression/`.
+A first harness check timed out because CSS uppercases innerText; checking the
+underlying textContent corrected the harness without changing production code.
+The reusable check is `desktop-preview/tests/suppression-ui.cjs`. Its disposable
+profile and fixture files were removed. No microphone or VerseVIEW command was
+used; fresh speech/visible-output acceptance remains unverified. Windows/Intel
+native builds were not rerun for this branch. Installed app and real settings
+remain untouched; replacement and publication have not been performed.
