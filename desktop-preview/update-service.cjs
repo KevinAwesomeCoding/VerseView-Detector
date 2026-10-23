@@ -47,6 +47,25 @@ async function releaseList() {
   return value;
 }
 
+async function changesSince(base, head) {
+  if (!/^[a-f0-9]{40}$/.test(base) || !/^[a-f0-9]{40}$/.test(head)) return '';
+  const res = await request(`https://api.github.com/repos/KevinAwesomeCoding/VerseView-Detector/compare/${base}...${head}?per_page=100`);
+  let body = '';
+  for await (const chunk of res) {
+    body += chunk;
+    if (body.length > 2 * 1024 * 1024) throw new Error('Changelog response is too large');
+  }
+  const value = JSON.parse(body);
+  if (!Array.isArray(value.commits)) throw new Error('Changelog response is invalid');
+  const subjects = value.commits.map(item => String(item.commit?.message || '').split('\n')[0].trim().slice(0, 180))
+    .filter(Boolean).slice(-100);
+  if (!subjects.length) return '';
+  const heading = Number(value.total_commits) > value.commits.length
+    ? 'Recent changes since your installed version (latest 100 shown):'
+    : 'Changes since your installed version:';
+  return `${heading}\n${subjects.map(subject => `• ${subject}`).join('\n')}`.slice(0, 14000);
+}
+
 function checksum(body, name) {
   const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const match = String(body || '').match(new RegExp(`^([a-fA-F0-9]{64})\\s+${escaped}\\s*$`, 'm'));
@@ -146,4 +165,4 @@ async function launchInstaller(file, executable, spawnInstaller = spawn) {
   child.unref();
 }
 
-module.exports = { API, ASSETS, candidate, releaseList, download, prepareMac, launchInstaller, checksum, highlights };
+module.exports = { API, ASSETS, candidate, releaseList, changesSince, download, prepareMac, launchInstaller, checksum, highlights };

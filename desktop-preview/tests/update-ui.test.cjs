@@ -15,20 +15,19 @@ function launch(storage) {
   const ids = ['verseview-prototype', 'preview-surface', 'preview-layout', 'preview-mode', 'preview-reset',
     'preview-update-tools', 'preview-update', 'preview-update-status', 'preview-update-prompt',
     'preview-update-prompt-message', 'preview-update-prompt-notes', 'preview-update-prompt-later',
-    'preview-update-prompt-apply', 'preview-update-prompt-changelog'];
+    'preview-update-prompt-apply'];
   const nodes = Object.fromEntries(ids.map(id => [id, Object.assign(element(), { id })]));
   nodes['verseview-prototype'].dispatchEvent = () => {};
-  let updateChanged, applied = 0, checked = 0, changelogs = 0;
+  let updateChanged, applied = 0, checked = 0;
   const bridge = { onUpdateChanged(fn) { updateChanged = fn; }, updateState: async () => ({ phase: 'current' }),
     applyUpdate: async () => { applied++; }, checkUpdate: async () => { checked++; },
-    openUpdateChangelog: async () => { changelogs++; },
     onBackendChanged() {}, backendState: async () => ({ status: 'unavailable' }),
     onObserverChanged() {}, observer: async () => ({ connection: 'waiting', sources: [], session: null }),
     onAppearanceChanged() {}, environment: async () => ({ platform: 'darwin', appearance: { mode: 'solid' } }) };
   vm.runInNewContext(script, { window: { verseviewDesktop: bridge }, document: { getElementById: id => nodes[id] },
     localStorage: { getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value) }, Event,
     CustomEvent: class extends Event { constructor(name, value) { super(name); this.detail = value.detail; } } });
-  return { nodes, handlers, update: value => updateChanged(value), counts: () => ({ applied, checked, changelogs }) };
+  return { nodes, handlers, update: value => updateChanged(value), counts: () => ({ applied, checked }) };
 }
 
 test('a release prompts once across restarts, while Update reopens its notes and a newer release prompts again', async () => {
@@ -49,8 +48,6 @@ test('a release prompts once across restarts, while Update reopens its notes and
   assert.equal(reopened.nodes['preview-update-prompt'].open, false);
   reopened.handlers.get('preview-update:click')();
   assert.equal(reopened.nodes['preview-update-prompt'].open, true);
-  await reopened.handlers.get('preview-update-prompt-changelog:click')();
-  assert.equal(reopened.counts().changelogs, 1);
   reopened.handlers.get('preview-update-prompt-later:click')();
   reopened.update({ ...available, tag: 'desktop-beta-242-1', notes: 'Added new controls.' });
   assert.equal(reopened.nodes['preview-update-prompt'].open, true);

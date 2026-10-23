@@ -26,7 +26,6 @@
   const updatePromptNotes = document.getElementById('preview-update-prompt-notes');
   const updatePromptLater = document.getElementById('preview-update-prompt-later');
   const updatePromptApply = document.getElementById('preview-update-prompt-apply');
-  const updatePromptChangelog = document.getElementById('preview-update-prompt-changelog');
   const promptedReleaseKey = 'verseview-desktop-preview.prompted-release.v1';
   let promptedReleaseTag;
   try { promptedReleaseTag = localStorage.getItem(promptedReleaseKey); } catch { /* Session-only reminder. */ }
@@ -53,7 +52,7 @@
     if (phase === 'error') updateButton.disabled = false;
     if (phase === 'available' && value.tag) {
       if (updatePromptMessage) updatePromptMessage.textContent = `${value.prerelease ? 'Beta' : 'Release'} ${value.tag} is ready. Would you like to update now?`;
-      if (updatePromptNotes) updatePromptNotes.textContent = value.notes || 'A written summary is unavailable for this release. Open the full changelog to see every change since your installed version.';
+      if (updatePromptNotes) updatePromptNotes.textContent = value.notes || 'A written change summary is unavailable for this release.';
       if (value.tag !== promptedReleaseTag) openUpdatePrompt();
     } else if (updatePrompt?.open) {
       updatePrompt.close();
@@ -72,7 +71,6 @@
   });
   updatePromptApply?.addEventListener('click', startUpdate);
   updatePromptLater?.addEventListener('click', () => updatePrompt.close());
-  updatePromptChangelog?.addEventListener('click', () => window.verseviewDesktop?.openUpdateChangelog());
   let observer = { connection: 'waiting', message: 'Waiting for an observer-enabled detector', sources: [], session: null };
   let environment = { platform: 'browser', version: '0.1.0', packaged: false, appearance: { mode: 'solid', reason: 'Browser preview' } };
   let backend = { status: 'unavailable', message: 'Checking bundled backend availability', owned: false };

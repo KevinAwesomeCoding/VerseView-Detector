@@ -106,8 +106,8 @@ package on launch and every two minutes while open. When one is available,
 the app shows its release notes once and **Update** appears in the title bar.
 **Later** dismisses that release's prompt across app restarts; a newer release
 prompts once again. The title-bar **Update** button reopens the notes and update
-choice at any time. **Full changelog** opens the changes since the installed
-build on GitHub. Clicking **Update now** downloads the whole native package and
+choice at any time. The change list since the installed build stays in the app.
+Clicking **Update now** downloads the whole native package and
 verifies its published SHA-256 before
 the app quits. On Mac, a helper extracts and verifies the complete app bundle,
 then swaps it into the existing location and keeps the prior bundle as a hidden

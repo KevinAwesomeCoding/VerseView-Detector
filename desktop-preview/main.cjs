@@ -86,8 +86,18 @@ async function checkUpdates() {
   if (!app.isPackaged || !build.builtAt || !['darwin', 'win32'].includes(process.platform)) return publishUpdate({ phase: 'unavailable' });
   try {
     const releases = await updates.releaseList();
+    const previous = availableUpdate;
     availableUpdate = updates.candidate(releases, { platform: process.platform, arch: process.arch,
       builtAt: build.builtAt, sourceRevision: build.sourceRevision, channel: updateChannel });
+    if (availableUpdate) {
+      if (previous?.tag === availableUpdate.tag && previous.notes) availableUpdate.notes = previous.notes;
+      else {
+        try {
+          const changes = await updates.changesSince(build.sourceRevision, availableUpdate.sourceRevision);
+          if (changes) availableUpdate.notes = [availableUpdate.notes, changes].filter(Boolean).join('\n\n');
+        } catch { /* Release notes remain available if the detailed comparison fails. */ }
+      }
+    }
     publishUpdate(availableUpdate ? { phase: 'available', tag: availableUpdate.tag, prerelease: availableUpdate.prerelease,
       notes: availableUpdate.notes }
       : { phase: 'current' });
@@ -143,11 +153,6 @@ ipcMain.handle('preview:update-state', event => {
 ipcMain.handle('preview:check-update', event => {
   if (!trusted(event)) throw new Error('Untrusted update request');
   return checkUpdates();
-});
-ipcMain.handle('preview:update-changelog', event => {
-  if (!trusted(event) || !availableUpdate || !/^[a-f0-9]{40}$/.test(build.sourceRevision)
-    || !/^[a-f0-9]{40}$/.test(availableUpdate.sourceRevision)) throw new Error('No update changelog is available');
-  return shell.openExternal(`https://github.com/KevinAwesomeCoding/VerseView-Detector/compare/${build.sourceRevision}...${availableUpdate.sourceRevision}`);
 });
 ipcMain.handle('preview:apply-update', async event => {
   if (!trusted(event) || !availableUpdate || updateBusy || !app.isPackaged) throw new Error('No verified update is ready');
