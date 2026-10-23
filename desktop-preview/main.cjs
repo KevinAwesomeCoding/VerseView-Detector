@@ -339,7 +339,7 @@ app.whenReady().then(() => {
   ]));
   createWindow();
   setTimeout(checkUpdates, 3000).unref();
-  setInterval(checkUpdates, 5 * 60 * 1000).unref();
+  setInterval(checkUpdates, 2 * 60 * 1000).unref();
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });
 nativeTheme.on('updated', updateBackdrop);

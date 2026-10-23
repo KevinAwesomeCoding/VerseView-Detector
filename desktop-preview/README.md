@@ -374,7 +374,7 @@ This is automated installation coverage; physical Windows acceptance is deferred
 See the [installation and rollback guide](INSTALLATION_AND_ROLLBACK.md) for
 profile locations, one-time settings/managed-credential import, private backups,
 manual updates and uninstall/reinstall. Packaged builds now check GitHub releases
-for a newer verified package on launch and every five minutes while open. A new
+for a newer verified package on launch and every two minutes while open. A new
 release shows an in-app prompt and **Update** in the title bar. The app downloads
 and checks the package before replacing it at the
 same location after shutdown. Settings and credentials remain in the profile.

@@ -102,7 +102,7 @@ presentation should start only in the isolated test session approved by the user
 ## Manual update and backup
 
 Packaged builds check GitHub releases for a newer compatible stable or beta
-package on launch and every five minutes while open. When one is available,
+package on launch and every two minutes while open. When one is available,
 the app shows an in-app prompt and **Update** appears in the title bar. **Later**
 dismisses the prompt for that release until the app closes; a newer release
 prompts again. Clicking **Update now** or the title-bar **Update** button
