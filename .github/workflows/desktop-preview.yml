@@ -3,7 +3,7 @@ name: Build desktop preview
 # Reusable native desktop build. Release publishing belongs to the caller.
 on:
   push:
-    branches: [codex/consumer-parity]
+    branches: [codex/consumer-parity, codex/updater-native-validation]
   workflow_call:
   workflow_dispatch:
 

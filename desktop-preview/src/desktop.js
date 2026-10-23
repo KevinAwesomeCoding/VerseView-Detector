@@ -18,6 +18,27 @@
   const surface = document.getElementById('preview-surface');
   const layout = document.getElementById('preview-layout');
   const mode = document.getElementById('preview-mode');
+  const updateTools = document.getElementById('preview-update-tools');
+  const updateButton = document.getElementById('preview-update');
+  const updateStatus = document.getElementById('preview-update-status');
+  function showUpdate(value) {
+    if (!updateTools || !updateButton || !updateStatus) return;
+    const phase = value?.phase;
+    updateTools.hidden = !['available', 'downloading', 'verified', 'installing', 'error'].includes(phase);
+    updateButton.disabled = phase !== 'available';
+    updateButton.textContent = phase === 'available' ? 'Update' : phase === 'downloading' ? `Downloading ${value.percent || 0}%…`
+      : phase === 'verified' ? 'Verifying…' : phase === 'installing' ? 'Installing…' : 'Check again';
+    updateStatus.textContent = phase === 'available' ? `${value.prerelease ? 'Beta ' : ''}${value.tag || ''} available`
+      : phase === 'error' ? value.message || 'Update failed' : '';
+    updateStatus.title = updateStatus.textContent;
+    if (phase === 'error') updateButton.disabled = false;
+  }
+  updateButton?.addEventListener('click', async () => {
+    if (!window.verseviewDesktop) return;
+    updateButton.disabled = true;
+    if (updateButton.textContent === 'Check again') await window.verseviewDesktop.checkUpdate();
+    else await window.verseviewDesktop.applyUpdate();
+  });
   let observer = { connection: 'waiting', message: 'Waiting for an observer-enabled detector', sources: [], session: null };
   let environment = { platform: 'browser', version: '0.1.0', packaged: false, appearance: { mode: 'solid', reason: 'Browser preview' } };
   let backend = { status: 'unavailable', message: 'Checking bundled backend availability', owned: false };
@@ -96,6 +117,8 @@
     }
   });
   if (window.verseviewDesktop) {
+    window.verseviewDesktop.onUpdateChanged(showUpdate);
+    window.verseviewDesktop.updateState().then(showUpdate).catch(() => {});
     const updateBackend = value => { backend = value; root.dispatchEvent(new Event('preview:backend')); };
     window.verseviewDesktop.onBackendChanged(updateBackend);
     window.verseviewDesktop.backendState().then(updateBackend).catch(() => {});
