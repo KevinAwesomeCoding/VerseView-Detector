@@ -16,7 +16,7 @@ const { verify: verifyBackend } = require('./backend-integrity.cjs');
   const read = relative => extractFile(archive, path.normalize(relative));
   const build = JSON.parse(read('build-info.json'));
   const files = listPackage(archive).filter(file => path.extname(file));
-  const allowed = /^(src\/|main\.cjs$|preload\.cjs$|update-service\.cjs$|outline-output\.cjs$|outline-preload\.cjs$|appearance\.cjs$|appearance-preferences\.cjs$|theme-icons\.cjs$|backend-manager\.cjs$|engine-feed\.cjs$|engine-commands\.cjs$|session-export\.cjs$|launch-preferences\.cjs$|profile-transfer\.cjs$|package\.json$|build-info\.json$)/;
+  const allowed = /^(src\/|main\.cjs$|preload\.cjs$|update-service\.cjs$|outline-output\.cjs$|outline-preload\.cjs$|appearance\.cjs$|appearance-preferences\.cjs$|theme-icons\.cjs$|backend-manager\.cjs$|engine-feed\.cjs$|engine-commands\.cjs$|notification-actions\.cjs$|session-export\.cjs$|launch-preferences\.cjs$|profile-transfer\.cjs$|package\.json$|build-info\.json$)/;
   for (const file of files) {
     const relative = file.replace(/^[/\\]+/, '').replaceAll('\\', '/');
     assert.match(relative, allowed, `Unexpected packaged file: ${relative}`);
@@ -28,7 +28,7 @@ const { verify: verifyBackend } = require('./backend-integrity.cjs');
     const digest = crypto.createHash('sha256').update(read(relative)).digest('hex');
     assert.equal(digest, build.sourceFiles[relative], `Packaged bytes differ: ${relative}`);
   }
-  for (const required of ['main.cjs', 'preload.cjs', 'update-service.cjs', 'outline-output.cjs', 'outline-preload.cjs', 'src/outline.js', 'src/outline-display.html', 'src/outline-display.js', 'src/outline-display.css', 'appearance.cjs', 'appearance-preferences.cjs', 'theme-icons.cjs', 'backend-manager.cjs', 'engine-feed.cjs', 'engine-commands.cjs', 'session-export.cjs', 'launch-preferences.cjs', 'profile-transfer.cjs', 'src/notes.js', 'src/session-policy.js', 'src/session-setup.js', 'src/options-policy.js', 'src/connections.js', 'src/index.html', 'src/dashboard.js',
+  for (const required of ['main.cjs', 'preload.cjs', 'update-service.cjs', 'outline-output.cjs', 'outline-preload.cjs', 'src/outline.js', 'src/outline-display.html', 'src/outline-display.js', 'src/outline-display.css', 'appearance.cjs', 'appearance-preferences.cjs', 'theme-icons.cjs', 'backend-manager.cjs', 'engine-feed.cjs', 'engine-commands.cjs', 'notification-actions.cjs', 'session-export.cjs', 'launch-preferences.cjs', 'profile-transfer.cjs', 'src/notes.js', 'src/session-policy.js', 'src/session-setup.js', 'src/options-policy.js', 'src/connections.js', 'src/index.html', 'src/dashboard.js',
     'src/verse-tools.js', 'src/verse-tools.css', 'src/transcript-view.js', 'src/operator.js', 'src/consumer.js', 'src/cloud-policy.js', 'src/cloud-settings.js', 'src/settings-policy.js', 'src/settings.js', 'src/desktop.js', 'src/desktop.css', 'src/dashboard.css', 'src/vendor/lucide.min.js', 'src/vendor/lucide.LICENSE']) {
     assert.ok(read(required).length, required);
   }
@@ -39,6 +39,8 @@ const { verify: verifyBackend } = require('./backend-integrity.cjs');
   if (target.endsWith('.app') && process.platform === 'darwin') {
     const { execFileSync } = require('node:child_process');
     const icon = execFileSync('plutil', ['-extract', 'CFBundleIconFile', 'raw', '-o', '-', path.join(target, 'Contents/Info.plist')], { encoding: 'utf8' }).trim();
+    const notificationStyle = execFileSync('plutil', ['-extract', 'NSUserNotificationAlertStyle', 'raw', '-o', '-', path.join(target, 'Contents/Info.plist')], { encoding: 'utf8' }).trim();
+    assert.equal(notificationStyle, 'alert');
     assert.deepEqual(fs.readFileSync(path.join(resources, icon)), read('src/assets/icons/verseview-original.icns'));
     for (const license of ['LICENSE', 'LICENSES.chromium.html']) assert.ok(fs.statSync(path.join(resources, 'licenses', license)).size);
   }

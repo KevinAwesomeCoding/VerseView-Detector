@@ -46,7 +46,10 @@ const { inventory, verify: verifyBackend, relocateLinks } = require('./backend-i
   const artifacts = await packager({ dir: root, out: output, name: packageInfo.productName,
     icon: path.join(root, 'src', 'assets', 'icons', `verseview-original.${platform === 'darwin' ? 'icns' : 'ico'}`),
     ...(backendPath ? { extraResource: [backendPath] } : {}),
-    ...(platform === 'darwin' ? { extendInfo: { NSMicrophoneUsageDescription: 'VerseView uses microphone audio when you explicitly start recognition.' } } : {}),
+    ...(platform === 'darwin' ? { extendInfo: {
+      NSMicrophoneUsageDescription: 'VerseView uses microphone audio when you explicitly start recognition.',
+      NSUserNotificationAlertStyle: 'alert'
+    } } : {}),
     appBundleId: 'com.verseview.detector.desktop-preview', appVersion: packageInfo.version,
     executableName: packageInfo.productName, platform, arch, asar: true, prune: true,
     // Explicit allowlist: never package the Python engine, production settings, or tests.
@@ -54,7 +57,7 @@ const { inventory, verify: verifyBackend, relocateLinks } = require('./backend-i
       // Packager passes slash-prefixed paths relative to `dir` to this callback.
       const relative = file.replace(/^[/\\]+/, '');
       if (!relative) return false;
-      return !['src', 'main.cjs', 'preload.cjs', 'update-service.cjs', 'outline-output.cjs', 'outline-preload.cjs', 'appearance.cjs', 'appearance-preferences.cjs', 'theme-icons.cjs', 'backend-manager.cjs', 'engine-feed.cjs', 'engine-commands.cjs', 'session-export.cjs', 'launch-preferences.cjs', 'profile-transfer.cjs', 'package.json', 'build-info.json'].includes(relative.split(/[/\\]/)[0]);
+      return !['src', 'main.cjs', 'preload.cjs', 'update-service.cjs', 'outline-output.cjs', 'outline-preload.cjs', 'appearance.cjs', 'appearance-preferences.cjs', 'theme-icons.cjs', 'backend-manager.cjs', 'engine-feed.cjs', 'engine-commands.cjs', 'notification-actions.cjs', 'session-export.cjs', 'launch-preferences.cjs', 'profile-transfer.cjs', 'package.json', 'build-info.json'].includes(relative.split(/[/\\]/)[0]);
     }
   });
   if (platform === 'darwin' && process.platform === 'darwin') {

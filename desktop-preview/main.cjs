@@ -7,6 +7,7 @@ const { pathToFileURL } = require('node:url');
 const { DARK_THEMES, validTheme, backdropPolicy, backgroundColor } = require('./appearance.cjs');
 const { EngineFeedReader, feedDirectory } = require('./engine-feed.cjs');
 const { EngineCommands } = require('./engine-commands.cjs');
+const { approvalDecision } = require('./notification-actions.cjs');
 const { BackendManager } = require('./backend-manager.cjs');
 const { OutlineOutput } = require('./outline-output.cjs');
 const { iconPath, applyThemeIcon } = require('./theme-icons.cjs');
@@ -38,6 +39,12 @@ if (app.isPackaged) {
 const pageURL = pathToFileURL(path.join(__dirname, 'src', 'index.html')).href;
 const notifiedCandidates = new Set();
 const activeApprovalNotifications = new Map();
+function openApprovalReview(message) {
+  if(!window||window.isDestroyed())return;
+  window.show();window.focus();
+  if(message)dialog.showMessageBox(window,{type:'warning',title:'Approval needs attention',message,
+    buttons:['OK'],noLink:true}).catch(()=>{});
+}
 function reviewNotifications(snapshot) {
   const sessionId=snapshot.session?.session_id, control=snapshot.session?.control;
   const pending=control?.ask_before_sending&&control.state==='running'?control.pending||[]:[];
@@ -51,10 +58,17 @@ function reviewNotifications(snapshot) {
     if(notifiedCandidates.size>256)notifiedCandidates.delete(notifiedCandidates.values().next().value);
     const actions=['darwin','win32'].includes(process.platform)?[{type:'button',text:'Approve'},{type:'button',text:'Deny'}]:[];
     const notice=new Notification({title:`${item.reference} was said`,body:'Display this verse? Click to review the spoken context.',actions});
-    const decide=approved=>commands.submit(sessionId,approved?'approve':'reject',item.candidate_id).catch(()=>{});
-    notice.on('action',(_event,details)=>decide(details.actionIndex===0));
-    notice.on('click',()=>{window.show();window.focus();});
-    notice.on('failed',()=>activeApprovalNotifications.delete(item.candidate_id));
+    let deciding=false;
+    notice.on('action',async(details,legacyIndex)=>{
+      const approved=approvalDecision(details,legacyIndex);
+      if(approved===null){openApprovalReview('The notification did not identify which button was pressed. Choose Approve or Deny in VerseView Detector.');return;}
+      if(deciding)return;
+      deciding=true;
+      try{await commands.submit(sessionId,approved?'approve':'reject',item.candidate_id);}
+      catch{deciding=false;openApprovalReview('The notification decision could not reach the detector. Review the current reference in VerseView Detector.');}
+    });
+    notice.on('click',()=>openApprovalReview());
+    notice.on('failed',()=>{activeApprovalNotifications.delete(item.candidate_id);window?.flashFrame(true);});
     activeApprovalNotifications.set(item.candidate_id,notice);
     notice.show();
   }

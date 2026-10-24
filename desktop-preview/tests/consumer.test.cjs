@@ -74,6 +74,32 @@ test('top controls keep urgent actions visible and group occasional actions in M
  c.ask_before_sending=true;
  assert.match(h.view.compactControls(h.s),/data-ask-before-send aria-pressed="true"[^>]*>Ask before sending <strong>On<\/strong>/);
 });
+test('approval dialog stays inside the themed app and sends an explicit decision',async()=>{
+ const root=events(),s=snapshot(),calls=[];let attached,focused=false,click;
+ s.session.control.ask_before_sending=true;
+ s.session.control.pending[0].reference='John 3:16';
+ s.session.control.pending[0].context={before:'Hi',detected:'John 3:16',after:'Keep reading'};
+ root.append=element=>{attached=element;};
+ const dialog={open:false,className:'',innerHTML:'',attributes:{},setAttribute(name,value){this.attributes[name]=value;},addEventListener:(name,handler)=>{if(name==='click')click=handler;},showModal(){this.open=true;},close(){this.open=false;},querySelector:selector=>selector==='#vv-approval-title'?{focus:()=>{focused=true;}}:null};
+ const window={previewShell:{getObserver:()=>s,isDeveloper:()=>false,getBackend:()=>({owned:true})},consumerFlow:{state:()=>({})},verseviewDesktop:{resolveCandidate:async(...args)=>{calls.push(args);return{id:'d'.repeat(32),action:'approve',outcome:'submitted'};}}};
+ const document={getElementById:()=>root,createElement:()=>dialog,addEventListener:()=>{},querySelectorAll:()=>[]};
+ vm.runInNewContext(source('observer.js'),{window,document,Event,setTimeout:()=>{}});
+ root.dispatchEvent(new Event('preview:observer'));
+ assert.equal(attached,dialog);
+ assert.equal(dialog.className,'vv-memory-dialog vv-approval-dialog');
+ assert.equal(dialog.attributes['aria-labelledby'],'vv-approval-title');
+ assert.match(dialog.innerHTML,/<h2 id="vv-approval-title" tabindex="-1">Display John 3:16\?<\/h2>/);
+ assert.match(dialog.innerHTML,/<mark>John 3:16<\/mark>/);
+ assert.equal(dialog.open,true);assert.equal(focused,true);
+ await click({target:{closest:()=>({dataset:{approvalDecision:'approve',candidate:s.session.control.pending[0].candidate_id}})}});
+ assert.deepEqual(calls,[[s.session.session_id,s.session.control.pending[0].candidate_id,true]]);
+ assert.equal(dialog.open,false);
+ assert.match(window.observerView.consumerNotice(s),/Sending your decision/);
+ s.session.control.pending[0].candidate_id='next-candidate';
+ root.dispatchEvent(new Event('preview:observer'));
+ await click({target:{closest:()=>({dataset:{approvalDecision:'reject',candidate:'next-candidate'}})}});
+ assert.deepEqual(calls[1],[s.session.session_id,'next-candidate',false]);
+});
 function flowHarness(){
  const root=events(),s=snapshot();s.session.control.state='stopped';s.session.control.pending=[];s.session.control.actions=['start'];
  const calls=[];let backend={status:'idle',owned:false};

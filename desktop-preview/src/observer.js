@@ -68,6 +68,7 @@
     const error=Object.entries(snapshot.session?.streams||{}).find(([,v])=>v.state==='error');
     if(error)return `${streamName(snapshot.session,error[0])}: speech recognition needs attention. Check the provider connection and allowance in Settings.`;
     if(command&&['failed','rejected','unknown'].includes(command.outcome))return command.reason||'The request needs attention. Check History.';
+    if(command?.outcome==='submitted'&&['approve','reject'].includes(command.action))return 'Sending your decision to the detector…';
     return c?.state==='running'?'':flow?.notice||'';
   }
   function consumerDecisions(snapshot){
@@ -311,18 +312,31 @@
     shownCandidate=item.candidate_id;
     if(!approvalDialog){
       approvalDialog=document.createElement('dialog');approvalDialog.className='vv-memory-dialog vv-approval-dialog';
-      document.body.append(approvalDialog);
+      approvalDialog.setAttribute('aria-labelledby','vv-approval-title');
+      root.append(approvalDialog);
       approvalDialog.addEventListener('click',async event=>{
         const decision=event.target.closest('[data-approval-decision]');
         if(!decision||approvalBusy)return;
         approvalBusy=true;
-        try{await window.verseviewDesktop.resolveCandidate(window.previewShell.getObserver().session.session_id,decision.dataset.candidate,decision.dataset.approvalDecision==='approve');approvalDialog.close();}
-        catch{approvalDialog.querySelector('[role="status"]').textContent='Could not send the decision. Check the connection and try again.';}
+        try{
+          const session=window.previewShell.getObserver().session;
+          const submitted=await window.verseviewDesktop.resolveCandidate(session.session_id,decision.dataset.candidate,decision.dataset.approvalDecision==='approve');
+          command={...submitted,hostId:session.control.id};
+          const id=submitted.id;
+          setTimeout(()=>{
+            if(command?.id===id&&command.outcome==='submitted'){
+              command={...command,outcome:'unknown',reason:'No decision acknowledgement received. Check the reference in History before trying again.'};
+              root.dispatchEvent(new Event('preview:observer'));
+            }
+          },12000);
+          approvalDialog.close();root.dispatchEvent(new Event('preview:observer'));
+        }
+        catch(error){approvalDialog.querySelector('[role="status"]').textContent=error.message||'Could not send the decision. Check the connection and try again.';}
         finally{approvalBusy=false;}
       });
     }
-    approvalDialog.innerHTML=`<h2>Display ${escape(item.reference)}?</h2><p class="vv-caption">Review what was heard before sending this verse to VerseVIEW.</p>${reviewContext(item)}<p role="status" class="vv-caption"></p><div class="vv-control-actions"><button class="vv-btn vv-btn-primary" data-approval-decision="approve" data-candidate="${escape(item.candidate_id)}">Approve and display</button><button class="vv-btn" data-approval-decision="reject" data-candidate="${escape(item.candidate_id)}">Deny</button></div>`;
-    if(!approvalDialog.open)approvalDialog.showModal();
+    approvalDialog.innerHTML=`<h2 id="vv-approval-title" tabindex="-1">Display ${escape(item.reference)}?</h2><p class="vv-caption">Review what was heard before sending this verse to VerseVIEW.</p>${reviewContext(item)}<p role="status" class="vv-caption"></p><div class="vv-control-actions"><button class="vv-btn vv-btn-primary" data-approval-decision="approve" data-candidate="${escape(item.candidate_id)}">Approve and display</button><button class="vv-btn" data-approval-decision="reject" data-candidate="${escape(item.candidate_id)}">Deny</button></div>`;
+    if(!approvalDialog.open){approvalDialog.showModal();approvalDialog.querySelector('#vv-approval-title')?.focus();}
   }
   root.addEventListener('preview:observer',syncApproval);
   root.addEventListener('toggle', event => {

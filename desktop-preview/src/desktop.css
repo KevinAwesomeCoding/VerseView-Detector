@@ -191,11 +191,14 @@ html,body{margin:0;min-height:100%;background:transparent}
 .vv-memory-tools { margin-top: 1rem; }
 .vv-memory-dialog { width: min(38rem,90vw); max-height: 85vh; overflow: auto; padding: 1.5rem; border-radius: 1rem; color: var(--vv-ink); background: var(--vv-panel); border: 1px solid var(--vv-border); }
 .vv-memory-dialog::backdrop { background: rgba(0,0,0,.45); }
-.vv-approval-dialog { width: min(40rem, 90vw); text-align: center; }
-.vv-approval-dialog h2 { margin-top: 0; }
-.vv-approval-context { max-height: 13rem; overflow: auto; padding: 1rem; line-height: 1.7; text-align: left; border: 1px solid var(--vv-border); border-radius: .7rem; }
-.vv-approval-context mark, .vv-approval-dialog mark { background: #f5d66e; color: #292317; border-radius: .2rem; padding: 0 .12rem; }
-.vv-approval-dialog .vv-control-actions { justify-content: center; }
+.vv-approval-dialog { width: min(40rem, 90vw); text-align: center; box-shadow: 0 24px 80px #0008; }
+#verseview-prototype .vv-approval-dialog h2 { margin: 0; font-size: 22px; font-weight: 600; outline: none; }
+#verseview-prototype .vv-approval-dialog > .vv-caption { color: var(--vv-muted); font-size: 13px; }
+#verseview-prototype .vv-approval-context { max-height: 13rem; overflow: auto; margin: 16px 0; padding: 14px 16px; line-height: 1.65; font-size: 14px; text-align: left; background: var(--vv-soft); border: 1px solid var(--vv-border); border-radius: .7rem; }
+#verseview-prototype .vv-approval-context p { margin: 0; }
+#verseview-prototype .vv-approval-context p + p { margin-top: 8px; }
+#verseview-prototype .vv-approval-dialog mark { background: #f5d66e; color: #292317; border-radius: .2rem; padding: 0 .12rem; }
+#verseview-prototype .vv-approval-dialog .vv-control-actions { justify-content: center; margin-top: 18px; }
 .vv-memory-dialog p { line-height: 1.6; margin-block: 1rem; }
 
 #verseview-prototype .vv-notes { padding: 17px; }
