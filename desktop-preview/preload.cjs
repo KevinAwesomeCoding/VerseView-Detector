@@ -24,6 +24,12 @@ contextBridge.exposeInMainWorld('verseviewDesktop', Object.freeze({
   resolveCandidate: (sessionId, candidateId, approved) => ipcRenderer.invoke('preview:resolve-candidate', sessionId, candidateId, approved),
   saveSettings: (sessionId, revision, changes) => ipcRenderer.invoke('preview:save-settings', sessionId, revision, changes),
   clearOutput: sessionId => ipcRenderer.invoke('preview:clear-output', sessionId),
+  panicShortcutStatus: () => ipcRenderer.invoke('preview:panic-shortcut-status'),
+  onPanicShortcutChanged: callback => {
+    const listener = (_event, status) => callback(status);
+    ipcRenderer.on('preview:panic-shortcut-changed', listener);
+    return () => ipcRenderer.removeListener('preview:panic-shortcut-changed', listener);
+  },
   recoverSession: (sessionId, revision, restore) => ipcRenderer.invoke('preview:recover-session', sessionId, revision, restore),
   sendSuggestion: (sessionId, suggestionId) => ipcRenderer.invoke('preview:send-suggestion', sessionId, suggestionId),
   editOutline:(sessionId,revision,text)=>ipcRenderer.invoke('preview:edit-outline',sessionId,revision,text),

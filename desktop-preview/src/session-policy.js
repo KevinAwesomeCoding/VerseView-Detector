@@ -6,7 +6,8 @@
  function shortcut(value){
   if(typeof value!=='string'||value.length>60)return false;
   const parts=value.split('+'),key=parts.pop(),order=['Control','Alt','Meta','Shift'];
-  if(!parts.length||parts.join('+')!==order.filter(m=>parts.includes(m)).join('+')||!/^(Escape|F([1-9]|1[0-2])|[A-Z])$/.test(key))return false;
+  if(!parts.length)return /^F([1-9]|1[0-2])$/.test(key);
+  if(parts.join('+')!==order.filter(m=>parts.includes(m)).join('+')||!/^(Escape|F([1-9]|1[0-2])|[A-Z])$/.test(key))return false;
   if(key==='Escape')return value==='Shift+Escape';
   if(/^[A-Z]$/.test(key)&&(!parts.includes('Shift')||!parts.some(m=>['Control','Alt','Meta'].includes(m))))return false;
   return !['Alt+F4','Meta+Shift+Q','Control+Shift+I','Control+Shift+J','Control+Shift+C'].includes(value);

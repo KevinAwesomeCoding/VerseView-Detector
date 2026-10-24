@@ -120,7 +120,7 @@ def validate_changes(changes, current, devices):
         if not valid:
             if key == 'schedule_timezone': raise SettingsError('Time zone unavailable. Use system, UTC or an IANA zone supported on this computer.')
             if key == 'service_schedule': raise SettingsError('Use up to 16 valid day/time/language entries without duplicate slots.')
-            if key == 'desktop_panic_shortcut': raise SettingsError('Use Shift+Escape or a supported modified shortcut. Quit/debug shortcuts are reserved.')
+            if key == 'desktop_panic_shortcut': raise SettingsError('Use F1–F12, Shift+Escape, or a supported modified shortcut. Quit/debug shortcuts are reserved.')
             raise SettingsError('Invalid settings value.')
     result = dict(current)
     result.update(changes)

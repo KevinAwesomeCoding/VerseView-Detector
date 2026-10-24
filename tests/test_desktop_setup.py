@@ -44,7 +44,7 @@ class SetupTests(unittest.TestCase):
         self.assertFalse(valid_rules([dict(day=0,time='24:00',language='English')]))
 
     def test_shortcut_conflicts_and_safe_binding_grammar(self):
-        for value in ['Shift+Escape','Control+Shift+P','Alt+Shift+M','Meta+Shift+P','Shift+F8']:self.assertTrue(valid_shortcut(value),value)
+        for value in ['F8','Shift+Escape','Control+Shift+P','Alt+Shift+M','Meta+Shift+P','Shift+F8']:self.assertTrue(valid_shortcut(value),value)
         for value in ['esc','Escape','Shift+A','Control+A','Alt+F4','Control+Shift+I','Meta+Shift+Q','Shift+Control+P','Control+Control+Shift+P']:self.assertFalse(valid_shortcut(value),value)
 
     def test_start_preview_surfaces_missing_device_provider_key_and_incompatible_schedule(self):

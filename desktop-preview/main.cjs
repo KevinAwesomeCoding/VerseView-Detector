@@ -1,12 +1,13 @@
 'use strict';
 
-const { app, BrowserWindow, Notification, ipcMain, Menu, nativeTheme, nativeImage, session, shell, screen, dialog, systemPreferences } = require('electron');
+const { app, BrowserWindow, Notification, ipcMain, Menu, nativeTheme, nativeImage, session, shell, screen, dialog, systemPreferences, globalShortcut } = require('electron');
 const path = require('node:path');
 const os = require('node:os');
 const { pathToFileURL } = require('node:url');
 const { DARK_THEMES, validTheme, backdropPolicy, backgroundColor } = require('./appearance.cjs');
 const { EngineFeedReader, feedDirectory } = require('./engine-feed.cjs');
 const { EngineCommands } = require('./engine-commands.cjs');
+const { PanicShortcut } = require('./panic-shortcut.cjs');
 const { approvalDecision } = require('./notification-actions.cjs');
 const { BackendManager } = require('./backend-manager.cjs');
 const { OutlineOutput } = require('./outline-output.cjs');
@@ -91,11 +92,15 @@ const observerDirectory = process.env.VV_PREVIEW_TEST_PROFILE === '1' && process
   : feedDirectory({ platform: process.platform, appData: app.getPath('appData'), home: app.getPath('home') });
 const observer = new EngineFeedReader({ directory: observerDirectory, onChange: snapshot => {
   if (window && !window.isDestroyed()) window.webContents.send('preview:observer-changed', snapshot);
+  panicShortcut.sync(snapshot);
   reviewNotifications(snapshot);
   outlineOutput?.update(snapshot);
 } });
 
 const commands = new EngineCommands(observer);
+const panicShortcut = new PanicShortcut({ globalShortcut, commands, onChange: status => {
+  if (window && !window.isDestroyed()) window.webContents.send('preview:panic-shortcut-changed', status);
+} });
 
 let backendRoot = path.join(process.resourcesPath, 'backend');
 if (!app.isPackaged) {
@@ -240,6 +245,10 @@ ipcMain.handle('preview:set-theme', (event, value, themedIcon = true) => {
 ipcMain.handle('preview:observer', event => {
   if (!trusted(event)) throw new Error('Untrusted preview sender');
   return observer.poll();
+});
+ipcMain.handle('preview:panic-shortcut-status', event => {
+  if (!trusted(event)) throw new Error('Untrusted preview sender');
+  return panicShortcut.snapshot();
 });
 ipcMain.handle('preview:transcript-page', (event, sessionId, offset) => {
   if (!trusted(event)) throw new Error('Untrusted preview sender');
@@ -410,6 +419,7 @@ app.whenReady().then(() => {
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });
 nativeTheme.on('updated', updateBackdrop);
+app.on('will-quit', () => panicShortcut.stop());
 app.on('window-all-closed', () => app.quit());
 app.on('before-quit', event => {
   outlineOutput?.close();

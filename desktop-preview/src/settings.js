@@ -27,7 +27,7 @@
   }
   function validation(values) {
     if(!window.sessionPolicy.validRules(values.service_schedule))return 'Use up to 16 valid timetable entries without duplicate day/time slots.';
-    if(!window.sessionPolicy.shortcut(values.desktop_panic_shortcut))return 'Use Shift+Escape or a supported modified shortcut. Quit/debug shortcuts are reserved.';
+    if(!window.sessionPolicy.shortcut(values.desktop_panic_shortcut))return 'Use F1–F12, Shift+Escape, or a supported modified shortcut. Quit/debug shortcuts are reserved.';
     if(!window.sessionPolicy.valid('schedule_timezone',values.schedule_timezone))return 'Choose system, UTC or a valid IANA time zone.';
     try {
       policy.validatePatch(values);

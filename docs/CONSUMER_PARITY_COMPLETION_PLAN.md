@@ -29,7 +29,7 @@ These are source findings, not new physical-test results.
 | Sermon notes | Group 4 adds normal Generate/Preview/Export, snapshot-bound bilingual source, cancellation/failure retention, native Unicode export and transcript-first automatic saving. Clear Memory saves a recoverable backup and diagnostic archive before resetting working state. Emergency saves deliberately skip summarization. |
 | Outline | Editable live outline and separate output exist; they must remain distinct from a final sermon summary. |
 | Local AI | Saved routing/configuration and startup warmup already exist. A complete settings editor and explicit Test connection/Warm selected model actions remain missing. |
-| Session setup | Group 5 adds labeled supplied-text/translation/transliteration views, stream-limited Sarvam transliteration configuration, fresh per-computer startup opt-in/countdown/cancel, a timezone-aware timetable editor with next-Start preview, and a configurable focused-window panic shortcut. Legacy startup flags never enable listening. Actual provider/OS/platform checks remain separate. |
+| Session setup | Group 5 adds labeled supplied-text/translation/transliteration views, stream-limited Sarvam transliteration configuration, fresh per-computer startup opt-in/countdown/cancel, a timezone-aware timetable editor with next-Start preview, and a configurable system-wide panic shortcut while listening. Legacy startup flags never enable listening. Actual provider/OS/platform checks remain separate. |
 | Other setup | GCP import, ATEM setup/manual control, local-model editors and low-level option editors still need desktop workflows. |
 | Updates | Legacy Python updater exists. No verified Electron update checker/apply workflow should be implied by a legacy or placeholder button. |
 
@@ -189,9 +189,9 @@ the verification report.
   Interpret the user's “remote schedule” as the existing Smart Schedule; any
   separate remote scheduling feature requires a distinct specification.
 - [x] **20. Panic keyboard shortcut.** Expose current shortcut and a validated custom
-  binding on Mac/Windows, conflict/reset behavior and honest in-app/global scope.
-  Panic clears presentation; Emergency Stop & Save is a different action. Preserve
-  popup Escape and text editing, and report unsupported OS registration explicitly.
+  binding on Mac/Windows, conflict/reset behavior and global registration status.
+  Panic clears presentation; Emergency Stop & Save is a different action.
+  Report unavailable OS registration explicitly.
 
 ### Group 6 — Connections, integrations and local AI
 
