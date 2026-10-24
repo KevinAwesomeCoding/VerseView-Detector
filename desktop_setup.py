@@ -13,7 +13,8 @@ def valid_shortcut(value):
     if not isinstance(value, str) or len(value) > 60: return False
     parts = value.split('+'); modifiers = parts[:-1]; key = parts[-1]
     order = ['Control', 'Alt', 'Meta', 'Shift']
-    if not modifiers or modifiers != [m for m in order if m in modifiers] or len(set(modifiers)) != len(modifiers): return False
+    if not modifiers: return bool(re.fullmatch(r'F(?:[1-9]|1[0-2])', key))
+    if modifiers != [m for m in order if m in modifiers] or len(set(modifiers)) != len(modifiers): return False
     if not re.fullmatch(r'Escape|F(?:[1-9]|1[0-2])|[A-Z]', key): return False
     if key == 'Escape': return value == 'Shift+Escape'
     if re.fullmatch('[A-Z]', key) and ('Shift' not in modifiers or not any(m in modifiers for m in ('Control','Alt','Meta'))): return False

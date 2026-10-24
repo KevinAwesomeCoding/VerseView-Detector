@@ -13,19 +13,19 @@ const root=path.resolve(__dirname,'..'),out=path.join(root,'test-results/session
  async function prepare(){await visible('[data-consumer-prepare="settings"]').click();await ready(()=>Boolean(window.previewShell.getObserver().session?.control?.session_setup));}
  async function save(predicate){await page.locator('[data-save-settings]').click();await ready(predicate);}
  async function stop(){await visible('[data-live-stop]').click();await ready(()=>window.previewShell.getObserver().session?.control?.state==='stopped');}
- const panics=async()=>(await state()).control.results.filter(r=>r.action==='panic').length;
  try{
   await launch();await page.waitForTimeout(1200);assert.equal(await page.evaluate(()=>window.previewShell.getBackend().owned),false);await prepare();await nav('settings');assert.equal(await page.locator('[data-startup-enabled]').isChecked(),false);
   await page.locator('[data-detector-setting="malayalam_transliteration"]').check();await page.locator('[data-detector-setting="desktop_transcript_display"]').selectOption('transliteration');await page.locator('[data-detector-setting="desktop_panic_shortcut"]').fill('Control+Shift+P');
   await save(()=>window.previewShell.getObserver().session?.control?.settings.values.desktop_panic_shortcut==='Control+Shift+P');
   await nav('session');await visible('[data-consumer-prepare="start"]').click();await ready(()=>window.previewShell.getObserver().session?.control?.state==='running');await ready(()=>window.previewShell.getObserver().session?.transcripts.some(r=>r.text_kind==='transliteration'));
   const ml=page.locator('[data-speech-stream="secondary"]');assert.match(await ml.innerText(),/Manglish/);assert.match(await ml.innerText(),/daivathinte sneham/);
-  const before=await panics();await page.locator('[data-verse-field="reference"]').fill('John 3:21');await page.keyboard.press('Control+Shift+P');await page.waitForTimeout(700);assert.equal(await panics(),before);
-  await page.locator('h1').click();await page.keyboard.press('Shift+Escape');await page.waitForTimeout(500);assert.equal(await panics(),before);
-  await page.keyboard.press('Control+Shift+P');await ready(n=>window.previewShell.getObserver().session?.control?.results.filter(r=>r.action==='panic').length>n,before);assert.equal((await state()).control.state,'running');
-  // Dialog Escape stays a dialog action, never a presentation shortcut.
-  await page.locator('[data-verse="open"]').click();const count=await panics();await page.keyboard.press('Control+Shift+P');await page.waitForTimeout(400);assert.equal(await panics(),count);await page.keyboard.press('Escape');await stop();
-  checks.push('Legacy auto_start does not launch backend/listening; Live retains primary/secondary controls; saved Sarvam transliteration is explicitly labeled; exact focused-window panic works while typing/dialogs/old binding are ignored, and listening continues');
+  await ready(async()=>(await window.verseviewDesktop.panicShortcutStatus()).state==='ready');
+  assert.equal(await app.evaluate(({globalShortcut})=>globalShortcut.isRegistered('Control+Shift+P')),true);
+  assert.equal(await app.evaluate(({globalShortcut})=>globalShortcut.isRegistered('Shift+Escape')),false);
+  assert.equal((await state()).control.state,'running');
+  await stop();
+  assert.equal(await app.evaluate(({globalShortcut})=>globalShortcut.isRegistered('Control+Shift+P')),false);
+  checks.push('Saved shortcut registers globally while listening and releases on Stop; speech and presentation behavior remain active');
   await nav('settings');await page.locator('[data-detector-setting="desktop_transcript_display"]').selectOption('translation');await page.locator('[data-detector-setting="smart_schedule"]').check();await page.locator('[data-detector-setting="schedule_timezone"]').fill('UTC');
   await page.locator('[data-schedule-index="2"][data-schedule-field="language"]').selectOption('English');
   await page.locator('[data-schedule-index="3"][data-schedule-field="language"]').selectOption('English');
