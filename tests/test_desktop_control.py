@@ -83,6 +83,19 @@ class DesktopControlTests(unittest.TestCase):
         self.assertEqual(answer, [False])
         self.assertFalse(engine.ASK_BEFORE_SENDING)
 
+    def test_display_suppressed_requires_matching_detected_event(self):
+        self.state='running'
+        verses=Mock()
+        verses.snapshot.return_value={'send_busy':False,'lookup_busy':False}
+        self.broker.verses=verses
+        self.publisher.emit('delivery', event={'candidate_id':'a'*12,'reference':'John 10:12','outcome':'SUPPRESSED'})
+        self.broker.refresh()
+        self.broker.execute(self.request('display_suppressed',candidate_id='a'*12,reference='John 10:12'))
+        self.assertEqual(self.result()['outcome'],'requested')
+        verses.display_suppressed.assert_called_once_with('a'*12,'John 10:12')
+        self.broker.execute(self.request('display_suppressed',candidate_id='a'*12,reference='John 10:11'))
+        self.assertEqual(self.result()['outcome'],'rejected')
+
     def test_pending_review_contains_bounded_spoken_context(self):
         self.publisher.emit('transcript', stream='secondary', text='Earlier sentence.', is_final=True)
         self.publisher.emit('transcript', stream='secondary', text='Please read John 3:18 now.', is_final=True)

@@ -109,6 +109,18 @@ class VerseToolsTests(unittest.TestCase):
         self.preview('John 3:17')
         with self.assertRaises(VerseError):self.tools.send(selected['id'])
 
+    def test_display_suppressed_is_explicit_and_reports_verseview_result(self):
+        self.engine.remote_present_verse=Mock(return_value=(True,'Presented John 10:12'))
+        self.engine._delivery_event=Mock()
+        self.engine._exit_scripture_read_mode=Mock()
+        with self.assertRaises(VerseError):self.tools.display_suppressed('a'*12,'John 10:12')
+        self.state='running'
+        self.tools.display_suppressed('a'*12,'John 10:12');self.tools.send_worker.join(2)
+        self.engine.remote_present_verse.assert_called_once_with('John 10:12')
+        self.engine._exit_scripture_read_mode.assert_called_once()
+        self.assertEqual(self.tools.last_send['outcome'],'COMMAND_ACCEPTED')
+        self.engine._delivery_event.assert_called_once()
+
     def test_translation_changes_or_stop_discard_late_preview_and_block_stale_send(self):
         entered,release=threading.Event(),threading.Event();self.addCleanup(release.set)
         self.tools.lookup=lambda *args:(entered.set(),release.wait(2),[{'num':16,'text':'Old translation'}])[-1]

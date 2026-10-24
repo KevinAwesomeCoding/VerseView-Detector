@@ -18,7 +18,7 @@ function feedDirectory({ platform, appData, home }) {
 function decodeControl(value) {
   if (!value || !/^[a-f0-9]{32}$/.test(value.id) || !['stopped', 'starting', 'running', 'stopping', 'closed'].includes(value.state)) return null;
   return { id: value.id, state: value.state, ask_before_sending:value.ask_before_sending===true,
-    actions: Array.isArray(value.actions) ? value.actions.filter(action => ['set_ask_before_sending', 'start', 'stop', 'save_settings', 'panic', 'restore_session', 'discard_session', 'send_suggestion', 'edit_outline', 'start_bot', 'stop_bot', 'pull_settings', 'list_sessions', 'preview_session', 'resume_saved', 'save_session', 'set_worship', 'emergency_save', 'set_context', 'verse_preview', 'chapter_browse', 'send_reference', 'preview_suggestion', 'dismiss_suggestion', 'clear_suggestions', 'clear_history', 'grid_preview', 'connection_action', 'generate_notes', 'cancel_notes', 'prepare_export', 'prepare_memory_clear', 'clear_memory', 'new_session'].includes(action)) : [],
+    actions: Array.isArray(value.actions) ? value.actions.filter(action => ['display_suppressed', 'set_ask_before_sending', 'start', 'stop', 'save_settings', 'panic', 'restore_session', 'discard_session', 'send_suggestion', 'edit_outline', 'start_bot', 'stop_bot', 'pull_settings', 'list_sessions', 'preview_session', 'resume_saved', 'save_session', 'set_worship', 'emergency_save', 'set_context', 'verse_preview', 'chapter_browse', 'send_reference', 'preview_suggestion', 'dismiss_suggestion', 'clear_suggestions', 'clear_history', 'grid_preview', 'connection_action', 'generate_notes', 'cancel_notes', 'prepare_export', 'prepare_memory_clear', 'clear_memory', 'new_session'].includes(action)) : [],
     recovery: decodeRecovery(value.recovery),
     operator: decodeOperator(value.operator),
     verses: decodeVerses(value.verses),
@@ -37,7 +37,7 @@ function decodeControl(value) {
         source: text(item.source, 64), stream: role(item.stream), context:{before:text(item.context?.before,200),detected:text(item.context?.detected,300),after:text(item.context?.after,200)} })),
     results: (Array.isArray(value.results) ? value.results : []).slice(-32)
       .filter(item => item && /^[a-f0-9]{32}$/.test(item.id))
-      .map(item => ({ id: item.id, action: text(item.action, 16), outcome: text(item.outcome, 24), reason: text(item.reason, 200) })) };
+      .map(item => ({ id: item.id, action: text(item.action, 32), outcome: text(item.outcome, 24), reason: text(item.reason, 200) })) };
 }
 
 function decodeConnections(v){

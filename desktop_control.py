@@ -114,8 +114,9 @@ class DesktopControl:
                     if suggestions and suggestions['active']: actions.append('preview_suggestion')
                 if (not verses['send_busy'] and not (operator and operator['busy']) and (not recovery or recovery['status'] not in ('available', 'invalid'))): actions.append('set_context')
                 if state == 'running' and not verses['send_busy'] and not (operator and operator['emergency']): actions.append('send_reference')
+                if state == 'running' and not verses['send_busy'] and not (operator and operator['emergency']): actions.append('display_suppressed')
             if (verses and verses['send_busy']) or (suggestions and suggestions['busy']):
-                actions = [a for a in actions if a not in ('send_reference', 'send_suggestion')]
+                actions = [a for a in actions if a not in ('send_reference', 'send_suggestion', 'display_suppressed')]
             connections = self.connections.snapshot() if self.connections else None
             if connections and state in ('stopped','running'):
                 actions.append('connection_action')
@@ -211,6 +212,7 @@ class DesktopControl:
                 'resume_saved': {'record_id', 'record_revision'}, 'set_worship': {'enabled'},
                 'set_context': {'reference', 'context_revision'}, 'verse_preview': {'reference'},
                 'chapter_browse': {'reference', 'page'}, 'send_reference': {'selection_id'},
+                'display_suppressed': {'candidate_id', 'reference'},
             }.get(action, set())
             valid = (set(request) <= {'id', 'control_id', 'session_id', 'created_at', 'action'} | fields
                      and request.get('control_id') == self.control_id
@@ -272,6 +274,16 @@ class DesktopControl:
                         else:
                             self.verses.preview(request.get('reference'), chapter=action == 'chapter_browse', page=request.get('page', 0))
                             outcome, reason = 'requested', 'Read-only lookup requested. Nothing was presented.'
+                    elif action == 'display_suppressed' and self.verses and action in self.publisher.snapshot()['control']['actions']:
+                        candidate_id, ref = request.get('candidate_id'), request.get('reference')
+                        if not isinstance(candidate_id, str) or not re.fullmatch(r'[a-f0-9]{12,32}', candidate_id):
+                            raise VerseError('Detected reference is no longer available.')
+                        events = self.publisher.snapshot().get('delivery_events', [])
+                        latest = next((row for row in reversed(events) if row.get('candidate_id') == candidate_id), None)
+                        if not latest or latest.get('outcome') != 'SUPPRESSED' or latest.get('reference') != ref:
+                            raise VerseError('Detected reference is no longer available.')
+                        self.verses.display_suppressed(candidate_id, ref)
+                        outcome, reason = 'requested', 'Explicit display requested. Check delivery activity for VerseVIEW acceptance.'
                     elif action in ('list_sessions', 'preview_session', 'resume_saved', 'save_session', 'set_worship', 'emergency_save') and self.operator and action in self.publisher.snapshot()['control']['actions']:
                         if action == 'list_sessions': self.operator.library.refresh(request.get('page', 0))
                         elif action == 'preview_session': self.operator.library.preview(request.get('record_id'), request.get('page', 0))
@@ -334,7 +346,7 @@ class DesktopControl:
                     outcome, reason = 'rejected', str(exc)
                 except Exception:
                     outcome, reason = 'failed', 'Detector control failed; inspect the detector log'
-            self.results.append(dict(id=command_id, action=action if action in ('set_ask_before_sending', 'start', 'stop', 'approve', 'reject', 'save_settings', 'panic', 'restore_session', 'discard_session', 'send_suggestion', 'edit_outline', 'start_bot', 'stop_bot', 'pull_settings', 'list_sessions', 'preview_session', 'resume_saved', 'save_session', 'set_worship', 'emergency_save', 'set_context', 'verse_preview', 'chapter_browse', 'send_reference', 'preview_suggestion', 'dismiss_suggestion', 'clear_suggestions', 'clear_history', 'grid_preview', 'connection_action', 'generate_notes', 'cancel_notes', 'prepare_export', 'prepare_memory_clear', 'clear_memory', 'new_session') else 'unknown',
+            self.results.append(dict(id=command_id, action=action if action in ('display_suppressed', 'set_ask_before_sending', 'start', 'stop', 'approve', 'reject', 'save_settings', 'panic', 'restore_session', 'discard_session', 'send_suggestion', 'edit_outline', 'start_bot', 'stop_bot', 'pull_settings', 'list_sessions', 'preview_session', 'resume_saved', 'save_session', 'set_worship', 'emergency_save', 'set_context', 'verse_preview', 'chapter_browse', 'send_reference', 'preview_suggestion', 'dismiss_suggestion', 'clear_suggestions', 'clear_history', 'grid_preview', 'connection_action', 'generate_notes', 'cancel_notes', 'prepare_export', 'prepare_memory_clear', 'clear_memory', 'new_session') else 'unknown',
                                      outcome=outcome, reason=reason))
             self.results = self.results[-32:]
             self.refresh()

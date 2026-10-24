@@ -23,6 +23,22 @@ test('verse feed projects only bounded preview data and keeps exact translation 
  assert.equal(decoded.history.length,128);assert.equal(decoded.chapter.rows.length,8);assert.equal(decoded.chapter.page,24);assert.equal(JSON.stringify(decoded).includes('private'),false);
 });
 
+test('Display accepts only the current suppressed candidate and exact reference',async t=>{
+ const directory=fs.mkdtempSync(path.join(os.tmpdir(),'vv-suppressed-command-'));t.after(()=>fs.rmSync(directory,{recursive:true,force:true}));
+ const id='a'.repeat(32),candidate='c'.repeat(12),now=Date.now(),control={id:'b'.repeat(32),state:'running',actions:['display_suppressed']};
+ const events=[{candidate_id:candidate,reference:'John 10:12',outcome:'SUPPRESSED'}];
+ const snapshot={connection:'connected',session:{session_id:id,pid:123,updated_at:new Date(now).toISOString(),control,delivery_events:events}};
+ const inbox=path.join(directory,`control-123-${control.id}`);fs.mkdirSync(inbox);
+ const commands=new EngineCommands({directory,poll:async()=>snapshot},{clock:()=>now});
+ const send=value=>commands.submit(id,'display_suppressed',undefined,undefined,undefined,undefined,undefined,value);
+ const result=await send({candidate_id:candidate,reference:'John 10:12'});
+ assert.equal(JSON.parse(fs.readFileSync(path.join(inbox,`command-${result.id}.json`))).reference,'John 10:12');
+ await assert.rejects(send({candidate_id:candidate,reference:'John 10:11'}));
+ await assert.rejects(send({candidate_id:'d'.repeat(12),reference:'John 10:12'}));
+ events.push({candidate_id:candidate,reference:'John 10:12',outcome:'COMMAND_ACCEPTED'});
+ await assert.rejects(send({candidate_id:candidate,reference:'John 10:12'}));
+});
+
 test('chapter grid and inbox review commands keep exact typed identities and reject extra fields',async t=>{
  const directory=fs.mkdtempSync(path.join(os.tmpdir(),'vv-review-command-'));t.after(()=>fs.rmSync(directory,{recursive:true,force:true}));
  const id='a'.repeat(32),revision='c'.repeat(32),now=Date.now(),control={id:'b'.repeat(32),state:'running',actions:['grid_preview','clear_history','preview_suggestion','dismiss_suggestion','clear_suggestions']};

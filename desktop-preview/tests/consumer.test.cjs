@@ -53,6 +53,15 @@ test('Live explicitly labels suppressed references and explains why without clai
  h.s.session.delivery_events[1].reason='Duplicate cooldown';
  assert.match(visible(h.view.session(h.s,'vv-studio')),/Already sent recently/);
 });
+test('suppressed verse offers Display before Review verse and Dismiss',()=>{
+ const h=observerHarness(),base=h.s.session.delivery_events[0];
+ h.s.session.control.actions.push('verse_preview','display_suppressed');
+ h.s.session.delivery_events=[{...base,candidate_id:'c'.repeat(12),reference:'John 10:12',outcome:'SUPPRESSED',reason:'Outside locked passage'}];
+ const html=h.view.session(h.s,'vv-studio');
+ assert.ok(html.indexOf('>Display</button>')<html.indexOf('>Review verse</button>'));
+ assert.ok(html.indexOf('>Review verse</button>')<html.indexOf('>Dismiss</button>'));
+ assert.match(html,/data-suppressed-display="cccccccccccc"/);
+});
 test('normal settings and diagnostics are separate; stale feed never says listening',()=>{
  const h=observerHarness();assert.doesNotMatch(h.view.settings(h.s),/PID|VERSEVIEW_|Session aaaa|Local detector connection/);
  h.s.connection='stale';assert.match(h.view.compactControls(h.s),/Connection unavailable/);assert.doesNotMatch(h.view.compactControls(h.s),/>Listening</);

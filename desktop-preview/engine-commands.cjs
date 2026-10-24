@@ -8,7 +8,7 @@ const { randomUUID } = require('node:crypto');
 class EngineCommands {
   constructor(reader, { clock = Date.now } = {}) { this.reader = reader; this.clock = clock; }
   async submit(sessionId, action, candidateId, settingsChange, recoveryRevision, suggestionId, outlineChange, operatorChange) {
-    if (!['set_ask_before_sending', 'start', 'stop', 'approve', 'reject', 'save_settings', 'panic', 'restore_session', 'discard_session', 'send_suggestion', 'edit_outline', 'start_bot', 'stop_bot', 'pull_settings', 'list_sessions', 'preview_session', 'resume_saved', 'save_session', 'set_worship', 'emergency_save', 'set_context', 'verse_preview', 'chapter_browse', 'send_reference', 'preview_suggestion', 'dismiss_suggestion', 'clear_suggestions', 'clear_history', 'grid_preview', 'connection_action', 'generate_notes', 'cancel_notes', 'prepare_export', 'prepare_memory_clear', 'clear_memory', 'new_session'].includes(action) || !/^[a-f0-9]{32}$/.test(sessionId || '')) {
+    if (!['display_suppressed', 'set_ask_before_sending', 'start', 'stop', 'approve', 'reject', 'save_settings', 'panic', 'restore_session', 'discard_session', 'send_suggestion', 'edit_outline', 'start_bot', 'stop_bot', 'pull_settings', 'list_sessions', 'preview_session', 'resume_saved', 'save_session', 'set_worship', 'emergency_save', 'set_context', 'verse_preview', 'chapter_browse', 'send_reference', 'preview_suggestion', 'dismiss_suggestion', 'clear_suggestions', 'clear_history', 'grid_preview', 'connection_action', 'generate_notes', 'cancel_notes', 'prepare_export', 'prepare_memory_clear', 'clear_memory', 'new_session'].includes(action) || !/^[a-f0-9]{32}$/.test(sessionId || '')) {
       throw new Error('Invalid detector command');
     }
     if (['approve', 'reject'].includes(action) && (typeof candidateId !== 'string' || !candidateId || candidateId.length > 128)) {
@@ -36,14 +36,15 @@ class EngineCommands {
       if(['list_sessions','preview_session'].includes(action)&&(!Number.isInteger(value.page)||value.page<0||value.page>(action==='list_sessions'?499:8388608)))throw new Error('Invalid session page');
       operatorPayload=value;
     }
-    const verseActions=['set_context','verse_preview','chapter_browse','send_reference','grid_preview'];
+    const verseActions=['set_context','verse_preview','chapter_browse','send_reference','grid_preview','display_suppressed'];
     if(verseActions.includes(action)){
       const v=operatorChange||{};
-      const keys=['set_context','grid_preview'].includes(action)?['reference','context_revision']:action==='send_reference'?['selection_id']:action==='chapter_browse'?['reference','page']:['reference'];
+      const keys=['set_context','grid_preview'].includes(action)?['reference','context_revision']:action==='send_reference'?['selection_id']:action==='display_suppressed'?['candidate_id','reference']:action==='chapter_browse'?['reference','page']:['reference'];
       if(!v||typeof v!=='object'||Array.isArray(v)||Object.keys(v).some(k=>!keys.includes(k)))throw new Error('Invalid verse tool request');
       if(action!=='send_reference'&&(typeof v.reference!=='string'||!v.reference.trim()||v.reference.length>128||v.reference.includes('\0')))throw new Error('Enter a bounded Bible reference');
       if(['set_context','grid_preview'].includes(action)&&!/^[a-f0-9]{32}$/.test(v.context_revision||''))throw new Error('Reload the current context');
       if(action==='send_reference'&&!/^[a-f0-9]{32}$/.test(v.selection_id||''))throw new Error('Preview a reference before sending');
+      if(action==='display_suppressed'&&!/^[a-f0-9]{12,32}$/.test(v.candidate_id||''))throw new Error('Detected reference is no longer available');
       if(action==='chapter_browse'&&(!Number.isInteger(v.page)||v.page<0||v.page>24))throw new Error('Invalid chapter page');
       operatorPayload=v;
     }
@@ -79,7 +80,7 @@ class EngineCommands {
       || this.clock() - Date.parse(session.updated_at) > 6000 || control.state === 'closed') {
       throw new Error('Detector session unavailable; refresh before acting');
     }
-    if (['set_ask_before_sending', 'start', 'stop', 'save_settings', 'panic', 'restore_session', 'discard_session', 'send_suggestion', 'edit_outline', 'start_bot', 'stop_bot', 'pull_settings', 'list_sessions', 'preview_session', 'resume_saved', 'save_session', 'set_worship', 'emergency_save', 'set_context', 'verse_preview', 'chapter_browse', 'send_reference', 'preview_suggestion', 'dismiss_suggestion', 'clear_suggestions', 'clear_history', 'grid_preview', 'connection_action', 'generate_notes', 'cancel_notes', 'prepare_export', 'prepare_memory_clear', 'clear_memory', 'new_session'].includes(action) ? !control.actions.includes(action)
+    if (['display_suppressed', 'set_ask_before_sending', 'start', 'stop', 'save_settings', 'panic', 'restore_session', 'discard_session', 'send_suggestion', 'edit_outline', 'start_bot', 'stop_bot', 'pull_settings', 'list_sessions', 'preview_session', 'resume_saved', 'save_session', 'set_worship', 'emergency_save', 'set_context', 'verse_preview', 'chapter_browse', 'send_reference', 'preview_suggestion', 'dismiss_suggestion', 'clear_suggestions', 'clear_history', 'grid_preview', 'connection_action', 'generate_notes', 'cancel_notes', 'prepare_export', 'prepare_memory_clear', 'clear_memory', 'new_session'].includes(action) ? !control.actions.includes(action)
       : control.state !== 'running' || !control.pending.some(item => item.candidate_id === candidateId)) {
       throw new Error('Action is no longer available');
     }
@@ -92,6 +93,11 @@ class EngineCommands {
     if (action === 'send_suggestion' && (control.state !== 'running' || !control.suggestions?.active || control.suggestions.busy
       || !control.suggestions.rows.some(row => row.id === suggestionId && row.state === 'available'))) {
       throw new Error('Suggestion is no longer available');
+    }
+    if(action==='display_suppressed'){
+      const recent=(session.delivery_events||[]).findLast(e=>e.candidate_id===operatorPayload.candidate_id);
+      if(control.state!=='running'||recent?.outcome!=='SUPPRESSED'||recent.reference!==operatorPayload.reference)
+        throw new Error('This detected reference is no longer available');
     }
     if(action==='edit_outline'&&(!['running','stopped'].includes(control.state)||control.outline?.revision!==outlineChange.revision)){
       throw new Error('Outline changed or editing is unavailable; reload the latest notes');

@@ -11,6 +11,9 @@
   let newSessionNotice = '';
   let suppressedSession = null;
   let dismissedSuppressed = new Set();
+  let suppressedDisplayBusy = false;
+  let suppressedDisplayNotice = '';
+  let suppressedDisplayCandidate = '';
   const languageNames = { en: 'English', ml: 'Malayalam', hi: 'Hindi', multi: 'Multilingual' };
   const outcomeNames = { COMMAND_ACCEPTED: 'Command accepted', SUPPRESSED: 'Suppressed',
     MANUAL_CONFIRM_REQUIRED: 'Awaiting operator approval', QUEUED: 'Queued', CANCELLED: 'Cancelled',
@@ -88,10 +91,14 @@
     const events=session.delivery_events||[];
     const latest=[...events].reverse().find(e=>e.outcome==='SUPPRESSED'&&e.reference&&!dismissedSuppressed.has(e.reference));
     if(!latest)return '';
+    if(suppressedDisplayCandidate!==latest.candidate_id){suppressedDisplayCandidate=latest.candidate_id;suppressedDisplayNotice='';}
     const later=events.slice(events.lastIndexOf(latest)+1);
     if(later.some(e=>e.outcome==='COMMAND_ACCEPTED'&&e.reference===latest.reference))return '';
     const available=snapshot.connection==='connected'&&session.control?.actions.includes('verse_preview');
-    return `<section class="vv-panel vv-suppressed-review" aria-label="Detected reference awaiting review"><div><strong>Detected ${escape(latest.reference)}</strong><p class="vv-caption">It was not displayed. ${escape(latest.reason||'It did not pass the delivery checks.')} Review the verse if this is what you meant.</p></div><div class="vv-control-actions"><button type="button" class="vv-btn vv-btn-primary" data-suppressed-review="${escape(latest.reference)}" ${available?'':'disabled'}>Review verse</button><button type="button" class="vv-btn" data-suppressed-dismiss="${escape(latest.reference)}">Dismiss</button></div></section>`;
+    const display=available&&session.control?.actions.includes('display_suppressed')&&/^.+ \d+:\d+$/.test(latest.reference);
+    const send=session.control?.verses?.last_send;
+    const notice=send?.candidate_id===latest.candidate_id&&['DELIVERY_FAILED','ERROR','NOT_ACCEPTED'].includes(send.outcome)?send.reason:suppressedDisplayNotice;
+    return `<section class="vv-panel vv-suppressed-review" aria-label="Detected reference awaiting review"><div><strong>Detected ${escape(latest.reference)}</strong><p class="vv-caption">It was not displayed. ${escape(latest.reason||'It did not pass the delivery checks.')} Choose Display if this is the verse you meant.</p>${notice?`<p class="vv-caption" role="status">${escape(notice)}</p>`:''}</div><div class="vv-control-actions"><button type="button" class="vv-btn vv-btn-primary" data-suppressed-display="${escape(latest.candidate_id)}" data-suppressed-reference="${escape(latest.reference)}" ${display&&!suppressedDisplayBusy?'':'disabled'}>Display</button><button type="button" class="vv-btn" data-suppressed-review="${escape(latest.reference)}" ${available&&!suppressedDisplayBusy?'':'disabled'}>Review verse</button><button type="button" class="vv-btn" data-suppressed-dismiss="${escape(latest.reference)}" ${suppressedDisplayBusy?'disabled':''}>Dismiss</button></div></section>`;
   }
   function history(snapshot){
     const rows=new Map();for(const e of snapshot.session?.delivery_events||[])if(e.reference)rows.set(e.candidate_id,e);
@@ -445,14 +452,23 @@
     button.disabled = false;
   });
   root.addEventListener('click',event=>{const button=event.target.closest('[data-suggestion-preview]');if(button&&!button.disabled)window.verseTools.previewSuggestion(button,button.dataset.suggestionPreview);});
-  root.addEventListener('click',event=>{
-    const button=event.target.closest('[data-suppressed-review],[data-suppressed-dismiss]');
+  root.addEventListener('click',async event=>{
+    const button=event.target.closest('[data-suppressed-display],[data-suppressed-review],[data-suppressed-dismiss]');
     if(!button||button.disabled)return;
-    const reference=button.dataset.suppressedReview||button.dataset.suppressedDismiss;
+    const reference=button.dataset.suppressedReference||button.dataset.suppressedReview||button.dataset.suppressedDismiss;
     const snapshot=window.previewShell.getObserver();
     if(!snapshot.session?.delivery_events.some(e=>e.outcome==='SUPPRESSED'&&e.reference===reference))return;
-    if(button.dataset.suppressedDismiss){dismissedSuppressed.add(reference);root.dispatchEvent(new Event('preview:observer'));}
-    else window.verseTools.previewDetected(button,reference);
+    if(button.dataset.suppressedDismiss){dismissedSuppressed.add(reference);suppressedDisplayNotice='';root.dispatchEvent(new Event('preview:observer'));}
+    else if(button.dataset.suppressedReview)window.verseTools.previewDetected(button,reference);
+    else if(button.dataset.suppressedDisplay){
+      suppressedDisplayBusy=true;suppressedDisplayNotice='Sending to VerseVIEW…';root.dispatchEvent(new Event('preview:observer'));
+      try{
+        const submitted=await window.verseviewDesktop.operator(snapshot.session.session_id,'display_suppressed',{candidate_id:button.dataset.suppressedDisplay,reference});
+        command={...submitted,hostId:snapshot.session.control.id};
+        suppressedDisplayNotice='Display requested. Check the reference status for confirmation.';
+      }catch(error){suppressedDisplayNotice=error.message||'Could not display this verse. Try again.';}
+      finally{suppressedDisplayBusy=false;root.dispatchEvent(new Event('preview:observer'));}
+    }
   });
   root.addEventListener('change', async event => {
     if (!event.target.matches('[data-observer-source]') || !window.verseviewDesktop) return;

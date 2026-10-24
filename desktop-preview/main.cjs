@@ -48,10 +48,14 @@ function openApprovalReview(message) {
 function reviewNotifications(snapshot) {
   const sessionId=snapshot.session?.session_id, control=snapshot.session?.control;
   const pending=control?.ask_before_sending&&control.state==='running'?control.pending||[]:[];
-  const active=new Set(pending.map(item=>item.candidate_id));
+  const events=snapshot.session?.delivery_events||[];
+  const suppressed=control?.ask_before_sending&&control.state==='running'
+    ? [...events].reverse().find(item=>item.outcome==='SUPPRESSED'&&item.guard==='SCRIPTURE_READ_MODE'&&/^.+ \d+:\d+$/.test(item.reference||'')
+        && !events.slice(events.lastIndexOf(item)+1).some(later=>later.candidate_id===item.candidate_id&&later.outcome==='COMMAND_ACCEPTED')) : null;
+  const active=new Set([...pending.map(item=>item.candidate_id),...(suppressed?[suppressed.candidate_id]:[])]);
   for(const [id,notice] of activeApprovalNotifications)if(!active.has(id)){notice.close();activeApprovalNotifications.delete(id);}
   if(!window||window.isDestroyed()||window.isFocused())return;
-  if(!Notification.isSupported()){if(pending.length)window.flashFrame(true);return;}
+  if(!Notification.isSupported()){if(pending.length||suppressed)window.flashFrame(true);return;}
   for(const item of pending){
     if(notifiedCandidates.has(item.candidate_id))continue;
     notifiedCandidates.add(item.candidate_id);
@@ -70,6 +74,15 @@ function reviewNotifications(snapshot) {
     notice.on('click',()=>openApprovalReview());
     notice.on('failed',()=>{activeApprovalNotifications.delete(item.candidate_id);window?.flashFrame(true);});
     activeApprovalNotifications.set(item.candidate_id,notice);
+    notice.show();
+  }
+  if(suppressed&&!notifiedCandidates.has(suppressed.candidate_id)){
+    notifiedCandidates.add(suppressed.candidate_id);
+    if(notifiedCandidates.size>256)notifiedCandidates.delete(notifiedCandidates.values().next().value);
+    const notice=new Notification({title:`${suppressed.reference} was detected`,body:'Not displayed because the passage is locked. Click to review or display it.'});
+    notice.on('click',()=>openApprovalReview());
+    notice.on('failed',()=>{activeApprovalNotifications.delete(suppressed.candidate_id);window?.flashFrame(true);});
+    activeApprovalNotifications.set(suppressed.candidate_id,notice);
     notice.show();
   }
 }
@@ -259,7 +272,7 @@ ipcMain.handle('preview:profile-transfer',async(event,sessionId,revision,kind,in
   return require('./profile-transfer.cjs').importProfile({reader:observer,manager,commands,sessionId,revision,kind,includeCredentials,chooseFile:o=>dialog.showOpenDialog(window,o)});
 });
 ipcMain.handle('preview:operator', (event, sessionId, action, value) => {
-  if(!trusted(event)||!['list_sessions','preview_session','resume_saved','save_session','set_worship','set_ask_before_sending','emergency_save','set_context','verse_preview','chapter_browse','send_reference','preview_suggestion','dismiss_suggestion','clear_suggestions','clear_history','grid_preview', 'connection_action', 'generate_notes', 'cancel_notes', 'prepare_export', 'prepare_memory_clear', 'clear_memory', 'new_session'].includes(action))throw new Error('Invalid operator request');
+  if(!trusted(event)||!['list_sessions','preview_session','resume_saved','save_session','set_worship','set_ask_before_sending','emergency_save','set_context','verse_preview','chapter_browse','send_reference','display_suppressed','preview_suggestion','dismiss_suggestion','clear_suggestions','clear_history','grid_preview', 'connection_action', 'generate_notes', 'cancel_notes', 'prepare_export', 'prepare_memory_clear', 'clear_memory', 'new_session'].includes(action))throw new Error('Invalid operator request');
   return commands.submit(sessionId,action,undefined,undefined,undefined,undefined,undefined,value);
 });
 ipcMain.handle('preview:window-pin', (event, enabled) => {

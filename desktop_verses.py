@@ -257,3 +257,38 @@ class VerseTools:
                     logging.getLogger(__name__).exception('Guarded manual verse send failed')
             self.send_worker = threading.Thread(target=work, name='VerseSend', daemon=True)
             self.send_worker.start()
+
+    def display_suppressed(self, candidate_id, value):
+        """Explicit operator override for a reference suppressed by automatic detection."""
+        canonical, _, _, _ = reference(self.engine, value, True)
+        with self.lock:
+            if self.runtime.state() != 'running' or self.runtime.stop_requested.is_set():
+                raise VerseError('Start listening before displaying a reference.')
+            if self.send_worker and self.send_worker.is_alive():
+                raise VerseError('A Display is already in progress.')
+            self.last_send = dict(reference=canonical, candidate_id=candidate_id, outcome='SUBMITTED',
+                                  reason='Sending the detected verse to VerseVIEW.')
+            generation = self.generation
+            def work():
+                try:
+                    if generation != self.generation or self.runtime.stop_requested.is_set(): return
+                    ok, _ = self.engine.remote_present_verse(canonical)
+                    if ok and hasattr(self.engine, '_exit_scripture_read_mode'):
+                        self.engine._exit_scripture_read_mode('operator displayed detected reference')
+                    outcome = 'COMMAND_ACCEPTED' if ok else 'DELIVERY_FAILED'
+                    reason = ('Operator displayed a previously suppressed reference; visible output is unverified.'
+                              if ok else 'VerseVIEW did not accept the display request.')
+                    self.engine._delivery_event(candidate_id, canonical, 'DESKTOP-OVERRIDE', 'unknown',
+                                                'operator', outcome, reason)
+                    with self.lock:
+                        if self.last_send and self.last_send['candidate_id'] == candidate_id:
+                            self.last_send.update(outcome=outcome, reason=reason)
+                except Exception:
+                    self.engine._delivery_event(candidate_id, canonical, 'DESKTOP-OVERRIDE', 'unknown',
+                                                'operator', 'DELIVERY_FAILED', 'Display request failed.')
+                    with self.lock:
+                        if self.last_send and self.last_send['candidate_id'] == candidate_id:
+                            self.last_send.update(outcome='DELIVERY_FAILED', reason='Display request failed.')
+                    logging.getLogger(__name__).exception('Suppressed verse display failed')
+            self.send_worker = threading.Thread(target=work, name='SuppressedVerseDisplay', daemon=True)
+            self.send_worker.start()
